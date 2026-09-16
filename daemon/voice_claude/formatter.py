@@ -119,6 +119,26 @@ def _trim_to(text: str, limit: int) -> str:
     return " ".join(sentences[:limit])
 
 
+def parse_approval(text: str) -> str | None:
+    """Разбирает голосовой ответ на запрос разрешения (спека: permissions.answers)."""
+    def normalise(value: str) -> str:
+        return " ".join(re.sub(r"[^\w\s]", " ", value.lower()).split())
+
+    lowered = normalise(text)
+    if not lowered:
+        return None
+    best: tuple[int, str] | None = None
+    for rule in section("permissions")["answers"]:
+        for utterance in rule["utterances"]:
+            u = normalise(utterance)
+            matched = lowered == u or lowered.startswith(u + " ") or f" {u} " in f" {lowered} "
+            # Самое длинное совпадение выигрывает: "да, и больше не спрашивай"
+            # не должно превратиться в простое "да".
+            if matched and (best is None or len(u) > best[0]):
+                best = (len(u), rule["action"])
+    return best[1] if best else None
+
+
 def approval_to_speech(raw: str) -> str:
     """Turn a tool-permission request into a human question."""
     tool = raw.strip().splitlines()[0][:120]

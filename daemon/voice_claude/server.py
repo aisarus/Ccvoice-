@@ -75,6 +75,8 @@ class Daemon:
         self._pending: dict[str, asyncio.Future[bool]] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
         self._setup: SetupTokenFlow | None = None
+        self._pending_tools: dict[str, str] = {}
+        self.preapproved: set[str] = set()
 
     # -- transport -------------------------------------------------------
     async def handler(self, websocket: Any) -> None:
@@ -125,9 +127,15 @@ class Daemon:
                 self.ambient.wipe()
             await self._send(ws, {"id": "ambient_control", "submode": self.ambient.submode})
         elif kind == "target_switch":
-            self.router.sticky_target = msg.get("target")
-            await self._send(ws, {"id": "route", "target": self.router.sticky_target,
-                                  "reason": "explicit_prefix", "confidence": 1.0})
+            try:
+                self.router.force(msg.get("target"))
+            except ValueError as exc:
+                await self._send(ws, {"id": "error", "code": "unknown_target",
+                                      "message": str(exc), "recoverable": True})
+                return
+            await self._send(ws, {"id": "route", "target": self.router.forced_target,
+                                  "reason": "forced" if self.router.forced_target else "auto",
+                                  "confidence": 1.0})
         elif kind in ("auth_start", "auth_code"):
             await self._on_auth(ws, msg)
         elif kind == "ping":
@@ -146,6 +154,10 @@ class Daemon:
             return
         self.ambient.add(decision.role, text, decision.confidence)
 
+        if self._pending:
+            await self._answer_permission_by_voice(ws, text, decision)
+            return
+
         if not self.classifier.may("execute", decision):
             await self._send(ws, {"id": "route", "target": None, "reason": "role_gate",
                                   "role": decision.role, "confidence": round(decision.confidence, 3),
@@ -153,7 +165,7 @@ class Daemon:
             return
 
         if self.router.is_misroute_recovery(text):
-            self.router.sticky_target = None
+            self.router.force(None)
             await self._send(ws, {"id": "route", "target": None, "reason": "misroute_recovery",
                                   "confidence": 1.0})
             return
@@ -251,9 +263,12 @@ class Daemon:
     # -- approvals -------------------------------------------------------
     async def _ask_permission(self, tool_name: str, input_data: dict[str, Any]) -> bool:
         raw = f"{tool_name} {json.dumps(input_data, ensure_ascii=False)[:200]}"
+        if tool_name in self.preapproved:
+            return True
         request_id = secrets.token_hex(6)
         future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
+        self._pending_tools[request_id] = raw
         await self._broadcast({"id": "permission_request", "request_id": request_id,
                                "spoken": formatter.approval_to_speech(raw), "raw": raw,
                                "earcon": "needs_approval"})
@@ -263,6 +278,39 @@ class Daemon:
             return False
         finally:
             self._pending.pop(request_id, None)
+            self._pending_tools.pop(request_id, None)
+
+    async def _answer_permission_by_voice(self, ws: Any, text: str, decision: Decision) -> None:
+        """Пока висит запрос разрешения, реплика — это ответ на него, а не команда."""
+        action = formatter.parse_approval(text)
+        if action is None:
+            await self._send(ws, {"id": "route", "target": None, "reason": "awaiting_permission",
+                                  "role": decision.role, "label": decision.label_ru})
+            return
+        if action == "speak_details":
+            await self._broadcast({"id": "voice_summary", "text": self._pending_detail(),
+                                   "is_question": True, "target": "approval", "stubbed": False,
+                                   "full_output": self._pending_detail()})
+            return
+        if not self.classifier.may("approve", decision):
+            await self._send(ws, {"id": "route", "target": None, "reason": "approval_role_gate",
+                                  "role": decision.role, "confidence": round(decision.confidence, 3),
+                                  "label": decision.label_ru})
+            return
+
+        request_id = next(iter(self._pending))
+        self._resolve_permission({"request_id": request_id, "decision": action,
+                                  "role": decision.role, "confidence": decision.confidence})
+        approved = action.startswith("approve")
+        if action == "approve_and_remember_rule":
+            self.preapproved.add(self._pending_tools.get(request_id, ""))
+        await self._broadcast({"id": "permission_result", "request_id": request_id,
+                               "approved": approved, "remembered": action.endswith("rule"),
+                               "earcon": "accepted" if approved else "error"})
+
+    def _pending_detail(self) -> str:
+        request_id = next(iter(self._pending), "")
+        return self._pending_tools.get(request_id, "Нечего уточнять.")
 
     def _resolve_permission(self, msg: dict[str, Any]) -> None:
         future = self._pending.get(msg.get("request_id", ""))
@@ -275,7 +323,10 @@ class Daemon:
             log.warning("approval rejected: role=%s confidence=%.2f", role, confidence)
             future.set_result(False)
             return
-        future.set_result(msg.get("decision", "reject").startswith("approve"))
+        decision_name = msg.get("decision", "reject")
+        if decision_name == "approve_and_remember_rule":
+            self.preapproved.add(self._pending_tools.get(msg.get("request_id", ""), ""))
+        future.set_result(decision_name.startswith("approve"))
 
     async def _on_interrupt(self, ws: Any, msg: dict[str, Any]) -> None:
         if msg.get("scope") == "work":

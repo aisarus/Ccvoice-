@@ -63,3 +63,28 @@ def test_handoff_is_detected_both_ways(router):
 
 def test_earcons_differ_per_target(router):
     assert router.earcon_for("code") != router.earcon_for("chat")
+
+
+def test_forced_target_holds_outside_the_conversation_window(router):
+    """Чип в интерфейсе — явный выбор: он не должен истекать вместе с окном."""
+    router.force("code")
+    route = router.route("ну такое себе", ms_since_last=10 ** 6)
+    assert (route.target, route.reason) == ("code", "forced")
+
+
+def test_auto_clears_the_forced_target(router):
+    router.force("code")
+    router.force(None)
+    assert router.route("ну такое себе", ms_since_last=10 ** 6).target == "chat"
+
+
+def test_spoken_prefix_still_wins_over_a_forced_target(router):
+    router.force("code")
+    route = router.route("в чат что думаешь про отпуск")
+    assert (route.target, route.reason) == ("chat", "explicit_prefix")
+
+
+def test_unknown_forced_target_is_rejected(router):
+    import pytest as _pytest
+    with _pytest.raises(ValueError):
+        router.force("nope")

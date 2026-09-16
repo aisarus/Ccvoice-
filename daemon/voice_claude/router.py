@@ -43,6 +43,9 @@ class Router:
         self._router = self._spec["router"]
         self._targets = {t["id"]: t for t in self._spec["list"]}
         self.sticky_target: str | None = None
+        # Явный выбор пользователя в интерфейсе: держится, пока его не снимут,
+        # в отличие от sticky-цели, которая живёт только внутри окна диалога.
+        self.forced_target: str | None = None
 
     @property
     def default_target(self) -> str:
@@ -58,6 +61,9 @@ class Router:
             target, stripped = prefix
             self.sticky_target = target
             return Route(target, "explicit_prefix", 1.0, stripped or cleaned)
+
+        if self.forced_target:
+            return Route(self.forced_target, "forced", 1.0, cleaned)
 
         sticky = sticky_target if sticky_target is not None else self.sticky_target
         window_ms = self._router["sticky_target"]["window_s"] * 1000
@@ -101,6 +107,13 @@ class Router:
         if chat_hits:
             return "chat", min(0.95, 0.6 + 0.1 * chat_hits)
         return None, 0.0
+
+    def force(self, target: str | None) -> None:
+        """Чип в интерфейсе: None возвращает к автоматическому выбору."""
+        if target is not None and target not in self._targets:
+            raise ValueError(f"unknown target {target!r}")
+        self.forced_target = target
+        self.sticky_target = target
 
     def handoff(self, text: str) -> str | None:
         """Detect a cross-target handoff phrase, return the phrase id."""

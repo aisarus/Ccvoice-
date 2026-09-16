@@ -200,7 +200,7 @@ for (const id of ["auto","code","chat","note"]){
     forced = id === "auto" ? null : id;
     for (const other of ["auto","code","chat","note"])
       el("t-"+other).setAttribute("aria-pressed", String(other === id));
-    if (forced) send({id:"target_switch", target: forced, sticky:true});
+    send({id:"target_switch", target: forced});   // null возвращает авто-режим
   };
 }
 let ambient = "off";
@@ -260,7 +260,11 @@ function connect(){
       earcon(m.is_question ? "needs_approval" : "finished");
     } else if (m.id === "permission_request"){
       earcon("needs_approval"); addMsg("approval", m.spoken); speak(m.spoken);
-      window.__approval = m.request_id;
+      el("hint").textContent = "скажи «да» или «нет»";
+    } else if (m.id === "permission_result"){
+      earcon(m.earcon || "accepted");
+      addMsg("approval", m.approved ? (m.remembered ? "разрешил и запомнил" : "разрешил") : "отклонил");
+      el("hint").textContent = "";
     } else if (m.id === "auth_url"){
       el("authstart").hidden = true;
       el("authlink").hidden = false; el("authlink").href = m.url;
