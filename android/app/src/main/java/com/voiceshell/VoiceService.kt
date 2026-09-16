@@ -180,6 +180,14 @@ class VoiceService : Service(), RecognitionListener {
             report(if (scope == "work") "останавливаю работу" else "тихо")
             return
         }
+        Intents.languageSwitch(text)?.let { code ->
+            prefs.language = code
+            val said = mapOf("ru-RU" to "Говорю по-русски.", "en-US" to "Switching to English.",
+                             "he-IL" to "עובר לעברית.")[code].orEmpty()
+            report("язык: $code")
+            speak(said)
+            return
+        }
         if (speaking) return                       // во время ответа слышно самих себя
         val windowOpen = System.currentTimeMillis() < windowUntil
         if (!windowOpen && !Intents.hasWake(text)) return
@@ -232,6 +240,12 @@ class VoiceService : Service(), RecognitionListener {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, prefs.language)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                // Android 14 умеет переключать язык сам; на старых — просто игнорируется.
+                putExtra("android.speech.extra.ENABLE_LANGUAGE_SWITCH", "adaptive")
+                putStringArrayListExtra(
+                    "android.speech.extra.LANGUAGE_SWITCH_ALLOWED_LANGUAGES",
+                    arrayListOf("ru-RU", "en-US", "he-IL")
+                )
             }
             cloud?.setRecognitionListener(object : CloudListener {
                 override fun onResults(results: Bundle?) {
@@ -325,7 +339,10 @@ class VoiceService : Service(), RecognitionListener {
         }
     }
 
+    /** Язык ответа берётся из самого ответа: русский текст — русский голос. */
     private fun speak(text: String) {
+        val code = Intents.scriptLanguage(text, prefs.language)
+        tts?.language = Locale.forLanguageTag(code)
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "voice-shell")
     }
 

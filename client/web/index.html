@@ -370,10 +370,17 @@ function addMsg(who, text, cls){
   el("log").prepend(div);
   while (el("log").children.length > 40) el("log").lastChild.remove();
 }
+/* Язык ответа — по письменности самого ответа, а не по переключателю. */
+function scriptLang(text){
+  if (/[\u0590-\u05FF]/.test(text)) return "he-IL";
+  if (/[\u0400-\u04FF]/.test(text)) return "ru-RU";
+  if (/[A-Za-z]/.test(text)) return "en-US";
+  return lang;
+}
 function speak(text){
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
-  u.lang = lang; u.rate = 1.05;
+  u.lang = scriptLang(text); u.rate = 1.05;
   u.onstart = () => { speaking = true; };
   u.onend = () => {
     speaking = false;
