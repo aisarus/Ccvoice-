@@ -52,7 +52,12 @@
   <button class="chip" id="t-chat" aria-pressed="false">чат</button>
   <button class="chip" id="t-note" aria-pressed="false">заметка</button>
   <button class="chip" id="ambient" aria-pressed="false">ambient: off</button>
+  <button class="chip" id="bystander" hidden aria-pressed="false">чужие реплики: выкл</button>
 </div>
+<p class="hint" id="bystanderhint" hidden>
+  Запись чужой речи требует согласия собеседников — во многих юрисдикциях это
+  обязательно. Буфер живёт 10 минут и стирается при выключении ambient.
+</p>
 
 <div id="authbox" hidden style="padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);margin-bottom:12px">
   <div style="color:var(--dim);font-size:13px;margin-bottom:8px" id="authtext">
@@ -203,12 +208,22 @@ for (const id of ["auto","code","chat","note"]){
     send({id:"target_switch", target: forced});   // null возвращает авто-режим
   };
 }
-let ambient = "off";
+let ambient = "off", bystander = false;
 el("ambient").onclick = () => {
   ambient = {off:"passive", passive:"assist", assist:"off"}[ambient];
   el("ambient").textContent = "ambient: " + ambient;
   el("ambient").setAttribute("aria-pressed", String(ambient !== "off"));
-  send({id:"ambient_control", submode: ambient, wipe: ambient === "off"});
+  el("bystander").hidden = ambient === "off";
+  el("bystanderhint").hidden = ambient === "off" || !bystander;
+  if (ambient === "off"){ bystander = false; el("bystander").setAttribute("aria-pressed","false"); el("bystander").textContent = "чужие реплики: выкл"; }
+  send({id:"ambient_control", submode: ambient, bystander_transcript: bystander, wipe: ambient === "off"});
+};
+el("bystander").onclick = () => {
+  bystander = !bystander;
+  el("bystander").textContent = "чужие реплики: " + (bystander ? "вкл" : "выкл");
+  el("bystander").setAttribute("aria-pressed", String(bystander));
+  el("bystanderhint").hidden = !bystander;
+  send({id:"ambient_control", bystander_transcript: bystander});
 };
 
 /* ---------- подключение подписки ---------- */

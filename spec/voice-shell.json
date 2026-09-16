@@ -1251,7 +1251,9 @@
         {
           "id": "bystander_transcript",
           "default": "off",
-          "description": "сохранять ли чужие реплики в буфер"
+          "description": "сохранять ли чужие реплики в буфер",
+          "surface": "отдельный переключатель в интерфейсе, появляется только когда ambient включён",
+          "on_disable": "уже собранные чужие реплики немедленно удаляются из буфера"
         },
         {
           "id": "visible_indicator",
@@ -1904,7 +1906,9 @@
         "dir": "phone→daemon|daemon→phone",
         "fields": {
           "submode": "off|passive|assist",
-          "wipe": "bool?"
+          "bystander_transcript": "bool?",
+          "wipe": "bool?",
+          "lines": "int (в ответе демона)"
         }
       },
       {

@@ -57,6 +57,16 @@ class AmbientBuffer:
     def retention_s(self) -> float:
         return float(self._cfg["buffer_min"]) * 60.0
 
+    @property
+    def bystander_transcript(self) -> bool:
+        return bool(self._cfg["bystander_transcript"])
+
+    def set_bystander_transcript(self, enabled: bool) -> None:
+        """Явный опт-ин: чужая речь по умолчанию не попадает в буфер."""
+        if not enabled:
+            self._lines = deque(line for line in self._lines if line.role == "master")
+        self._cfg["bystander_transcript"] = bool(enabled)
+
     def set_submode(self, submode: str) -> None:
         if submode not in self._submodes:
             raise ValueError(f"unknown ambient submode {submode!r}")

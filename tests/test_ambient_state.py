@@ -83,3 +83,20 @@ def test_unknown_state_is_rejected():
     with pytest.raises(ValueError):
         machine.to("BUSY")
     machine.to(IDLE)
+
+
+def test_bystander_transcript_is_an_explicit_opt_in():
+    buf = AmbientBuffer(submode="passive")
+    assert not buf.bystander_transcript
+    assert not buf.add("bystander", "он назвал сорок два")
+    buf.set_bystander_transcript(True)
+    assert buf.add("bystander", "он назвал сорок два")
+    assert [line.role for line in buf.lines()] == ["bystander"]
+
+
+def test_turning_the_opt_in_off_drops_already_captured_bystander_lines():
+    buf = AmbientBuffer(submode="passive", config={"bystander_transcript": True})
+    buf.add("master", "моя реплика")
+    buf.add("bystander", "чужая реплика")
+    buf.set_bystander_transcript(False)
+    assert [line.text for line in buf.lines()] == ["моя реплика"]

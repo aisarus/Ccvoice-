@@ -122,10 +122,15 @@ class Daemon:
             self.machine.to(state.LISTENING)
             await self._broadcast_state()
         elif kind == "ambient_control":
-            self.ambient.set_submode(msg.get("submode", "off"))
+            if "submode" in msg:
+                self.ambient.set_submode(msg["submode"])
+            if "bystander_transcript" in msg:
+                self.ambient.set_bystander_transcript(bool(msg["bystander_transcript"]))
             if msg.get("wipe"):
                 self.ambient.wipe()
-            await self._send(ws, {"id": "ambient_control", "submode": self.ambient.submode})
+            await self._send(ws, {"id": "ambient_control", "submode": self.ambient.submode,
+                                  "bystander_transcript": self.ambient.bystander_transcript,
+                                  "lines": len(self.ambient.lines())})
         elif kind == "target_switch":
             try:
                 self.router.force(msg.get("target"))
