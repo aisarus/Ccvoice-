@@ -19,6 +19,8 @@ SERVICE="/etc/systemd/system/voice-shell.service"
 PORT="${PORT:-8787}"
 WORKSPACE="${WORKSPACE:-/opt/voice-shell/workspace}"
 DOMAIN="${DOMAIN:-}"
+# С доменом впереди стоит Caddy, поэтому наружу порт открывать незачем.
+BIND_HOST="${HOST:-$([ -n "$DOMAIN" ] && echo 127.0.0.1 || echo 0.0.0.0)}"
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf '\n\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
@@ -74,6 +76,14 @@ fi
 
 TOKEN="${VOICE_TOKEN:-$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')}"
 
+say "Порт"
+systemctl stop voice-shell 2>/dev/null || true
+if command -v ss >/dev/null && ss -lntH "sport = :$PORT" | grep -q .; then
+    echo "Порт $PORT занят:"
+    ss -lptnH "sport = :$PORT" || true
+    die "перезапусти с другим портом: curl ... | sudo PORT=8790 bash"
+fi
+
 say "Служба"
 umask 077
 cat > "$ENV_FILE" <<ENV
@@ -81,6 +91,7 @@ VOICE_TOKEN=$TOKEN
 WORKSPACE_DIR=$WORKSPACE
 NOTE_PATH=$WORKSPACE/inbox.md
 PORT=$PORT
+HOST=$BIND_HOST
 PYTHONPATH=$ROOT/daemon
 ${OAUTH:+CLAUDE_CODE_OAUTH_TOKEN=$OAUTH}
 ENV
@@ -137,6 +148,7 @@ cat <<REPORT
   Voice Shell поднят.
 
   адрес     : $URL
+  привязка  : $BIND_HOST:$PORT
   токен     : $TOKEN
   проект    : $WORKSPACE
   служба    : systemctl status voice-shell
@@ -144,7 +156,10 @@ cat <<REPORT
 
   В приложении на телефоне введи адрес и токен.
   Браузерный клиент требует https — он есть только если задан DOMAIN.
-$([ -z "$OAUTH" ] && echo "
+$([ "$BIND_HOST" = "0.0.0.0" ] && [ -z "$DOMAIN" ] && echo "
+  БЕЗ ДОМЕНА порт открыт наружу и трафик идёт по http: токен защитит от
+  чужих, но разговор поедет открытым текстом. Поставь домен (DOMAIN=...)
+  или Tailscale и закрой порт фаерволом.")$([ -z "$OAUTH" ] && echo "
   ВНИМАНИЕ: подписка Claude не подключена — цели «код» и «чат» будут
   отвечать заглушкой. Подключить: claude setup-token, затем вписать
   CLAUDE_CODE_OAUTH_TOKEN в $ENV_FILE и systemctl restart voice-shell")

@@ -41,6 +41,7 @@ class Settings:
     expose exactly one, and a same-origin wss:// keeps the browser happy."""
 
     workspace: str = "~"
+    host: str = "0.0.0.0"
     port: int = 8787
     token: str = field(default_factory=lambda: secrets.token_urlsafe(24))
     note_path: str = "~/voice-claude/inbox.md"
@@ -52,6 +53,7 @@ class Settings:
         """Read the deployment environment (Render, Fly, Koyeb, a plain VPS)."""
         return cls(
             workspace=os.environ.get("WORKSPACE_DIR", "/tmp/workspace"),
+            host=os.environ.get("HOST", "0.0.0.0"),
             port=int(os.environ.get("PORT", 8787)),
             token=os.environ.get("VOICE_TOKEN") or secrets.token_urlsafe(24),
             note_path=os.environ.get("NOTE_PATH", "/tmp/workspace/inbox.md"),
@@ -438,12 +440,12 @@ async def run(settings: Settings) -> None:
 
     print(f"voice-claude-daemon\n"
           f"  workspace : {Path(settings.workspace).expanduser()}\n"
-          f"  listening : 0.0.0.0:{settings.port} (клиент и WebSocket на одном порту)\n"
+          f"  listening : {settings.host}:{settings.port} (клиент и WebSocket на одном порту)\n"
           f"  token     : {settings.token}\n"
           f"  code      : {'ready' if daemon.targets.code.available else 'stub (нет SDK/ключа)'}\n"
           f"  chat      : {'ready' if daemon.targets.chat.available else 'stub (нет SDK/ключа)'}",
           flush=True)
-    async with serve(daemon.handler, "0.0.0.0", settings.port, process_request=process_request):
+    async with serve(daemon.handler, settings.host, settings.port, process_request=process_request):
         await asyncio.Future()
 
 

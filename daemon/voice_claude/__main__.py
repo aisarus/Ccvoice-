@@ -11,6 +11,8 @@ def main() -> int:
     env = Settings.from_env()
     parser = argparse.ArgumentParser(prog="voice-claude-daemon")
     parser.add_argument("--workspace", default=None, help="каталог Claude Code-сессии")
+    parser.add_argument("--host", default=None,
+                        help="адрес привязки; 127.0.0.1 — когда впереди стоит reverse proxy")
     parser.add_argument("--port", type=int, default=None,
                         help="один порт для клиента и WebSocket (по умолчанию $PORT или 8787)")
     parser.add_argument("--token", default=None, help="pre-shared token (по умолчанию $VOICE_TOKEN)")
@@ -24,6 +26,7 @@ def main() -> int:
                         format="%(asctime)s %(levelname)s %(message)s")
     settings = Settings(
         workspace=args.workspace or env.workspace,
+        host=args.host or env.host,
         port=args.port or env.port,
         token=args.token or env.token,
         note_path=args.note_path or env.note_path,
