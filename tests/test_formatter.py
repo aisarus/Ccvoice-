@@ -53,3 +53,28 @@ def test_approval_is_spoken_like_a_human():
     assert approval_to_speech("rm -rf ./build") == "Клод хочет удалить старую папку build. Разрешить?"
     assert approval_to_speech("git push origin main").startswith("Клод хочет запушить")
     assert "Разрешить?" in approval_to_speech("Bash {\"command\": \"curl example.com\"}")
+
+
+CODE_HEAVY = """Сейчас проверю тесты.
+
+```bash
+npm test -- --coverage
+```
+
+$ git status
+src/auth/login.ts
+Ran npm test...
+47 tests passed
+"""
+
+
+def test_commands_and_code_blocks_are_never_spoken():
+    spoken = summarize(CODE_HEAVY).text
+    for forbidden in ("npm test", "git status", "--coverage", "```", "src/"):
+        assert forbidden not in spoken
+    assert "47" in spoken
+
+
+def test_llm_summary_is_still_capped_at_three_sentences():
+    verbose = "Раз. Два. Три. Четыре. Пять."
+    assert summarize("вывод", llm=lambda _: verbose).sentences == 3

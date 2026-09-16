@@ -195,7 +195,7 @@ class Daemon:
             role_line += "\n[ambient] последние реплики:\n" + self.ambient.transcript()
 
         reply = await self.targets[route.target].send(route.text, preamble, role_line)
-        summary = formatter.summarize(reply.text)
+        summary = await self._voice_summary(reply, route.target)
 
         self.machine.to(state.SPEAKING)
         self.machine.open_window()
@@ -203,6 +203,19 @@ class Daemon:
                                "is_question": summary.is_question, "target": route.target,
                                "stubbed": reply.stubbed, "full_output": reply.full_output})
         await self._broadcast_state()
+
+    async def _voice_summary(self, reply: Any, target: str) -> formatter.VoiceSummary:
+        """Вслух идёт пересказ, а не вывод. Полный текст остаётся на экране."""
+        if reply.stubbed or target == "note":
+            return formatter.summarize(reply.text)
+        if target == "chat":
+            return formatter.summarize(reply.text, llm=lambda text: text)
+        spoken = None
+        if self.targets.summary is not None:
+            spoken = await self.targets.summary.shorten(reply.text)
+        if spoken:
+            return formatter.summarize(reply.text, llm=lambda _: spoken)
+        return formatter.summarize(reply.text)
 
     def _classify(self, msg: dict[str, Any]) -> Decision:
         raw = msg.get("features")
@@ -338,11 +351,15 @@ class Daemon:
         future.set_result(decision_name.startswith("approve"))
 
     async def _on_interrupt(self, ws: Any, msg: dict[str, Any]) -> None:
-        if msg.get("scope") == "work":
+        """«стоп» останавливает голос, «останови работу» — саму работу."""
+        scope = msg.get("scope", "voice")
+        if scope == "work":
             await self.targets.code.interrupt()
-            self.machine.to(state.LISTENING)
-        else:
-            self.machine.to(state.LISTENING)
+            await self._broadcast({"id": "voice_summary", "text": "Остановил.",
+                                   "is_question": False, "target": "code",
+                                   "stubbed": False, "full_output": "interrupt"})
+        self.machine.to(state.LISTENING)
+        self.machine.open_window()
         await self._broadcast_state()
 
     # -- plumbing --------------------------------------------------------

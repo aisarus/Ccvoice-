@@ -115,6 +115,8 @@ if (qs.get("token")) {
 
 const el = id => document.getElementById(id);
 const WAKE_WORDS = ["клод", "клода", "клоуд", "cloud", "claude", "код"];
+const STOP_WORK = ["стоп работу", "стоп работа", "останови работу", "останови", "прекрати", "отмени", "отмена"];
+const STOP_VOICE = ["стоп", "тихо", "хватит", "замолчи"];
 const FOLLOW_MS = 15000;
 
 let ws = null, recog = null, audioCtx = null, analyser = null;
@@ -219,6 +221,14 @@ function ensureRecognition(){
   recog.onresult = ev => {
     const text = (ev.results[ev.results.length - 1][0].transcript || "").trim();
     if (!text) return;
+    const stop = stopIntent(text);
+    if (stop){
+      speechSynthesis.cancel(); speaking = false;
+      send({id:"interrupt", scope:stop});
+      addMsg("я", stop === "work" ? "останавливаю работу" : "тихо", "master");
+      earcon("accepted");
+      return;
+    }
     if (always && !wakeMatched(text)) { addMsg("мимо", text, "bystander"); return; }
     const payload = stripWake(text);
     addMsg("я", payload, "master");
@@ -238,6 +248,15 @@ function ensureRecognition(){
     if (follow && Date.now() < followUntil) setTimeout(startListen, 150);
   };
   return recog;
+}
+
+/* «Стоп» работает всегда — до обращения и без него. */
+function stopIntent(text){
+  const t = text.toLowerCase().replace(/[^\wа-яё\s]/gi, " ").replace(/\s+/g, " ").trim();
+  const bare = t.replace(new RegExp("^(" + WAKE_WORDS.join("|") + ")\\s+"), "");
+  for (const phrase of STOP_WORK) if (bare === phrase || bare.startsWith(phrase + " ")) return "work";
+  for (const phrase of STOP_VOICE) if (bare === phrase || bare.startsWith(phrase + " ")) return "voice";
+  return null;
 }
 
 function wakeMatched(text){

@@ -94,3 +94,23 @@ def test_details_are_spoken_without_deciding(tmp_path):
 
 def test_request_is_phrased_like_a_human():
     assert approval_to_speech("rm -rf ./build") == "Клод хочет удалить старую папку build. Разрешить?"
+
+
+def test_stop_work_interrupts_and_says_so(tmp_path):
+    """«стоп» гасит голос, «останови работу» — саму работу."""
+    async def flow():
+        daemon = Daemon(Settings(workspace=".", port=0, token="t", note_path=str(tmp_path / "i.md")))
+        ws = FakeWS()
+        daemon.clients.add(ws)
+        await daemon._dispatch(ws, {"id": "interrupt", "scope": "work"})
+        voice_only = FakeWS()
+        daemon.clients.add(voice_only)
+        await daemon._dispatch(voice_only, {"id": "interrupt", "scope": "voice"})
+        return ws, voice_only
+
+    ws, voice_only = asyncio.run(flow())
+    said = [m for m in ws.sent if m.get("id") == "voice_summary"]
+    assert said and said[0]["text"] == "Остановил."
+    # у второго клиента подключения ещё не было к моменту первой команды
+    assert not [m for m in voice_only.sent if m.get("id") == "voice_summary"]
+    assert [m for m in voice_only.sent if m.get("id") == "state"]

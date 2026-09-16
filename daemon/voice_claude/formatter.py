@@ -13,6 +13,10 @@ from typing import Callable
 
 from .spec import section
 
+FENCE_RE = re.compile(r"```.*?```", re.S)
+COMMAND_RE = re.compile(
+    r"^\s*(?:[$>#]|(?:sudo|npm|npx|yarn|pnpm|pip|python|pytest|git|docker|make|cd|ls|cat|"
+    r"grep|rm|mv|cp|curl|node|go|cargo|bash|sh)\b)", re.I)
 TESTS_RE = re.compile(r"(\d+)\s+(?:tests?|тест\w*)\s+(passed|passing|проход\w*)", re.I)
 FAILED_RE = re.compile(r"(\d+)\s+(?:tests?|тест\w*)\s+(failed|провал\w*|падают?)", re.I)
 MODIFIED_RE = re.compile(r"^\s*(?:modified|changed|изменено|обновлено)\s*:?\s*$", re.I)
@@ -72,9 +76,10 @@ def summarize(output: str, llm: Callable[[str], str] | None = None,
     limit = max_sentences or section("config_defaults")["tts"]["max_sentences"]
 
     if llm is not None:
-        spoken = llm(output).strip()
-        return VoiceSummary(spoken, spoken.endswith("?"), _count_sentences(spoken))
+        spoken = _trim_to(llm(output).strip(), limit)
+        return VoiceSummary(spoken, spoken.rstrip().endswith("?"), _count_sentences(spoken))
 
+    output = FENCE_RE.sub(" ", output)          # блоки кода вслух не читаются
     parts: list[str] = []
     files = _touched_files(output)
     if files:
@@ -105,8 +110,12 @@ def _last_question(output: str) -> str:
 
 
 def _first_sentences(output: str, limit: int) -> str:
+    """Только проза: команды, пути и таблицы вслух не читаются."""
     prose = [line.strip() for line in output.splitlines()
-             if line.strip() and not PATH_RE.match(line) and not line.startswith(("$", ">", "|"))]
+             if line.strip()
+             and not PATH_RE.match(line)
+             and not COMMAND_RE.match(line)
+             and not line.lstrip().startswith(("|", "```", "---"))]
     return _trim_to(" ".join(prose), limit)
 
 

@@ -158,6 +158,46 @@ class ChatTarget(_SdkTarget):
         return ClaudeAgentOptions(**options)
 
 
+class SummaryTarget(_SdkTarget):
+    """Пересказ вывода Claude Code для чтения вслух.
+
+    Спека (`voice_formatter`): в ухо идут 1–3 предложения, полный вывод остаётся
+    на экране. Инструменты выключены — эта цель только сокращает текст.
+    """
+
+    target_id = "summary"
+    SYSTEM = (
+        "Ты сокращаешь вывод Claude Code до реплики, которую произнесут вслух в наушник.\n"
+        "Правила:\n"
+        "1–3 коротких предложения, не длиннее 35 слов.\n"
+        "Никогда не произноси команды, пути к файлам, флаги, хеши, стек-трейсы и куски кода.\n"
+        "Имена файлов сокращай до сути: «исправил auth и session».\n"
+        "Числа результатов сохраняй точно: 47 тестов — именно 47.\n"
+        "Если Claude задал вопрос или просит решение — закончи этим вопросом.\n"
+        "Не добавляй ничего, чего нет в выводе. Отвечай только самой репликой."
+    )
+
+    def __init__(self, cwd: str | Path | None = None) -> None:
+        super().__init__(cwd or Path(tempfile.gettempdir()) / "voice-claude-summary")
+
+    def _options(self) -> Any:
+        from claude_agent_sdk import ClaudeAgentOptions  # type: ignore
+
+        return ClaudeAgentOptions(cwd=str(self.cwd), system_prompt=self.SYSTEM,
+                                  allowed_tools=[], max_turns=1)
+
+    async def shorten(self, output: str, timeout: float = 10.0) -> str | None:
+        """Возвращает реплику для озвучки или None — тогда работают правила."""
+        if not self.available or not output.strip():
+            return None
+        try:
+            reply = await asyncio.wait_for(self.send(output), timeout=timeout)
+        except (asyncio.TimeoutError, Exception):  # pragma: no cover - сеть/SDK
+            return None
+        spoken = reply.text.strip()
+        return spoken or None
+
+
 class NoteTarget:
     """Захват мысли без ответа."""
 
@@ -179,9 +219,11 @@ class TargetSet:
     code: CodeTarget
     chat: ChatTarget
     note: NoteTarget
+    summary: "SummaryTarget | None" = None
     _by_id: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        self.summary = self.summary or SummaryTarget()
         self._by_id = {"code": self.code, "chat": self.chat, "note": self.note}
 
     def __getitem__(self, target: str) -> Any:
@@ -194,3 +236,5 @@ class TargetSet:
     async def reset_sessions(self) -> None:
         await self.code.reset()
         await self.chat.reset()
+        if self.summary is not None:
+            await self.summary.reset()
