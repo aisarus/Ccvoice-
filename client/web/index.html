@@ -40,6 +40,12 @@
 
 <div id="state"><span id="dot"></span><span id="statetext">не подключено</span></div>
 
+<div class="row" id="tokenrow" hidden>
+  <input id="tokeninput" placeholder="токен доступа" autocomplete="off"
+         style="flex:1;min-width:180px;padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--text);font:inherit;font-size:13px">
+  <button class="chip" id="tokensave">сохранить</button>
+</div>
+
 <div class="row">
   <button class="chip" id="t-auto" aria-pressed="true">авто</button>
   <button class="chip" id="t-code" aria-pressed="false">код</button>
@@ -55,9 +61,14 @@
 
 <script>
 const qs = new URLSearchParams(location.search);
-const WS_PORT = qs.get("port") || 8787;
-const TOKEN = qs.get("token") || "";
-const WS_URL = `ws://${location.hostname}:${WS_PORT}`;
+/* Same origin as the page: on a hosted deployment that means wss:// over the
+   platform's TLS, which is also what getUserMedia and SpeechRecognition need. */
+const WS_URL = qs.get("ws") || `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}`;
+let TOKEN = qs.get("token") || localStorage.getItem("vs_token") || "";
+if (qs.get("token")) {
+  localStorage.setItem("vs_token", qs.get("token"));
+  history.replaceState(null, "", location.pathname);   // keep the token out of history
+}
 
 const el = id => document.getElementById(id);
 let ws, audioCtx, analyser, micStream, recog;
@@ -210,10 +221,25 @@ function connect(){
       earcon("needs_approval"); addMsg("approval", m.spoken); speak(m.spoken);
       window.__approval = m.request_id;
     } else if (m.id === "whisper"){ addMsg("whisper", m.text); speak(m.text);
-    } else if (m.id === "error"){ earcon("error"); addMsg("error", m.message); }
+    } else if (m.id === "error"){
+      earcon("error"); addMsg("error", m.message);
+      if (m.code === "unauthorized"){ localStorage.removeItem("vs_token"); TOKEN = ""; el("tokenrow").hidden = false; }
+    }
   };
 }
-startMeter().catch(() => el("hint").textContent = "нет доступа к микрофону");
+el("tokensave").onclick = () => {
+  TOKEN = el("tokeninput").value.trim();
+  if (!TOKEN) return;
+  localStorage.setItem("vs_token", TOKEN);
+  el("tokenrow").hidden = true;
+  try { ws.close(); } catch(e){}
+  connect();
+};
+
+if (!window.isSecureContext && location.hostname !== "localhost"){
+  el("hint").textContent = "нужен https: браузер не даст микрофон на http";
+}
+startMeter().catch(() => el("hint").textContent = "нет доступа к микрофону (нужен https и разрешение)");
 connect();
 </script>
 </body>

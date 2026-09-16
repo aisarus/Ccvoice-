@@ -15,7 +15,7 @@ BYSTANDER = {"level_rel_db": -14.0, "snr_db": 9.0, "drr_db": -1.0, "c50_db": 2.0
 
 
 async def _session(segments, note_path):
-    settings = Settings(workspace=".", ws_port=0, token="test-token", note_path=str(note_path))
+    settings = Settings(workspace=".", port=0, token="test-token", note_path=str(note_path))
     daemon = Daemon(settings)
     received = []
     async with serve(daemon.handler, "127.0.0.1", 0) as server:
@@ -135,3 +135,47 @@ def test_ambient_control_switches_and_wipes(tmp_path):
     assert reply["submode"] == "passive"
     assert daemon.ambient.submode == "off"
     assert daemon.ambient.lines() == []
+
+
+def test_same_port_serves_the_client_and_health_check(tmp_path):
+    """One port for page and socket: hosting platforms expose exactly one."""
+    import subprocess
+
+    from voice_claude.server import make_process_request
+
+    async def flow():
+        settings = Settings(workspace=".", port=0, token="t", note_path=str(tmp_path / "i.md"))
+        daemon = Daemon(settings)
+        async with serve(daemon.handler, "127.0.0.1", 0,
+                         process_request=make_process_request()) as server:
+            port = server.sockets[0].getsockname()[1]
+
+            def fetch(path):
+                return subprocess.run(
+                    ["curl", "-si", "--max-time", "5", f"http://127.0.0.1:{port}{path}"],
+                    capture_output=True, text=True).stdout
+
+            health = await asyncio.to_thread(fetch, "/healthz")
+            page = await asyncio.to_thread(fetch, "/")
+            escape = await asyncio.to_thread(fetch, "/../../etc/passwd")
+
+            async with connect(f"ws://127.0.0.1:{port}") as ws:
+                await ws.send(json.dumps({"id": "hello", "v": 1, "token": "t"}))
+                welcome = json.loads(await ws.recv())
+            return health, page, escape, welcome
+
+    health, page, escape, welcome = asyncio.run(flow())
+    assert "200 OK" in health.splitlines()[0] and health.strip().endswith("ok")
+    assert "200 OK" in page.splitlines()[0] and "text/html" in page.lower()
+    assert "Voice Shell" in page
+    assert "404" in escape.splitlines()[0]
+    assert welcome["id"] == "welcome"
+
+
+def test_settings_read_the_deployment_environment(monkeypatch):
+    monkeypatch.setenv("PORT", "10000")
+    monkeypatch.setenv("VOICE_TOKEN", "from-env")
+    monkeypatch.setenv("WORKSPACE_REPO", "https://github.com/example/repo.git")
+    settings = Settings.from_env()
+    assert (settings.port, settings.token) == (10000, "from-env")
+    assert settings.workspace_repo.endswith("repo.git")

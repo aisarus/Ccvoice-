@@ -1,0 +1,24 @@
+# Render Blueprint: New → Blueprint → выбрать этот репозиторий → Apply.
+services:
+  - type: web
+    name: voice-shell
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      # Вписывается руками в дашборде Render.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Генерируется Render'ом: это пароль от твоего голосового доступа.
+      - key: VOICE_TOKEN
+        generateValue: true
+      # Необязательно: репозиторий, в котором Claude Code будет работать.
+      - key: WORKSPACE_REPO
+        sync: false
+      # Необязательно: токен GitHub, чтобы работа пушилась, а не терялась.
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: AMBIENT_SUBMODE
+        value: "off"

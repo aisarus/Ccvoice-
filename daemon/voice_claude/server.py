@@ -7,14 +7,14 @@ sends speech segments and receives state, routes, summaries and approvals.
 from __future__ import annotations
 
 import asyncio
+import http
 import json
 import logging
+import mimetypes
+import os
 import secrets
-import threading
 import time
 from dataclasses import dataclass, field
-from functools import partial
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -32,12 +32,27 @@ CLIENT_DIR = Path(__file__).resolve().parents[2] / "client" / "web"
 
 @dataclass
 class Settings:
+    """One port serves both the client and the WebSocket: hosting platforms
+    expose exactly one, and a same-origin wss:// keeps the browser happy."""
+
     workspace: str = "~"
-    ws_port: int = 8787
-    http_port: int = 8788
-    token: str = field(default_factory=lambda: secrets.token_urlsafe(12))
+    port: int = 8787
+    token: str = field(default_factory=lambda: secrets.token_urlsafe(24))
     note_path: str = "~/voice-claude/inbox.md"
     ambient_submode: str = "off"
+    workspace_repo: str | None = None
+
+    @classmethod
+    def from_env(cls) -> "Settings":
+        """Read the deployment environment (Render, Fly, Koyeb, a plain VPS)."""
+        return cls(
+            workspace=os.environ.get("WORKSPACE_DIR", "/tmp/workspace"),
+            port=int(os.environ.get("PORT", 8787)),
+            token=os.environ.get("VOICE_TOKEN") or secrets.token_urlsafe(24),
+            note_path=os.environ.get("NOTE_PATH", "/tmp/workspace/inbox.md"),
+            ambient_submode=os.environ.get("AMBIENT_SUBMODE", "off"),
+            workspace_repo=os.environ.get("WORKSPACE_REPO") or None,
+        )
 
 
 class Daemon:
@@ -251,23 +266,73 @@ class Daemon:
             self.clients.discard(ws)
 
 
-def serve_client_files(port: int, directory: Path = CLIENT_DIR) -> ThreadingHTTPServer:
-    handler = partial(SimpleHTTPRequestHandler, directory=str(directory))
-    httpd = ThreadingHTTPServer(("0.0.0.0", port), handler)
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    return httpd
+def static_response(connection: Any, path: str, directory: Path = CLIENT_DIR) -> Any:
+    """Serve the phone client from the same origin as the WebSocket."""
+    if path in ("", "/"):
+        path = "/index.html"
+    target = (directory / path.lstrip("/")).resolve()
+    if directory.resolve() not in target.parents or not target.is_file():
+        return connection.respond(http.HTTPStatus.NOT_FOUND, "not found\n")
+    body = target.read_bytes()
+    response = connection.respond(http.HTTPStatus.OK, "")
+    response.body = body
+    content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    if content_type.startswith(("text/", "application/javascript")):
+        content_type += "; charset=utf-8"
+    response.headers["Content-Type"] = content_type
+    response.headers["Content-Length"] = str(len(body))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def make_process_request(directory: Path = CLIENT_DIR) -> Any:
+    """HTTP side of the single port: health check, client, everything else 404."""
+
+    async def process_request(connection: Any, request: Any) -> Any:
+        path = request.path.split("?")[0]
+        if path == "/healthz":
+            response = connection.respond(http.HTTPStatus.OK, "ok\n")
+            response.headers["Content-Type"] = "text/plain; charset=utf-8"
+            return response
+        if request.headers.get("Upgrade", "").lower() == "websocket":
+            return None
+        return static_response(connection, path, directory)
+
+    return process_request
 
 
 async def run(settings: Settings) -> None:
     from websockets.asyncio.server import serve
 
+    await bootstrap_workspace(settings)
     daemon = Daemon(settings)
-    serve_client_files(settings.http_port)
-    url = f"http://<этот-хост>:{settings.http_port}/?port={settings.ws_port}&token={settings.token}"
-    print(f"voice-claude-daemon\n  workspace : {Path(settings.workspace).expanduser()}\n"
-          f"  websocket : ws://0.0.0.0:{settings.ws_port}\n  client    : {url}\n"
+    process_request = make_process_request()
+
+    print(f"voice-claude-daemon\n"
+          f"  workspace : {Path(settings.workspace).expanduser()}\n"
+          f"  listening : 0.0.0.0:{settings.port} (клиент и WebSocket на одном порту)\n"
           f"  token     : {settings.token}\n"
           f"  code      : {'ready' if daemon.targets.code.available else 'stub (нет SDK/ключа)'}\n"
-          f"  chat      : {'ready' if daemon.targets.chat.available else 'stub (нет SDK/ключа)'}")
-    async with serve(daemon.handler, "0.0.0.0", settings.ws_port):
+          f"  chat      : {'ready' if daemon.targets.chat.available else 'stub (нет SDK/ключа)'}",
+          flush=True)
+    async with serve(daemon.handler, "0.0.0.0", settings.port, process_request=process_request):
         await asyncio.Future()
+
+
+async def bootstrap_workspace(settings: Settings) -> None:
+    """On a host with no checkout, clone the repo Claude Code will work in."""
+    workspace = Path(settings.workspace).expanduser()
+    workspace.mkdir(parents=True, exist_ok=True)
+    if not settings.workspace_repo or (workspace / ".git").exists():
+        return
+    url = settings.workspace_repo
+    token = os.environ.get("GITHUB_TOKEN")
+    if token and url.startswith("https://") and "@" not in url:
+        url = url.replace("https://", f"https://x-access-token:{token}@", 1)
+    log.info("cloning workspace from %s", settings.workspace_repo)
+    process = await asyncio.create_subprocess_exec(
+        "git", "clone", "--depth", "50", url, str(workspace),
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    _, stderr = await process.communicate()
+    if process.returncode != 0:
+        log.error("workspace clone failed: %s", stderr.decode()[:400])

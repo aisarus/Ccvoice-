@@ -11,20 +11,19 @@ pip install -r daemon/requirements.txt
 python -m voice_claude --workspace ~/aegis          # из каталога daemon/
 ```
 
-Демон печатает токен и адрес клиента:
-
 ```
 voice-claude-daemon
   workspace : /home/you/aegis
-  websocket : ws://0.0.0.0:8787
-  client    : http://<этот-хост>:8788/?port=8787&token=XXXX
+  listening : 0.0.0.0:8787 (клиент и WebSocket на одном порту)
   token     : XXXX
   code      : ready
   chat      : ready
 ```
 
-Открой этот адрес в Chrome на Android (в домашней сети — по локальному IP,
-снаружи — по имени хоста в Tailscale). Держи кнопку, говори, отпускай.
+Клиент — `http://<хост>:8787/?token=XXXX`. Один порт нужен потому, что хостинги
+отдают наружу ровно один, а браузеру проще всего открывать `wss://` на том же
+origin, что и страница. Микрофон браузер даст только на `https://` или на
+`localhost` — для телефона это значит деплой, см. `docs/DEPLOY.md`.
 
 Без `claude-agent-sdk` / `ANTHROPIC_API_KEY` цели `code` и `chat` работают
 заглушками: петля целиком проходит, а в ухо приходит «Claude Code недоступен».
@@ -32,13 +31,16 @@ voice-claude-daemon
 
 ## Флаги
 
-| Флаг | Смысл |
-|---|---|
-| `--workspace` | каталог Claude Code-сессии |
-| `--ws-port` / `--http-port` | порты WebSocket и статики (8787 / 8788) |
-| `--token` | фиксированный pre-shared token вместо случайного |
-| `--ambient off\|passive\|assist` | стартовый режим «второго уха» |
-| `--note-path` | файл инбокса для цели `note` |
+| Флаг | Переменная окружения | Смысл |
+|---|---|---|
+| `--workspace` | `WORKSPACE_DIR` | каталог Claude Code-сессии |
+| `--workspace-repo` | `WORKSPACE_REPO` | git URL, который склонировать на старте (+ `GITHUB_TOKEN`) |
+| `--port` | `PORT` | один порт для клиента и WebSocket |
+| `--token` | `VOICE_TOKEN` | pre-shared token (по умолчанию случайный) |
+| `--ambient off\|passive\|assist` | `AMBIENT_SUBMODE` | стартовый режим «второго уха» |
+| `--note-path` | `NOTE_PATH` | файл инбокса для цели `note` |
+
+`GET /healthz` отвечает `ok` — это health check для хостинга.
 
 ## Модули
 
