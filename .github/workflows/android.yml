@@ -34,6 +34,16 @@ jobs:
         working-directory: android
         run: gradle --no-daemon assembleDebug
 
+      # Запасной путь: некоторые браузеры и сети не дают докачать .apk,
+      # а такой же файл в .zip проходит спокойно.
+      - name: Упаковать запасную копию
+        working-directory: android/app/build/outputs/apk/debug
+        run: |
+          cp app-debug.apk voice-shell.apk
+          zip -q voice-shell-apk.zip voice-shell.apk
+          sha256sum app-debug.apk voice-shell-apk.zip > checksums.txt
+          cat checksums.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: voice-shell-apk
@@ -46,6 +56,15 @@ jobs:
         with:
           tag_name: apk-latest
           name: Voice Shell APK
-          body: Свежая сборка приложения. Скачай app-debug.apk и установи на телефон.
+          body: |
+            Свежая сборка приложения.
+
+            - `app-debug.apk` — обычный файл, ставится сразу.
+            - `voice-shell-apk.zip` — то же самое в архиве, если браузер не даёт докачать apk:
+              скачай, распакуй файловым менеджером и поставь `voice-shell.apk`.
+            - `checksums.txt` — контрольные суммы.
           prerelease: true
-          files: android/app/build/outputs/apk/debug/app-debug.apk
+          files: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/debug/voice-shell-apk.zip
+            android/app/build/outputs/apk/debug/checksums.txt
