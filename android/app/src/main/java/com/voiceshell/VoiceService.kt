@@ -8,9 +8,13 @@ import android.app.Service
 import android.content.Intent
 import android.media.AudioManager
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.speech.RecognitionListener as CloudListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.support.v4.media.session.MediaSessionCompat
@@ -70,6 +74,8 @@ class VoiceService : Service(), RecognitionListener {
     private var speaking = false
     private var windowUntil = 0L
     private var status = "запуск"
+    private var cloud: SpeechRecognizer? = null
+    private var awaitingCommand = false
 
     override fun onCreate() {
         super.onCreate()
@@ -91,6 +97,7 @@ class VoiceService : Service(), RecognitionListener {
     }
 
     override fun onDestroy() {
+        cloud?.destroy()
         speech?.stop()
         speech?.shutdown()
         model?.close()
@@ -176,9 +183,24 @@ class VoiceService : Service(), RecognitionListener {
         if (speaking) return                       // во время ответа слышно самих себя
         val windowOpen = System.currentTimeMillis() < windowUntil
         if (!windowOpen && !Intents.hasWake(text)) return
-        val payload = Intents.stripWake(text)
-        if (payload.isBlank()) return
         windowUntil = 0
+
+        val payload = Intents.stripWake(text)
+        // Обращение прозвучало, но команда — нет: слушаем её отдельно, на выбранном языке.
+        if (payload.isBlank() || Intents.hasWake(text) && payload == Intents.normalise(text)) {
+            listenForCommand()
+            return
+        }
+        if (prefs.language != "ru-RU") {
+            // Локальная модель русская: саму реплику распознаём на нужном языке.
+            listenForCommand()
+            return
+        }
+        deliver(payload)
+    }
+
+    private fun deliver(payload: String) {
+        if (payload.isBlank()) return
         report("→ $payload")
         send(
             JSONObject()
@@ -190,6 +212,68 @@ class VoiceService : Service(), RecognitionListener {
                 .put("voiced_frames", 40)
                 .put("role", "master")
         )
+    }
+
+    /**
+     * Реплика на выбранном языке.
+     *
+     * Wake word ловится локально, поэтому наружу уходит только то, что сказано
+     * после обращения — зато распознаётся точнее и на любом языке, включая иврит,
+     * для которого локальной модели нет.
+     */
+    private fun listenForCommand() {
+        if (awaitingCommand) return
+        awaitingCommand = true
+        main.post {
+            speech?.stop()
+            if (cloud == null) cloud = SpeechRecognizer.createSpeechRecognizer(this)
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, prefs.language)
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            }
+            cloud?.setRecognitionListener(object : CloudListener {
+                override fun onResults(results: Bundle?) {
+                    val text = results
+                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        ?.firstOrNull()
+                        ?.trim()
+                        .orEmpty()
+                    finishCommand()
+                    if (text.isEmpty()) return
+                    Intents.stopIntent(text)?.let { scope ->
+                        silence()
+                        send(JSONObject().put("id", "interrupt").put("scope", scope))
+                        return
+                    }
+                    deliver(text)
+                }
+
+                override fun onError(error: Int) {
+                    finishCommand()
+                    if (error != SpeechRecognizer.ERROR_NO_MATCH &&
+                        error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+                    ) {
+                        report("распознавание реплики: ошибка $error")
+                    }
+                }
+
+                override fun onReadyForSpeech(params: Bundle?) { report("слушаю реплику…") }
+                override fun onBeginningOfSpeech() = Unit
+                override fun onRmsChanged(rmsdB: Float) = Unit
+                override fun onBufferReceived(buffer: ByteArray?) = Unit
+                override fun onEndOfSpeech() = Unit
+                override fun onPartialResults(partialResults: Bundle?) = Unit
+                override fun onEvent(eventType: Int, params: Bundle?) = Unit
+            })
+            cloud?.startListening(intent)
+        }
+    }
+
+    private fun finishCommand() {
+        awaitingCommand = false
+        main.postDelayed({ if (!awaitingCommand) startListening() }, 300)
     }
 
     // ---------- кнопка гарнитуры ----------
@@ -220,13 +304,14 @@ class VoiceService : Service(), RecognitionListener {
         if (speaking) silence()
         windowUntil = System.currentTimeMillis() + WINDOW_MS
         report("слушаю — говори")
+        if (prefs.language != "ru-RU") listenForCommand()
     }
 
     // ---------- речь ----------
     private fun setUpTts() {
         tts = TextToSpeech(this) { code ->
             if (code == TextToSpeech.SUCCESS) {
-                tts?.language = Locale("ru", "RU")
+                tts?.language = Locale.forLanguageTag(prefs.language)
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) { speaking = true }
                     override fun onDone(utteranceId: String?) {

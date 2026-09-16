@@ -14,6 +14,11 @@ class Prefs(context: Context) {
         get() = sp.getString("token", "") ?: ""
         set(value) = sp.edit().putString("token", value.trim()).apply()
 
+    /** Язык реплик: ru-RU, en-US, he-IL. Wake word всегда слушается локально. */
+    var language: String
+        get() = sp.getString("language", "ru-RU") ?: "ru-RU"
+        set(value) = sp.edit().putString("language", value).apply()
+
     val isConfigured: Boolean get() = server.isNotBlank() && token.isNotBlank()
 
     /** https://host -> wss://host, http://host -> ws://host. */

@@ -7,11 +7,15 @@ package com.voiceshell
  * потому что остановка не должна зависеть от круга по сети.
  */
 object Intents {
-    val WAKE = listOf("клод", "клода", "клоуд", "клауд", "claude")
+    val WAKE = listOf("клод", "клода", "клоуд", "клауд", "claude", "клот", "клод")
     private val STOP_WORK = listOf(
-        "стоп работу", "стоп работа", "останови работу", "останови", "прекрати", "отмени", "отмена"
+        "стоп работу", "стоп работа", "останови работу", "останови", "прекрати", "отмени", "отмена",
+        "stop working", "stop the work", "abort", "cancel"
     )
-    private val STOP_VOICE = listOf("стоп", "тихо", "хватит", "замолчи")
+    private val STOP_VOICE = listOf(
+        "стоп", "тихо", "хватит", "замолчи",
+        "stop", "quiet", "enough", "shut up"
+    )
 
     fun normalise(text: String): String =
         text.lowercase().replace(Regex("[^\\p{L}\\p{N}\\s]"), " ").replace(Regex("\\s+"), " ").trim()

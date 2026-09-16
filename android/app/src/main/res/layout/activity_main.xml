@@ -48,6 +48,18 @@
             android:inputType="textNoSuggestions"
             android:importantForAutofill="no" />
 
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="язык реплик"
+            android:textSize="12sp"
+            android:layout_marginTop="12dp" />
+
+        <Spinner
+            android:id="@+id/language"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
         <Button
             android:id="@+id/start"
             android:layout_width="match_parent"
@@ -75,6 +87,6 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
             android:textSize="13sp"
-            android:text="Скажи «Клод…» — распознавание идёт на телефоне, наружу уходит только текст принятой реплики. Кнопка на наушниках разрешает сказать реплику без обращения. «Стоп» гасит голос, «останови работу» прерывает работу." />
+            android:text="Обращение «Клод» слышит сама трубка, без интернета. Дальше реплика распознаётся на выбранном языке — русский, английский или иврит. Скажи «Клод…» — распознавание обращения идёт на телефоне, наружу уходит только текст принятой реплики. Кнопка на наушниках разрешает сказать реплику без обращения. «Стоп» гасит голос, «останови работу» прерывает работу." />
     </LinearLayout>
 </ScrollView>

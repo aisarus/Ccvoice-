@@ -65,6 +65,7 @@
 <div class="row">
   <button class="chip" id="follow" aria-pressed="true" type="button">разговор: вкл</button>
   <button class="chip" id="always" aria-pressed="false" type="button">слушать всегда: выкл</button>
+  <button class="chip" id="lang" type="button">язык: русский</button>
   <button class="chip" id="ambient" aria-pressed="false" type="button">ambient: off</button>
   <button class="chip" id="bystander" hidden aria-pressed="false" type="button">чужие реплики: выкл</button>
 </div>
@@ -118,6 +119,8 @@ const WAKE_WORDS = ["клод", "клода", "клоуд", "cloud", "claude", "
 const STOP_WORK = ["стоп работу", "стоп работа", "останови работу", "останови", "прекрати", "отмени", "отмена"];
 const STOP_VOICE = ["стоп", "тихо", "хватит", "замолчи"];
 const FOLLOW_MS = 15000;
+const LANGS = [{code:"ru-RU", name:"русский"}, {code:"en-US", name:"English"}, {code:"he-IL", name:"עברית"}];
+let lang = localStorage.getItem("vs_lang") || "ru-RU";
 
 let ws = null, recog = null, audioCtx = null, analyser = null;
 let listening = false, speaking = false, connected = false;
@@ -217,7 +220,7 @@ function ensureRecognition(){
   if (!SR){ el("hint").textContent = "нужен Chrome: этот браузер не умеет распознавание речи"; return null; }
   if (recog) return recog;
   recog = new SR();
-  recog.lang = "ru-RU"; recog.interimResults = false; recog.continuous = false;
+  recog.lang = lang; recog.interimResults = false; recog.continuous = false;
   recog.onresult = ev => {
     const text = (ev.results[ev.results.length - 1][0].transcript || "").trim();
     if (!text) return;
@@ -311,6 +314,15 @@ el("always").onclick = () => {
   always ? startListen() : stopListen();
   paintButton();
 };
+function paintLang(){ el("lang").textContent = "язык: " + (LANGS.find(l => l.code === lang) || LANGS[0]).name; }
+el("lang").onclick = () => {
+  const next = (LANGS.findIndex(l => l.code === lang) + 1) % LANGS.length;
+  lang = LANGS[next].code;
+  try { localStorage.setItem("vs_lang", lang); } catch (e) {}
+  if (recog) { try { recog.abort(); } catch (e) {} recog = null; }
+  paintLang();
+};
+
 let ambient = "off", bystander = false;
 el("ambient").onclick = () => {
   ambient = {off:"passive", passive:"assist", assist:"off"}[ambient];
@@ -361,7 +373,7 @@ function addMsg(who, text, cls){
 function speak(text){
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
-  u.lang = "ru-RU"; u.rate = 1.05;
+  u.lang = lang; u.rate = 1.05;
   u.onstart = () => { speaking = true; };
   u.onend = () => {
     speaking = false;
@@ -427,6 +439,7 @@ function connect(){
 if (!window.isSecureContext && location.hostname !== "localhost")
   el("hint").textContent = "нужен https: браузер не даст микрофон на http";
 startMeter().catch(() => el("hint").textContent = "нет доступа к микрофону — разреши его в Chrome");
+paintLang();
 paintButton();
 connect();
 </script>

@@ -8,8 +8,10 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
+import android.widget.Spinner
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -34,13 +36,20 @@ class MainActivity : AppCompatActivity() {
 
         val server = findViewById<EditText>(R.id.server)
         val token = findViewById<EditText>(R.id.token)
+        val language = findViewById<Spinner>(R.id.language)
         status = findViewById(R.id.status)
         server.setText(prefs.server)
         token.setText(prefs.token)
 
+        val codes = listOf("ru-RU", "en-US", "he-IL")
+        val labels = listOf("русский", "English", "עברית")
+        language.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
+        language.setSelection(codes.indexOf(prefs.language).coerceAtLeast(0))
+
         findViewById<Button>(R.id.start).setOnClickListener {
             prefs.server = server.text.toString()
             prefs.token = token.text.toString()
+            prefs.language = codes[language.selectedItemPosition]
             if (!prefs.isConfigured) {
                 status.text = "нужны адрес сервиса и токен"
                 return@setOnClickListener
