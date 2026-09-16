@@ -54,7 +54,11 @@ python3 scripts/validate_spec.py
 
 Пошагово, со всеми граблями (сон free-плана, GitHub-токен, чтобы работа не
 терялась, что уходит в Google при распознавании) — [`docs/DEPLOY.md`](docs/DEPLOY.md).
-Тот же образ разворачивается на Koyeb, Railway, Fly.io или любом VPS.
+
+Render не обязателен: подойдёт любой хостинг с долго живущим контейнером,
+WebSocket и HTTPS (Railway, Koyeb, Fly.io, VPS через [`docker-compose.yml`](docker-compose.yml)).
+Serverless — Vercel, Netlify, Cloudflare Workers — **не** подойдёт: там процесс
+живёт только на время запроса, а нам нужна сессия, которая держится между репликами.
 
 ## Запустить локально
 

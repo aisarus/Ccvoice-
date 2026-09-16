@@ -1,0 +1,26 @@
+# Для VPS или локального docker: docker compose up -d
+# Хостингам с деплоем из GitHub (Render, Railway, Koyeb) этот файл не нужен —
+# им достаточно Dockerfile.
+services:
+  voice-shell:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      # Пароль от голосового доступа: придумай длинный.
+      VOICE_TOKEN: "${VOICE_TOKEN:?задай VOICE_TOKEN}"
+      # Подписка Claude. Можно не задавать и подключить из приложения,
+      # но тогда после перезапуска флоу придётся пройти заново.
+      CLAUDE_CODE_OAUTH_TOKEN: "${CLAUDE_CODE_OAUTH_TOKEN:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      WORKSPACE_REPO: "${WORKSPACE_REPO:-}"
+      GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
+      AMBIENT_SUBMODE: "off"
+    volumes:
+      # Чтобы рабочая копия и подключённая подписка переживали перезапуск.
+      - workspace:/tmp/workspace
+      - claude-home:/root/.claude
+volumes:
+  workspace:
+  claude-home:
