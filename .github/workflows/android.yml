@@ -1,0 +1,48 @@
+name: android
+
+on:
+  push:
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Собрать APK
+        working-directory: android
+        run: gradle --no-daemon assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voice-shell-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      # Ссылка, которую можно открыть с телефона без входа в GitHub.
+      - name: Выложить в релиз
+        if: github.ref_name == 'claude/voice-shell-claude-code-77wwh2'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-latest
+          name: Voice Shell APK
+          body: Свежая сборка приложения. Скачай app-debug.apk и установи на телефон.
+          prerelease: true
+          files: android/app/build/outputs/apk/debug/app-debug.apk

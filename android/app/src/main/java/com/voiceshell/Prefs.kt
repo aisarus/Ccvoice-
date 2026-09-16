@@ -1,0 +1,29 @@
+package com.voiceshell
+
+import android.content.Context
+
+/** Ввод один раз: адрес сервиса и токен доступа. */
+class Prefs(context: Context) {
+    private val sp = context.getSharedPreferences("voice-shell", Context.MODE_PRIVATE)
+
+    var server: String
+        get() = sp.getString("server", "") ?: ""
+        set(value) = sp.edit().putString("server", value.trim()).apply()
+
+    var token: String
+        get() = sp.getString("token", "") ?: ""
+        set(value) = sp.edit().putString("token", value.trim()).apply()
+
+    val isConfigured: Boolean get() = server.isNotBlank() && token.isNotBlank()
+
+    /** https://host -> wss://host, http://host -> ws://host. */
+    fun socketUrl(): String {
+        val raw = server.trim().removeSuffix("/")
+        return when {
+            raw.startsWith("https://") -> "wss://" + raw.removePrefix("https://")
+            raw.startsWith("http://") -> "ws://" + raw.removePrefix("http://")
+            raw.startsWith("wss://") || raw.startsWith("ws://") -> raw
+            else -> "wss://$raw"
+        }
+    }
+}
