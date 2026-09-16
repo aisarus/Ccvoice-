@@ -54,9 +54,8 @@ class MainActivity : AppCompatActivity() {
                 status.text = "нужны адрес сервиса и токен"
                 return@setOnClickListener
             }
-            requestPermissions()
-            ContextCompat.startForegroundService(this, Intent(this, VoiceService::class.java))
-            status.text = "служба запущена"
+            // Сначала разрешение, потом служба: без микрофона она падает при старте.
+            if (missingPermissions().isEmpty()) launchService() else requestPermissions()
         }
 
         findViewById<Button>(R.id.stop).setOnClickListener {
@@ -65,8 +64,24 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        val micIndex = permissions.indexOf(Manifest.permission.RECORD_AUDIO)
+        val micGranted = micIndex < 0 ||
+            grantResults.getOrNull(micIndex) == PackageManager.PERMISSION_GRANTED
+        if (micGranted) launchService() else status.text = "без микрофона работать не смогу"
+    }
+
+    private fun launchService() {
+        ContextCompat.startForegroundService(this, Intent(this, VoiceService::class.java))
+        status.text = "служба запускается…"
+    }
+
     override fun onStart() {
         super.onStart()
+        if (prefs.lastError.isNotBlank()) status.text = "прошлый запуск: ${prefs.lastError}"
         val filter = IntentFilter(VoiceService.ACTION_STATUS)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(statusReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -81,7 +96,7 @@ class MainActivity : AppCompatActivity() {
         runCatching { unregisterReceiver(statusReceiver) }
     }
 
-    private fun requestPermissions() {
+    private fun missingPermissions(): List<String> {
         val wanted = mutableListOf<String>()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
@@ -94,6 +109,12 @@ class MainActivity : AppCompatActivity() {
         ) {
             wanted += Manifest.permission.POST_NOTIFICATIONS
         }
-        if (wanted.isNotEmpty()) ActivityCompat.requestPermissions(this, wanted.toTypedArray(), 1)
+        return wanted
+    }
+
+    private fun requestPermissions() {
+        val wanted = missingPermissions()
+        if (wanted.isEmpty()) launchService()
+        else ActivityCompat.requestPermissions(this, wanted.toTypedArray(), 1)
     }
 }

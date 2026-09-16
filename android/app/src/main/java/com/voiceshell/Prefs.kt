@@ -19,6 +19,11 @@ class Prefs(context: Context) {
         get() = sp.getString("language", "ru-RU") ?: "ru-RU"
         set(value) = sp.edit().putString("language", value).apply()
 
+    /** Последняя ошибка службы: без компьютера это единственный способ её увидеть. */
+    var lastError: String
+        get() = sp.getString("last_error", "") ?: ""
+        set(value) = sp.edit().putString("last_error", value).apply()
+
     val isConfigured: Boolean get() = server.isNotBlank() && token.isNotBlank()
 
     /** https://host -> wss://host, http://host -> ws://host. */

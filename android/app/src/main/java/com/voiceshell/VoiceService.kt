@@ -4,8 +4,11 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.Manifest
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
@@ -21,6 +24,8 @@ import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -80,12 +85,44 @@ class VoiceService : Service(), RecognitionListener {
     override fun onCreate() {
         super.onCreate()
         prefs = Prefs(this)
-        createChannel()
-        startForeground(NOTIFICATION_ID, notification("запуск"))
-        setUpTts()
-        setUpMediaSession()
-        connect()
-        Thread { prepareModel() }.start()
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            fail("нет разрешения на микрофон — выдай его и запусти снова")
+            return
+        }
+
+        try {
+            createChannel()
+            // На Android 14 тип обязателен, иначе служба падает с исключением.
+            ServiceCompat.startForeground(
+                this, NOTIFICATION_ID, notification("запуск"),
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0
+            )
+        } catch (e: Exception) {
+            fail("служба не смогла стартовать: ${e.javaClass.simpleName}: ${e.message}")
+            return
+        }
+
+        try {
+            setUpTts()
+            setUpMediaSession()
+            connect()
+            Thread { prepareModel() }.start()
+            prefs.lastError = ""
+        } catch (e: Exception) {
+            fail("ошибка при запуске: ${e.javaClass.simpleName}: ${e.message}")
+        }
+    }
+
+    /** Сообщить причину и остановиться, а не падать молча. */
+    private fun fail(reason: String) {
+        Log.e(TAG, reason)
+        runCatching { prefs.lastError = reason }
+        sendBroadcast(Intent(ACTION_STATUS).setPackage(packageName).putExtra(EXTRA_TEXT, reason))
+        stopSelf()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -424,7 +461,7 @@ class VoiceService : Service(), RecognitionListener {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         return NotificationCompat.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle("Voice Shell")
             .setContentText(text)
             .setContentIntent(open)
@@ -436,6 +473,7 @@ class VoiceService : Service(), RecognitionListener {
 
     private fun report(text: String) {
         status = text
+        if (text.startsWith("не ") || text.contains("ошибка")) runCatching { prefs.lastError = text }
         main.post {
             getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(text))
             sendBroadcast(Intent(ACTION_STATUS).setPackage(packageName).putExtra(EXTRA_TEXT, text))
