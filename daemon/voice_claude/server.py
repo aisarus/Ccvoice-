@@ -18,6 +18,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from websockets.datastructures import Headers
+from websockets.http11 import Response
+
 from . import formatter, state
 from .ambient import AmbientBuffer, RateLimiter, WhisperGate
 from .auth import SetupError, SetupTokenFlow, apply_token, credential_kind
@@ -361,23 +364,32 @@ class Daemon:
             self.clients.discard(ws)
 
 
-def static_response(connection: Any, path: str, directory: Path = CLIENT_DIR) -> Any:
+def http_response(status: http.HTTPStatus, body: bytes, content_type: str) -> Response:
+    """Build the response by hand.
+
+    `connection.respond()` already fills Content-Type and Content-Length, and
+    assigning to `headers[...]` appends instead of replacing — that produced two
+    conflicting Content-Length values, which a proxy rejects outright.
+    """
+    headers = Headers()
+    headers["Content-Type"] = content_type
+    headers["Content-Length"] = str(len(body))
+    headers["Cache-Control"] = "no-store"
+    return Response(status.value, status.phrase, headers, body)
+
+
+def static_response(path: str, directory: Path = CLIENT_DIR) -> Response:
     """Serve the phone client from the same origin as the WebSocket."""
     if path in ("", "/"):
         path = "/index.html"
     target = (directory / path.lstrip("/")).resolve()
     if directory.resolve() not in target.parents or not target.is_file():
-        return connection.respond(http.HTTPStatus.NOT_FOUND, "not found\n")
+        return http_response(http.HTTPStatus.NOT_FOUND, b"not found\n", "text/plain; charset=utf-8")
     body = target.read_bytes()
-    response = connection.respond(http.HTTPStatus.OK, "")
-    response.body = body
     content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
     if content_type.startswith(("text/", "application/javascript")):
         content_type += "; charset=utf-8"
-    response.headers["Content-Type"] = content_type
-    response.headers["Content-Length"] = str(len(body))
-    response.headers["Cache-Control"] = "no-store"
-    return response
+    return http_response(http.HTTPStatus.OK, body, content_type)
 
 
 def make_process_request(directory: Path = CLIENT_DIR) -> Any:
@@ -386,12 +398,10 @@ def make_process_request(directory: Path = CLIENT_DIR) -> Any:
     async def process_request(connection: Any, request: Any) -> Any:
         path = request.path.split("?")[0]
         if path == "/healthz":
-            response = connection.respond(http.HTTPStatus.OK, "ok\n")
-            response.headers["Content-Type"] = "text/plain; charset=utf-8"
-            return response
+            return http_response(http.HTTPStatus.OK, b"ok\n", "text/plain; charset=utf-8")
         if request.headers.get("Upgrade", "").lower() == "websocket":
             return None
-        return static_response(connection, path, directory)
+        return static_response(path, directory)
 
     return process_request
 
@@ -402,6 +412,10 @@ async def run(settings: Settings) -> None:
     await bootstrap_workspace(settings)
     daemon = Daemon(settings)
     process_request = make_process_request()
+
+    # Health check стучится раз в секунду: без этого лог состоит из него одного.
+    if not log.isEnabledFor(logging.DEBUG):
+        logging.getLogger("websockets.server").setLevel(logging.WARNING)
 
     print(f"voice-claude-daemon\n"
           f"  workspace : {Path(settings.workspace).expanduser()}\n"

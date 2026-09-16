@@ -172,6 +172,13 @@ def test_same_port_serves_the_client_and_health_check(tmp_path):
     assert "404" in escape.splitlines()[0]
     assert welcome["id"] == "welcome"
 
+    # Дублированный Content-Length (0 и настоящая длина) — это то, из-за чего
+    # прокси Render отдавал 502 при живом контейнере.
+    for name, raw in (("health", health), ("page", page), ("404", escape)):
+        head = raw.split("\r\n\r\n", 1)[0].lower()
+        for header in ("content-length", "content-type"):
+            assert head.count(header + ":") == 1, f"{name}: дубль заголовка {header}"
+
 
 def test_settings_read_the_deployment_environment(monkeypatch):
     monkeypatch.setenv("PORT", "10000")
