@@ -15,9 +15,24 @@ android {
         versionName = "0.3.0"
     }
 
+    // Постоянный ключ: иначе каждая сборка в CI подписывается новым
+    // отладочным ключом, и Android отказывается ставить обновление поверх.
+    signingConfigs {
+        create("shared") {
+            storeFile = file("voice-shell.keystore")
+            storePassword = "voiceshell"
+            keyAlias = "voiceshell"
+            keyPassword = "voiceshell"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("shared")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("shared")
         }
     }
     compileOptions {

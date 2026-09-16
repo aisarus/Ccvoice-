@@ -63,6 +63,9 @@ jobs:
             - `voice-shell-apk.zip` — то же самое в архиве, если браузер не даёт докачать apk:
               скачай, распакуй файловым менеджером и поставь `voice-shell.apk`.
             - `checksums.txt` — контрольные суммы.
+
+            Все сборки подписаны одним ключом, поэтому обновление ставится поверх
+            предыдущего без удаления.
           prerelease: true
           files: |
             android/app/build/outputs/apk/debug/app-debug.apk
