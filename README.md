@@ -28,6 +28,8 @@ Desktop daemon
 | [`tests/`](tests/) | 57 тестов, включая end-to-end по реальному протоколу |
 | [`Dockerfile`](Dockerfile) · [`render.yaml`](render.yaml) | Деплой одним нажатием, с телефона |
 | [`docs/DEPLOY.md`](docs/DEPLOY.md) | Пошаговый деплой без компьютера |
+| [`docs/desktop-handoff.json`](docs/desktop-handoff.json) | Машиночитаемое задание для Claude Code-сессии на твоём ПК |
+| [`android/`](android/) | Приложение: локальный wake word, фон, кнопка наушников |
 
 ```bash
 python3 scripts/validate_spec.py
@@ -84,6 +86,32 @@ python3 scripts/validate_spec.py  # OK: voice-shell-for-claude-code v0.2.0
 предложения, голосовые approvals, ambient-буфер с ролями и стиранием,
 WebSocket-протокол из спеки и push-to-talk клиент. Чего ещё нет: wake word,
 VAD-endpointing на устройстве, voiceprint, мультипроект — это S1–S6.
+
+## Демон на своём компьютере
+
+Облачный сервис не видит твою машину. Чтобы Claude Code работал с настоящими
+проектами, демон запускается локально:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aisarus/Ccvoice-/claude/voice-shell-claude-code-77wwh2/scripts/install-desktop.sh | bash -s -- ~/твой-проект
+```
+
+Скрипт клонирует репозиторий, ставит зависимости, прогоняет тесты, генерирует
+токен и запускает демон. Снаружи дома — через Tailscale.
+
+Если за компьютером сидит Claude Code, отдай ему
+[`docs/desktop-handoff.json`](docs/desktop-handoff.json): там всё то же самое
+машиночитаемо — предусловия, шаги, что проверить и что сказать тебе.
+
+## Приложение для Android
+
+[Скачать APK](https://github.com/aisarus/Ccvoice-/releases/download/apk-latest/app-debug.apk) ·
+собирается из [`android/`](android/) на каждом пуше.
+
+Обращение «Клод» распознаётся на самом телефоне, поэтому постоянно открытый
+микрофон не означает постоянный поток аудио наружу. Реплика после обращения
+распознаётся на выбранном языке — русский, английский, иврит. Фоновая служба
+живёт с погашенным экраном, кнопка гарнитуры разрешает реплику без обращения.
 
 ## Ключевые решения
 

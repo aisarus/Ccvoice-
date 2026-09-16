@@ -1,0 +1,218 @@
+{
+  "meta": {
+    "id": "voice-shell-desktop-handoff",
+    "version": "1.0.0",
+    "purpose": "Инструкция для Claude Code-сессии, запущенной на компьютере пользователя: поднять voice-claude-daemon локально, чтобы телефон говорил с этой машиной, а не с облачным контейнером.",
+    "audience": "agent",
+    "repo": "https://github.com/aisarus/Ccvoice-.git",
+    "branch": "claude/voice-shell-claude-code-77wwh2",
+    "language_of_report": "ru-RU"
+  },
+
+  "context": {
+    "what_this_is": "Голосовая оболочка над Claude Code: телефон слушает, демон держит долгую Claude Code-сессию и отвечает короткими репликами.",
+    "already_running": {
+      "cloud_deployment": "https://voice-shell.onrender.com",
+      "limitation": "Claude Code там работает в эфемерном контейнере и не видит машину пользователя."
+    },
+    "why_desktop": "На этой машине Claude Code получает настоящую оболочку, файлы, git и проекты пользователя — то, ради чего всё затевалось.",
+    "read_first": ["README.md", "daemon/README.md", "spec/voice-shell.json"]
+  },
+
+  "preconditions": [
+    {"id": "os", "check": "macOS, Linux или Windows (WSL2 предпочтительнее нативного Windows)", "blocking": true},
+    {"id": "python", "check": "python3 --version >= 3.11", "install": {"macos": "brew install python@3.12", "debian": "sudo apt install python3 python3-venv", "windows": "winget install Python.Python.3.12"}, "blocking": true},
+    {"id": "node", "check": "node --version >= 18", "why": "claude-agent-sdk запускает CLI Claude Code", "install": {"macos": "brew install node", "debian": "sudo apt install nodejs npm", "windows": "winget install OpenJS.NodeJS.LTS"}, "blocking": true},
+    {"id": "claude_cli", "check": "claude --version", "install": "npm install -g @anthropic-ai/claude-code", "blocking": true},
+    {"id": "claude_auth", "check": "claude уже авторизован на этой машине (подписка Pro/Max)", "if_missing": "claude setup-token, затем export CLAUDE_CODE_OAUTH_TOKEN=<выданный токен>", "blocking": true},
+    {"id": "git", "check": "git --version", "blocking": true},
+    {"id": "tailscale", "check": "tailscale status", "install": "https://tailscale.com/download", "blocking": false, "why": "нужен только для доступа с телефона вне домашней сети"}
+  ],
+
+  "values_to_obtain": [
+    {
+      "id": "VOICE_TOKEN",
+      "what": "Пароль голосового доступа к демону",
+      "where": "Придумай сам: python3 -c \"import secrets; print(secrets.token_urlsafe(24))\"",
+      "note": "Это НЕ тот же токен, что в облачном сервисе на Render. Локальный демон — отдельный вход.",
+      "give_to_user": true
+    },
+    {
+      "id": "WORKSPACE",
+      "what": "Каталог проекта, в котором Claude Code будет работать",
+      "where": "Спроси пользователя, какой проект он хочет вести голосом. По умолчанию — каталог этого репозитория.",
+      "give_to_user": false
+    },
+    {
+      "id": "TAILNET_HOST",
+      "what": "Имя этой машины в tailnet",
+      "where": "tailscale status --json | grep -i dnsname, либо вывод `tailscale status` первой строкой",
+      "give_to_user": true
+    }
+  ],
+
+  "steps": [
+    {
+      "id": "1_clone",
+      "title": "Забрать репозиторий",
+      "commands": [
+        "git clone https://github.com/aisarus/Ccvoice-.git ~/voice-shell",
+        "cd ~/voice-shell",
+        "git checkout claude/voice-shell-claude-code-77wwh2"
+      ],
+      "skip_if": "каталог уже существует — тогда git pull",
+      "expect": "в каталоге есть daemon/, client/, spec/"
+    },
+    {
+      "id": "2_env",
+      "title": "Поставить зависимости в отдельное окружение",
+      "commands": [
+        "python3 -m venv ~/voice-shell/.venv",
+        "~/voice-shell/.venv/bin/pip install -r ~/voice-shell/daemon/requirements-dev.txt"
+      ],
+      "expect": "устанавливаются websockets и claude-agent-sdk без ошибок"
+    },
+    {
+      "id": "3_selftest",
+      "title": "Проверить, что код цел",
+      "commands": [
+        "cd ~/voice-shell && .venv/bin/python -m pytest tests -q",
+        "cd ~/voice-shell && .venv/bin/python scripts/validate_spec.py"
+      ],
+      "expect": "все тесты проходят; валидатор печатает OK",
+      "on_failure": "останови установку и покажи пользователю вывод — дальше идти нельзя"
+    },
+    {
+      "id": "4_token",
+      "title": "Сгенерировать токен доступа",
+      "commands": [
+        "python3 -c \"import secrets; print(secrets.token_urlsafe(24))\""
+      ],
+      "expect": "строка ~32 символа",
+      "store_as": "VOICE_TOKEN",
+      "never": "не коммить его в репозиторий и не писать в файлы внутри репозитория"
+    },
+    {
+      "id": "5_run",
+      "title": "Запустить демон",
+      "commands": [
+        "cd ~/voice-shell/daemon && VOICE_TOKEN=<VOICE_TOKEN> ../.venv/bin/python -m voice_claude --workspace <WORKSPACE> --port 8787"
+      ],
+      "expect": "печатает listening, token, и строки code: ready / chat: ready",
+      "if_code_is_stub": "значит claude CLI не авторизован — вернись к preconditions.claude_auth",
+      "keep_running": true,
+      "note": "для постоянной работы оформи автозапуск шагом 8"
+    },
+    {
+      "id": "6_verify",
+      "title": "Убедиться, что демон отвечает",
+      "commands": [
+        "curl -s http://127.0.0.1:8787/healthz",
+        "curl -s -o /dev/null -w '%{http_code} %{content_type}\\n' http://127.0.0.1:8787/"
+      ],
+      "expect": "ok, затем 200 text/html; charset=utf-8"
+    },
+    {
+      "id": "7_remote_access",
+      "title": "Дать телефону дотянуться",
+      "variants": [
+        {
+          "id": "lan",
+          "when": "телефон в той же Wi-Fi сети",
+          "url_for_phone": "http://<локальный IP>:8787",
+          "caveat": "Браузерный клиент по http микрофон не получит — годится только для приложения Android"
+        },
+        {
+          "id": "tailscale_app",
+          "when": "телефон где угодно, используется приложение Android",
+          "commands": ["tailscale up"],
+          "url_for_phone": "http://<TAILNET_HOST>:8787",
+          "caveat": "Приложению https не нужен — оно не браузер"
+        },
+        {
+          "id": "tailscale_https",
+          "when": "нужен браузерный клиент вне дома",
+          "commands": ["tailscale serve --bg 8787"],
+          "url_for_phone": "https://<TAILNET_HOST>/?token=<VOICE_TOKEN>",
+          "why": "Tailscale выдаёт сертификат, а браузер даёт микрофон только по https"
+        }
+      ],
+      "never": ["пробрасывать порт на публичный IP", "выключать проверку токена"]
+    },
+    {
+      "id": "8_autostart",
+      "title": "Автозапуск (по желанию)",
+      "variants": [
+        {"os": "linux", "how": "systemd --user unit, ExecStart = путь к .venv/bin/python -m voice_claude, Environment=VOICE_TOKEN=..."},
+        {"os": "macos", "how": "launchd plist в ~/Library/LaunchAgents"},
+        {"os": "windows", "how": "Task Scheduler, триггер «при входе в систему»"}
+      ],
+      "ask_user_first": true
+    }
+  ],
+
+  "phone_setup": {
+    "android_app": {
+      "download": "https://github.com/aisarus/Ccvoice-/releases/download/apk-latest/app-debug.apk",
+      "fields": [
+        {"field": "адрес сервиса", "value": "http://<TAILNET_HOST>:8787"},
+        {"field": "токен доступа", "value": "<VOICE_TOKEN>"},
+        {"field": "язык реплик", "value": "по вкусу: ru-RU, en-US, he-IL"}
+      ],
+      "note": "Приложение работает по http внутри tailnet — сертификат не нужен."
+    },
+    "web_client": {
+      "url": "https://<TAILNET_HOST>/?token=<VOICE_TOKEN>",
+      "requires": "tailscale serve --bg 8787",
+      "note": "Без https браузер не даст микрофон."
+    }
+  },
+
+  "verification_checklist": [
+    {"check": "тесты проходят", "how": "pytest tests -q"},
+    {"check": "демон печатает code: ready", "how": "вывод при старте"},
+    {"check": "healthz отвечает ok", "how": "curl"},
+    {"check": "телефон подключился", "how": "в логе демона появляется welcome при подключении приложения"},
+    {"check": "голосовая реплика доходит", "how": "сказать «Клод, скажи привет» и увидеть строку в логе"}
+  ],
+
+  "report_to_user": {
+    "format": "короткий список, без вывода команд",
+    "must_include": [
+      "адрес, который вводить в приложении на телефоне",
+      "VOICE_TOKEN целиком",
+      "какой каталог выбран рабочим для Claude Code",
+      "запущен ли автозапуск или демон живёт только пока открыт терминал",
+      "что именно проверено: тесты, healthz, подключение телефона"
+    ],
+    "phrasing_hint": "Пользователь не хочет читать логи — скажи, что работает, что вводить и чего пока нет."
+  },
+
+  "constraints": {
+    "never": [
+      "коммитить VOICE_TOKEN, CLAUDE_CODE_OAUTH_TOKEN или GITHUB_TOKEN в репозиторий",
+      "открывать порт демона в интернет без Tailscale",
+      "отключать проверку токена, чтобы «было проще»",
+      "менять пороги в spec/voice-shell.json, чтобы обойти тест — сначала разберись, почему тест красный"
+    ],
+    "ask_before": [
+      "любые изменения вне каталога ~/voice-shell",
+      "установка системных пакетов",
+      "настройка автозапуска"
+    ]
+  },
+
+  "troubleshooting": [
+    {"symptom": "code: stub при старте", "cause": "нет авторизации Claude на машине", "fix": "claude setup-token, затем экспортировать CLAUDE_CODE_OAUTH_TOKEN перед запуском демона"},
+    {"symptom": "телефон пишет bad token", "cause": "VOICE_TOKEN в приложении и у демона разные", "fix": "сверить строки целиком, без пробелов по краям"},
+    {"symptom": "браузер не даёт микрофон", "cause": "открыт http", "fix": "tailscale serve --bg 8787 и заходить по https"},
+    {"symptom": "приложение не подключается из другой сети", "cause": "телефон не в tailnet", "fix": "поставить Tailscale на телефон и войти тем же аккаунтом"},
+    {"symptom": "порт занят", "cause": "демон уже запущен", "fix": "найти процесс voice_claude и остановить, либо --port 8788"}
+  ],
+
+  "next_steps_after_success": [
+    "Спросить пользователя, какой проект вести голосом по умолчанию, и запомнить его как рабочий каталог.",
+    "Предложить preapproved policy для безопасных команд, чтобы не переспрашивать о каждом запуске тестов.",
+    "Сообщить, что облачный сервис на Render можно оставить как запасной вход или погасить."
+  ]
+}
