@@ -101,11 +101,21 @@ class SetupTokenFlow:
             self.token_timeout_s)
         match = TOKEN_RE.search(strip_ansi(raw))
         if not match:
+            detail = self._tail(raw)
             self.close()
-            raise SetupError("код не принят или токен не выдан")
+            raise SetupError(f"код не принят или токен не выдан. CLI ответил: {detail}"
+                             if detail else "код не принят или токен не выдан")
         token = match.group(0)
         self.close()
         return token
+
+    @staticmethod
+    def _tail(raw: str, limit: int = 220) -> str:
+        """Последние осмысленные строки вывода — чтобы не гадать, что пошло не так."""
+        lines = [line.strip() for line in strip_ansi(raw).splitlines() if line.strip()]
+        skip = ("paste code here", "welcome", "browser didn", "hold shift", "this will guide")
+        useful = [line for line in lines if not any(s in line.lower() for s in skip)]
+        return " / ".join(useful[-3:])[:limit]
 
     def close(self) -> None:
         if self._process is not None and self._process.poll() is None:

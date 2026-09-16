@@ -53,3 +53,15 @@ def test_nothing_is_invented_when_there_is_no_url():
 
 def test_ansi_stripping_leaves_the_prompt_readable():
     assert "Paste" in strip_ansi(WRAPPED_WITH_OSC8)
+
+
+def test_failure_reports_what_the_cli_said():
+    """Иначе «код не принят» — это гадание вместо диагноза."""
+    from voice_claude.auth import SetupTokenFlow
+
+    raw = ("Welcome to Claude Code\r\n"
+           "Paste code here if prompted > abc\r\n"
+           "\x1b[31mError: OAuth token exchange failed: authorization code expired\x1b[39m\r\n")
+    detail = SetupTokenFlow._tail(raw)
+    assert "authorization code expired" in detail
+    assert "Welcome" not in detail

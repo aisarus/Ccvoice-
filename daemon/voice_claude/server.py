@@ -32,6 +32,7 @@ from .targets import ChatTarget, CodeTarget, NoteTarget, TargetSet
 log = logging.getLogger("voice-claude")
 PROTOCOL_VERSION = 1
 CLIENT_DIR = Path(__file__).resolve().parents[2] / "client" / "web"
+EXTRA_TYPES = {".webmanifest": "application/manifest+json", ".svg": "image/svg+xml"}
 
 
 @dataclass
@@ -386,7 +387,8 @@ def static_response(path: str, directory: Path = CLIENT_DIR) -> Response:
     if directory.resolve() not in target.parents or not target.is_file():
         return http_response(http.HTTPStatus.NOT_FOUND, b"not found\n", "text/plain; charset=utf-8")
     body = target.read_bytes()
-    content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    content_type = EXTRA_TYPES.get(target.suffix) or \
+        mimetypes.guess_type(target.name)[0] or "application/octet-stream"
     if content_type.startswith(("text/", "application/javascript")):
         content_type += "; charset=utf-8"
     return http_response(http.HTTPStatus.OK, body, content_type)

@@ -1,0 +1,14 @@
+{
+  "name": "Voice Shell",
+  "short_name": "Voice",
+  "description": "Голосовая оболочка над Claude Code",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

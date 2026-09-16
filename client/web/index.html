@@ -3,36 +3,46 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
 <title>Voice Shell</title>
 <style>
   :root{
     --bg:#0d1117; --panel:#161b22; --line:#30363d; --text:#e6edf3; --dim:#8b949e;
-    --master:#3fb950; --bystander:#d29922; --unknown:#8b949e; --code:#58a6ff; --chat:#bc8cff;
+    --master:#3fb950; --bystander:#d29922; --code:#58a6ff; --chat:#bc8cff; --err:#f85149;
   }
   *{box-sizing:border-box}
-  body{margin:0;padding:16px;background:var(--bg);color:var(--text);
+  body{margin:0;padding:16px calc(16px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
+       background:var(--bg);color:var(--text);
        font:15px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;-webkit-tap-highlight-color:transparent}
   h1{font-size:15px;margin:0 0 12px;letter-spacing:.08em;color:var(--dim);text-transform:uppercase}
   .row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
   .chip{padding:6px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);
-        color:var(--dim);font-size:13px;cursor:pointer}
+        color:var(--dim);font:inherit;font-size:13px;cursor:pointer}
   .chip[aria-pressed="true"]{color:var(--text);border-color:var(--code)}
+  .chip:focus-visible{outline:2px solid var(--code);outline-offset:2px}
   #state{display:flex;align-items:center;gap:8px;padding:10px 14px;border:1px solid var(--line);
          border-radius:10px;background:var(--panel);margin-bottom:12px}
-  #dot{width:10px;height:10px;border-radius:50%;background:var(--dim)}
+  #dot{width:10px;height:10px;border-radius:50%;background:var(--dim);flex:none}
   #dot.LISTENING{background:var(--master)} #dot.THINKING{background:var(--code)}
   #dot.SPEAKING{background:var(--chat)} #dot.WORKING{background:var(--bystander)}
-  #ptt{width:100%;padding:28px;font:inherit;font-size:17px;border-radius:14px;border:1px solid var(--line);
-       background:var(--panel);color:var(--text);touch-action:manipulation}
+  input{padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:var(--panel);
+        color:var(--text);font:inherit;font-size:13px;flex:1;min-width:160px}
+  #ptt{width:100%;padding:30px;font:inherit;font-size:17px;border-radius:14px;border:1px solid var(--line);
+       background:var(--panel);color:var(--text);touch-action:manipulation;cursor:pointer}
   #ptt.on{border-color:var(--master);color:var(--master)}
+  #ptt:focus-visible{outline:2px solid var(--code);outline-offset:2px}
   #meter{height:6px;border-radius:3px;background:var(--line);margin:12px 0;overflow:hidden}
   #meterfill{height:100%;width:0;background:var(--master);transition:width .06s linear}
   #log{margin-top:12px;display:flex;flex-direction:column;gap:8px}
   .msg{padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
   .msg .who{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
   .msg.master .who{color:var(--master)} .msg.bystander .who{color:var(--bystander)}
-  .msg.code .who{color:var(--code)} .msg.chat .who{color:var(--chat)}
-  .hint{color:var(--dim);font-size:12px}
+  .msg.code .who{color:var(--code)} .msg.chat .who{color:var(--chat)} .msg.error .who{color:var(--err)}
+  .hint{color:var(--dim);font-size:12px;margin:8px 0 0}
+  .box{padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);margin-bottom:12px}
+  a.chip{text-decoration:none;display:inline-block}
 </style>
 </head>
 <body>
@@ -41,225 +51,314 @@
 <div id="state"><span id="dot"></span><span id="statetext">не подключено</span></div>
 
 <div class="row" id="tokenrow" hidden>
-  <input id="tokeninput" placeholder="токен доступа" autocomplete="off"
-         style="flex:1;min-width:180px;padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--text);font:inherit;font-size:13px">
-  <button class="chip" id="tokensave">сохранить</button>
+  <input id="tokeninput" placeholder="токен доступа" autocomplete="off">
+  <button class="chip" id="tokensave" type="button">сохранить</button>
 </div>
 
 <div class="row">
-  <button class="chip" id="t-auto" aria-pressed="true">авто</button>
-  <button class="chip" id="t-code" aria-pressed="false">код</button>
-  <button class="chip" id="t-chat" aria-pressed="false">чат</button>
-  <button class="chip" id="t-note" aria-pressed="false">заметка</button>
-  <button class="chip" id="ambient" aria-pressed="false">ambient: off</button>
-  <button class="chip" id="bystander" hidden aria-pressed="false">чужие реплики: выкл</button>
+  <button class="chip" id="t-auto" aria-pressed="true" type="button">авто</button>
+  <button class="chip" id="t-code" aria-pressed="false" type="button">код</button>
+  <button class="chip" id="t-chat" aria-pressed="false" type="button">чат</button>
+  <button class="chip" id="t-note" aria-pressed="false" type="button">заметка</button>
+</div>
+
+<div class="row">
+  <button class="chip" id="follow" aria-pressed="true" type="button">разговор: вкл</button>
+  <button class="chip" id="always" aria-pressed="false" type="button">слушать всегда: выкл</button>
+  <button class="chip" id="ambient" aria-pressed="false" type="button">ambient: off</button>
+  <button class="chip" id="bystander" hidden aria-pressed="false" type="button">чужие реплики: выкл</button>
 </div>
 <p class="hint" id="bystanderhint" hidden>
-  Запись чужой речи требует согласия собеседников — во многих юрисдикциях это
-  обязательно. Буфер живёт 10 минут и стирается при выключении ambient.
+  Запись чужой речи требует согласия собеседников — во многих юрисдикциях это обязательно.
+  Буфер живёт 10 минут и стирается при выключении ambient.
 </p>
 
-<div id="authbox" hidden style="padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);margin-bottom:12px">
-  <div style="color:var(--dim);font-size:13px;margin-bottom:8px" id="authtext">
+<div class="box" id="authbox" hidden>
+  <div class="hint" id="authtext" style="margin:0 0 8px">
     Claude не подключён. Можно подключить подписку — API-ключ не нужен.
   </div>
   <div class="row" style="margin:0">
-    <button class="chip" id="authstart">подключить подписку</button>
+    <button class="chip" id="authstart" type="button">подключить подписку</button>
     <a class="chip" id="authlink" hidden target="_blank" rel="noopener">открыть авторизацию ↗</a>
   </div>
   <div class="row" id="authcoderow" hidden style="margin:8px 0 0">
-    <input id="authcode" placeholder="вставь код со страницы" autocomplete="off"
-           style="flex:1;min-width:180px;padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:inherit;font-size:13px">
-    <button class="chip" id="authsend">готово</button>
+    <input id="authcode" placeholder="вставь код со страницы" autocomplete="off">
+    <button class="chip" id="authsend" type="button">готово</button>
   </div>
   <div id="authtoken" hidden style="margin-top:8px">
-    <div style="color:var(--dim);font-size:12px;margin-bottom:6px">
-      Работает сразу. Чтобы пережило перезапуск — вставь это в Render → Environment →
+    <div class="hint" style="margin:0 0 6px">
+      Работает сразу. Чтобы пережило перезапуск — вставь в Render → Environment →
       <code>CLAUDE_CODE_OAUTH_TOKEN</code>.
     </div>
     <div class="row" style="margin:0">
-      <input id="authtokenvalue" readonly style="flex:1;min-width:180px;padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:inherit;font-size:12px">
-      <button class="chip" id="authcopy">копировать</button>
+      <input id="authtokenvalue" readonly>
+      <button class="chip" id="authcopy" type="button">копировать</button>
     </div>
   </div>
 </div>
 
-<button id="ptt">удерживай и говори</button>
+<button id="ptt" type="button">нажми и говори</button>
 <div id="meter"><div id="meterfill"></div></div>
-<p class="hint" id="hint">S0: push-to-talk, STT и TTS браузера, роль по уровню сигнала.</p>
+<p class="hint" id="hint">подключаюсь…</p>
+<p class="hint" id="mediahint">кнопка наушников: не активна — нажми большую кнопку один раз</p>
 <div id="log"></div>
 
 <script>
+"use strict";
 const qs = new URLSearchParams(location.search);
-/* Same origin as the page: on a hosted deployment that means wss:// over the
-   platform's TLS, which is also what getUserMedia and SpeechRecognition need. */
 const WS_URL = qs.get("ws") || `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}`;
 let TOKEN = qs.get("token") || localStorage.getItem("vs_token") || "";
 if (qs.get("token")) {
-  localStorage.setItem("vs_token", qs.get("token"));
-  history.replaceState(null, "", location.pathname);   // keep the token out of history
+  try { localStorage.setItem("vs_token", qs.get("token")); } catch (e) {}
+  history.replaceState(null, "", location.pathname);
 }
 
 const el = id => document.getElementById(id);
-let ws, audioCtx, analyser, micStream, recog;
-let speaking = false, holding = false;
-let noiseFloor = -60, baseline = null, lastLevel = -60, segStart = 0;
+const WAKE_WORDS = ["клод", "клода", "клоуд", "cloud", "claude", "код"];
+const FOLLOW_MS = 15000;
 
-/* ---------- earcons ---------- */
+let ws = null, recog = null, audioCtx = null, analyser = null;
+let listening = false, speaking = false, connected = false;
+let followUntil = 0, always = false, follow = true;
+let noiseFloor = -60, baseline = null, seg = null;
+
+/* ---------- звуки ---------- */
 function earcon(kind){
-  const ctx = audioCtx || (audioCtx = new (window.AudioContext||window.webkitAudioContext)());
-  const tones = {activation:[[880,0.09]], accepted:[[560,0.05]], error:[[300,0.14]],
-                 needs_approval:[[740,0.06],[740,0.06]], finished:[[660,0.1],[990,0.12]],
-                 to_code:[[420,0.06]], to_chat:[[900,0.06]]}[kind] || [[700,0.06]];
-  let t = ctx.currentTime;
-  for (const [freq, dur] of tones){
-    const osc = ctx.createOscillator(), gain = ctx.createGain();
-    osc.frequency.value = freq; osc.type = "sine";
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.25, t + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    osc.connect(gain).connect(ctx.destination); osc.start(t); osc.stop(t + dur + 0.02);
-    t += dur + 0.04;
+  try {
+    const ctx = audioCtx || (audioCtx = new (window.AudioContext || window.webkitAudioContext)());
+    const tones = {activation:[[880,.09]], accepted:[[560,.05]], error:[[300,.14]],
+                   needs_approval:[[740,.06],[740,.06]], finished:[[660,.1],[990,.12]],
+                   to_code:[[420,.06]], to_chat:[[900,.06]]}[kind] || [[700,.06]];
+    let t = ctx.currentTime;
+    for (const [freq, dur] of tones){
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.frequency.value = freq; osc.type = "sine";
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.25, t + .01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      osc.connect(gain).connect(ctx.destination); osc.start(t); osc.stop(t + dur + .02);
+      t += dur + .04;
+    }
+  } catch (e) {}
+}
+
+/* ---------- кнопка наушников через медиа-сессию ---------- */
+function silentTrack(seconds){
+  const rate = 8000, samples = rate * seconds, buf = new ArrayBuffer(44 + samples * 2);
+  const view = new DataView(buf);
+  const str = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  str(0, "RIFF"); view.setUint32(4, 36 + samples * 2, true); str(8, "WAVE");
+  str(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true); view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true);
+  view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  str(36, "data"); view.setUint32(40, samples * 2, true);
+  return URL.createObjectURL(new Blob([buf], {type: "audio/wav"}));
+}
+
+let mediaAudio = null;
+async function armHeadsetButton(){
+  if (mediaAudio || !("mediaSession" in navigator)) return;
+  try {
+    mediaAudio = new Audio(silentTrack(2));
+    mediaAudio.loop = true; mediaAudio.volume = 0.0001;
+    await mediaAudio.play();
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: "Voice Shell", artist: "Claude", album: "голосовая оболочка"
+    });
+    navigator.mediaSession.playbackState = "playing";
+    for (const action of ["play", "pause", "stop", "nexttrack", "previoustrack"]){
+      try { navigator.mediaSession.setActionHandler(action, () => { toggleListen(); }); } catch (e) {}
+    }
+    el("mediahint").textContent = "кнопка наушников: активна — нажатие начинает и заканчивает реплику";
+  } catch (e) {
+    mediaAudio = null;
+    el("mediahint").textContent = "кнопка наушников: не включилась (" + (e.name || e) + ")";
   }
 }
 
-/* ---------- mic metering: level, noise floor, HF ratio ---------- */
+/* ---------- микрофон: уровень, шумовой пол, ВЧ ---------- */
 async function startMeter(){
-  micStream = await navigator.mediaDevices.getUserMedia({audio:{
+  const stream = await navigator.mediaDevices.getUserMedia({audio:{
     echoCancellation:true, noiseSuppression:false, autoGainControl:false}});
-  audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)();
-  const src = audioCtx.createMediaStreamSource(micStream);
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  const src = audioCtx.createMediaStreamSource(stream);
   analyser = audioCtx.createAnalyser(); analyser.fftSize = 1024;
   src.connect(analyser);
   const time = new Float32Array(analyser.fftSize), freq = new Float32Array(analyser.frequencyBinCount);
-  let peak = -90, hf = 0, frames = 0;
   setInterval(() => {
     analyser.getFloatTimeDomainData(time); analyser.getFloatFrequencyData(freq);
-    let sum = 0; for (const v of time) sum += v*v;
-    const db = 20*Math.log10(Math.sqrt(sum/time.length) + 1e-9);
-    lastLevel = db;
+    let sum = 0; for (const v of time) sum += v * v;
+    const db = 20 * Math.log10(Math.sqrt(sum / time.length) + 1e-9);
     el("meterfill").style.width = Math.max(0, Math.min(100, (db + 60) / 60 * 100)) + "%";
-    if (!holding) noiseFloor = Math.min(-25, noiseFloor*0.98 + db*0.02);
-    if (holding){
-      peak = Math.max(peak, db); frames++;
-      const bin = audioCtx.sampleRate / analyser.fftSize;
-      let lo = 0, hi = 0, nlo = 0, nhi = 0;
-      freq.forEach((v,i) => { const f = i*bin;
-        if (f>200 && f<1000){ lo += v; nlo++; } else if (f>2000 && f<8000){ hi += v; nhi++; } });
-      hf = (nhi? hi/nhi : 0) - (nlo? lo/nlo : 0);
-      window.__seg = {peak, hf, frames};
-    } else { peak = -90; frames = 0; }
+    if (!listening) { noiseFloor = Math.min(-25, noiseFloor * .98 + db * .02); return; }
+    const bin = audioCtx.sampleRate / analyser.fftSize;
+    let lo = 0, hi = 0, nlo = 0, nhi = 0;
+    freq.forEach((v, i) => { const f = i * bin;
+      if (f > 200 && f < 1000){ lo += v; nlo++; } else if (f > 2000 && f < 8000){ hi += v; nhi++; } });
+    seg = seg || {peak:-90, hf:0, frames:0, start:Date.now()};
+    seg.peak = Math.max(seg.peak, db);
+    seg.hf = (nhi ? hi / nhi : 0) - (nlo ? lo / nlo : 0);
+    seg.frames++;
   }, 50);
 }
 
 function features(){
-  const seg = window.__seg || {peak:lastLevel, hf:0, frames:10};
-  if (baseline === null && seg.peak > -45) baseline = seg.peak;   // first close utterance calibrates
-  return {
-    level_rel_db: seg.peak - (baseline ?? seg.peak),
-    snr_db: seg.peak - noiseFloor,
-    hf_ratio_db: seg.hf,
-    lf_proximity_db: 2.0
-  };
+  const s = seg || {peak:-30, hf:0, frames:20, start:Date.now()};
+  if (baseline === null && s.peak > -45) baseline = s.peak;
+  return {level_rel_db: s.peak - (baseline === null ? s.peak : baseline),
+          snr_db: s.peak - noiseFloor, hf_ratio_db: s.hf, lf_proximity_db: 2.0};
 }
 
-/* ---------- speech recognition ---------- */
-function startRecognition(){
+/* ---------- слушание ---------- */
+function ensureRecognition(){
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR){ addMsg("system", "браузер без SpeechRecognition — используй Chrome на Android"); return; }
-  recog = new SR(); recog.lang = "ru-RU"; recog.interimResults = false; recog.continuous = false;
-  recog.onresult = e => {
-    const text = e.results[e.results.length-1][0].transcript.trim();
+  if (!SR){ el("hint").textContent = "нужен Chrome: этот браузер не умеет распознавание речи"; return null; }
+  if (recog) return recog;
+  recog = new SR();
+  recog.lang = "ru-RU"; recog.interimResults = false; recog.continuous = false;
+  recog.onresult = ev => {
+    const text = (ev.results[ev.results.length - 1][0].transcript || "").trim();
     if (!text) return;
-    addMsg("master", text);
-    send({id:"speech_segment", segment_id: String(Date.now()), transcript: text,
-          device:"phone_mic", duration_ms: Date.now()-segStart,
-          voiced_frames: (window.__seg?.frames ?? 30), features: features()});
+    if (always && !wakeMatched(text)) { addMsg("мимо", text, "bystander"); return; }
+    const payload = stripWake(text);
+    addMsg("я", payload, "master");
     earcon("accepted");
+    const s = seg || {frames:20, start:Date.now()};
+    send({id:"speech_segment", segment_id:String(Date.now()), transcript:payload,
+          device:"phone_mic", duration_ms:Math.max(400, Date.now() - (s.start || Date.now())),
+          voiced_frames:Math.max(12, s.frames || 20), features:features()});
   };
-  recog.onerror = () => earcon("error");
-  recog.start();
+  recog.onerror = ev => {
+    if (ev.error === "not-allowed"){ el("hint").textContent = "микрофон запрещён — разреши в настройках сайта"; }
+    else if (ev.error !== "no-speech" && ev.error !== "aborted"){ earcon("error"); }
+  };
+  recog.onend = () => {
+    listening = false; seg = null; paintButton();
+    if (always) { setTimeout(startListen, 250); return; }
+    if (follow && Date.now() < followUntil) setTimeout(startListen, 150);
+  };
+  return recog;
 }
 
-/* ---------- push to talk ---------- */
-const ptt = el("ptt");
-function holdStart(ev){
-  ev.preventDefault();
+function wakeMatched(text){
+  const first = text.toLowerCase().replace(/[^\wа-яё\s]/gi, " ").trim().split(/\s+/)[0] || "";
+  return WAKE_WORDS.includes(first);
+}
+function stripWake(text){
+  if (!wakeMatched(text)) return text;
+  return text.replace(/^[^\wа-яё]*[\wа-яё]+[\s,.!?]*/i, "").trim() || text;
+}
+
+function startListen(){
+  const r = ensureRecognition();
+  if (!r || listening) return;
   if (speaking){ speechSynthesis.cancel(); speaking = false; send({id:"barge_in", ts:Date.now()}); }
-  holding = true; segStart = Date.now(); ptt.classList.add("on"); ptt.textContent = "говори…";
-  earcon("activation"); startRecognition();
+  seg = {peak:-90, hf:0, frames:0, start:Date.now()};
+  try { r.start(); listening = true; if (!always) earcon("activation"); paintButton(); }
+  catch (e) { /* уже запущено */ }
 }
-function holdEnd(){
-  if (!holding) return;
-  holding = false; ptt.classList.remove("on"); ptt.textContent = "удерживай и говори";
-  try { recog && recog.stop(); } catch(e){}
-}
-ptt.addEventListener("pointerdown", holdStart);
-ptt.addEventListener("pointerup", holdEnd);
-ptt.addEventListener("pointercancel", holdEnd);
+function stopListen(){ if (recog && listening) { try { recog.stop(); } catch (e) {} } }
+function toggleListen(){ armHeadsetButton(); listening ? stopListen() : startListen(); }
 
-/* ---------- targets & ambient ---------- */
+function paintButton(){
+  el("ptt").classList.toggle("on", listening);
+  el("ptt").textContent = listening ? "слушаю… нажми, чтобы закончить"
+                        : always ? "слушаю всегда — скажи «Клод…»"
+                        : "нажми и говори";
+}
+
+el("ptt").addEventListener("click", toggleListen);
+
+/* ---------- чипы ---------- */
 let forced = null;
 for (const id of ["auto","code","chat","note"]){
-  el("t-"+id).onclick = () => {
+  el("t-" + id).onclick = () => {
     forced = id === "auto" ? null : id;
     for (const other of ["auto","code","chat","note"])
-      el("t-"+other).setAttribute("aria-pressed", String(other === id));
-    send({id:"target_switch", target: forced});   // null возвращает авто-режим
+      el("t-" + other).setAttribute("aria-pressed", String(other === id));
+    send({id:"target_switch", target:forced});
   };
 }
+el("follow").onclick = () => {
+  follow = !follow;
+  el("follow").textContent = "разговор: " + (follow ? "вкл" : "выкл");
+  el("follow").setAttribute("aria-pressed", String(follow));
+};
+el("always").onclick = () => {
+  always = !always;
+  el("always").textContent = "слушать всегда: " + (always ? "вкл" : "выкл");
+  el("always").setAttribute("aria-pressed", String(always));
+  armHeadsetButton();
+  always ? startListen() : stopListen();
+  paintButton();
+};
 let ambient = "off", bystander = false;
 el("ambient").onclick = () => {
   ambient = {off:"passive", passive:"assist", assist:"off"}[ambient];
   el("ambient").textContent = "ambient: " + ambient;
   el("ambient").setAttribute("aria-pressed", String(ambient !== "off"));
   el("bystander").hidden = ambient === "off";
-  el("bystanderhint").hidden = ambient === "off" || !bystander;
-  if (ambient === "off"){ bystander = false; el("bystander").setAttribute("aria-pressed","false"); el("bystander").textContent = "чужие реплики: выкл"; }
-  send({id:"ambient_control", submode: ambient, bystander_transcript: bystander, wipe: ambient === "off"});
+  if (ambient === "off"){ bystander = false; el("bystander").textContent = "чужие реплики: выкл";
+                          el("bystander").setAttribute("aria-pressed","false"); el("bystanderhint").hidden = true; }
+  send({id:"ambient_control", submode:ambient, bystander_transcript:bystander, wipe:ambient === "off"});
 };
 el("bystander").onclick = () => {
   bystander = !bystander;
   el("bystander").textContent = "чужие реплики: " + (bystander ? "вкл" : "выкл");
   el("bystander").setAttribute("aria-pressed", String(bystander));
   el("bystanderhint").hidden = !bystander;
-  send({id:"ambient_control", bystander_transcript: bystander});
+  send({id:"ambient_control", bystander_transcript:bystander});
 };
 
-/* ---------- подключение подписки ---------- */
-el("authstart").onclick = () => {
-  el("authstart").textContent = "запрашиваю ссылку…";
-  send({id:"auth_start"});
-};
+/* ---------- подписка ---------- */
+el("authstart").onclick = () => { el("authstart").textContent = "запрашиваю ссылку…"; send({id:"auth_start"}); };
 el("authsend").onclick = () => {
   const code = el("authcode").value.trim();
-  if (code) send({id:"auth_code", code});
+  if (code) { el("authtext").textContent = "проверяю код…"; send({id:"auth_code", code}); }
 };
 el("authcopy").onclick = async () => {
   try { await navigator.clipboard.writeText(el("authtokenvalue").value); el("authcopy").textContent = "скопировано"; }
-  catch(e){ el("authtokenvalue").select(); }
+  catch (e) { el("authtokenvalue").select(); }
+};
+el("tokensave").onclick = () => {
+  TOKEN = el("tokeninput").value.trim();
+  if (!TOKEN) return;
+  try { localStorage.setItem("vs_token", TOKEN); } catch (e) {}
+  el("tokenrow").hidden = true;
+  if (ws) { try { ws.onclose = null; ws.close(); } catch (e) {} }
+  connect();
 };
 
-/* ---------- websocket ---------- */
-function send(obj){ ws && ws.readyState === 1 && ws.send(JSON.stringify(obj)); }
+/* ---------- связь ---------- */
+function send(obj){ if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
 function setState(s){ el("dot").className = s; el("statetext").textContent = s; }
 function addMsg(who, text, cls){
   const div = document.createElement("div");
   div.className = "msg " + (cls || who);
-  div.innerHTML = `<div class="who">${who}</div><div>${text.replace(/</g,"&lt;")}</div>`;
+  div.innerHTML = `<div class="who">${who}</div><div>${String(text).replace(/</g,"&lt;")}</div>`;
   el("log").prepend(div);
+  while (el("log").children.length > 40) el("log").lastChild.remove();
 }
 function speak(text){
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "ru-RU"; u.rate = 1.05;
-  u.onstart = () => speaking = true; u.onend = () => speaking = false;
+  u.onstart = () => { speaking = true; };
+  u.onend = () => {
+    speaking = false;
+    followUntil = Date.now() + FOLLOW_MS;
+    if (follow && !always) startListen();
+  };
   speechSynthesis.speak(u);
 }
 function connect(){
   ws = new WebSocket(WS_URL);
-  ws.onopen = () => { setState("IDLE"); send({id:"hello", v:1, token:TOKEN, device_id:"web", app_version:"0.2.0"}); };
-  ws.onclose = () => { setState("не подключено"); setTimeout(connect, 2000); };
+  ws.onopen = () => {
+    connected = true; setState("IDLE");
+    if (!TOKEN){ el("tokenrow").hidden = false; el("hint").textContent = "нужен токен доступа"; return; }
+    send({id:"hello", v:1, token:TOKEN, device_id:"web", app_version:"0.3.0"});
+  };
+  ws.onclose = () => { connected = false; setState("нет связи"); setTimeout(connect, 2000); };
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
     if (m.id === "welcome"){
@@ -270,22 +369,20 @@ function connect(){
     } else if (m.id === "state"){ setState(m.state);
     } else if (m.id === "route"){
       if (m.earcon) earcon(m.earcon);
-      if (!m.target) addMsg(m.label || m.reason, "реплика не исполнена (" + m.reason + ")", "bystander");
+      if (!m.target && m.reason !== "auto") addMsg(m.label || m.reason, "не исполнено: " + m.reason, "bystander");
     } else if (m.id === "voice_summary"){
       addMsg(m.target, m.text, m.target); speak(m.text);
       earcon(m.is_question ? "needs_approval" : "finished");
     } else if (m.id === "permission_request"){
-      earcon("needs_approval"); addMsg("approval", m.spoken); speak(m.spoken);
-      el("hint").textContent = "скажи «да» или «нет»";
+      earcon("needs_approval"); addMsg("разрешение", m.spoken, "code"); speak(m.spoken);
     } else if (m.id === "permission_result"){
       earcon(m.earcon || "accepted");
-      addMsg("approval", m.approved ? (m.remembered ? "разрешил и запомнил" : "разрешил") : "отклонил");
-      el("hint").textContent = "";
+      addMsg("разрешение", m.approved ? (m.remembered ? "разрешил и запомнил" : "разрешил") : "отклонил", "code");
     } else if (m.id === "auth_url"){
       el("authstart").hidden = true;
       el("authlink").hidden = false; el("authlink").href = m.url;
       el("authcoderow").hidden = false;
-      el("authtext").textContent = "Открой авторизацию, войди в свой аккаунт Claude и вставь код сюда.";
+      el("authtext").textContent = "Открой авторизацию, войди в аккаунт Claude и вставь код сюда. Код живёт недолго — вставляй сразу.";
     } else if (m.id === "auth_token"){
       el("authcoderow").hidden = true; el("authlink").hidden = true;
       el("authtoken").hidden = false; el("authtokenvalue").value = m.token;
@@ -294,29 +391,24 @@ function connect(){
       earcon("finished");
     } else if (m.id === "auth_error"){
       earcon("error");
-      el("authtext").textContent = "Не вышло: " + m.message + ". Попробуй ещё раз.";
-      el("authstart").hidden = false; el("authstart").textContent = "подключить подписку";
+      el("authtext").textContent = "Не вышло: " + m.message;
+      el("authstart").hidden = false; el("authstart").textContent = "подключить подписку заново";
       el("authcoderow").hidden = true; el("authlink").hidden = true;
-    } else if (m.id === "whisper"){ addMsg("whisper", m.text); speak(m.text);
+    } else if (m.id === "whisper"){ addMsg("шёпот", m.text, "chat"); speak(m.text);
     } else if (m.id === "error"){
-      earcon("error"); addMsg("error", m.message);
-      if (m.code === "unauthorized"){ localStorage.removeItem("vs_token"); TOKEN = ""; el("tokenrow").hidden = false; }
+      earcon("error"); addMsg("ошибка", m.message, "error");
+      if (m.code === "unauthorized"){
+        try { localStorage.removeItem("vs_token"); } catch (e) {}
+        TOKEN = ""; el("tokenrow").hidden = false;
+      }
     }
   };
 }
-el("tokensave").onclick = () => {
-  TOKEN = el("tokeninput").value.trim();
-  if (!TOKEN) return;
-  localStorage.setItem("vs_token", TOKEN);
-  el("tokenrow").hidden = true;
-  try { ws.close(); } catch(e){}
-  connect();
-};
 
-if (!window.isSecureContext && location.hostname !== "localhost"){
+if (!window.isSecureContext && location.hostname !== "localhost")
   el("hint").textContent = "нужен https: браузер не даст микрофон на http";
-}
-startMeter().catch(() => el("hint").textContent = "нет доступа к микрофону (нужен https и разрешение)");
+startMeter().catch(() => el("hint").textContent = "нет доступа к микрофону — разреши его в Chrome");
+paintButton();
 connect();
 </script>
 </body>
