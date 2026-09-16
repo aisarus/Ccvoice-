@@ -266,6 +266,7 @@ function connect(){
       const cred = {subscription:"подписка", api_key:"api-ключ", none:"нет доступа"}[m.credential] || m.credential;
       el("hint").textContent = `code: ${m.code_available?"ready":"stub"} · chat: ${m.chat_available?"ready":"stub"} · ${cred}`;
       el("authbox").hidden = m.credential !== "none";
+      el("tokenrow").hidden = true;
     } else if (m.id === "state"){ setState(m.state);
     } else if (m.id === "route"){
       if (m.earcon) earcon(m.earcon);

@@ -13,17 +13,53 @@ import pty
 import re
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b[()][B0]")
+# Ссылка в терминале печатается с переносами, поэтому видимый текст обрезан.
+# Целая ссылка лежит в OSC 8 — гиперссылке, которой терминал оборачивает вывод.
+OSC8_RE = re.compile(r"\x1b\]8;[^;]*;(https://[^\x1b\x07]+)")
 URL_RE = re.compile(r"https://[^\s\x1b\x07\]]+oauth/authorize[^\s\x1b\x07\]]*")
 TOKEN_RE = re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}")
+# Без этих параметров ссылка бесполезна: claude.ai ответит Invalid OAuth Request.
+REQUIRED_PARAMS = ("redirect_uri", "code_challenge", "state")
 
 SETUP_COMMAND = ("claude", "setup-token")
 
 
 def strip_ansi(text: str) -> str:
     return ANSI_RE.sub("", text)
+
+
+def _unwrap_candidates(text: str) -> list[str]:
+    """Склеивает ссылку, разорванную переносами строк."""
+    joined, buffer = [], ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if buffer:
+            if stripped and " " not in stripped:
+                buffer += stripped
+                continue
+            joined.append(buffer)
+            buffer = ""
+        match = URL_RE.search(stripped)
+        if match and stripped.endswith(match.group(0)):
+            buffer = match.group(0)      # строка кончилась ссылкой — возможно, перенос
+        elif match:
+            joined.append(match.group(0))
+    if buffer:
+        joined.append(buffer)
+    return joined
+
+
+def extract_auth_url(raw: str) -> str | None:
+    """Достаёт полную ссылку авторизации из вывода терминала."""
+    candidates = OSC8_RE.findall(raw)
+    candidates += _unwrap_candidates(strip_ansi(raw))
+    complete = [url for url in candidates
+                if "oauth/authorize" in url and all(p in url for p in REQUIRED_PARAMS)]
+    return max(complete, key=len) if complete else None
 
 
 class SetupError(RuntimeError):
@@ -41,26 +77,29 @@ class SetupTokenFlow:
     def __post_init__(self) -> None:
         self._master: int | None = None
         self._process: subprocess.Popen[bytes] | None = None
-        self._buffer = ""
+        self._raw = ""
 
     # -- публичный API ---------------------------------------------------
     async def start(self) -> str:
         """Запускает команду и возвращает OAuth-ссылку для телефона."""
         await asyncio.to_thread(self._spawn)
-        text = await asyncio.to_thread(self._read_until, URL_RE, self.url_timeout_s)
-        match = URL_RE.search(text)
-        if not match:
+        raw = await asyncio.to_thread(
+            self._read_until, lambda text: extract_auth_url(text) is not None, self.url_timeout_s)
+        url = extract_auth_url(raw)
+        if url is None:
             self.close()
             raise SetupError("не удалось получить ссылку авторизации")
-        return match.group(0)
+        return url
 
     async def submit(self, code: str) -> str:
         """Отдаёт код команде и возвращает долгоживущий токен."""
         if self._master is None:
             raise SetupError("флоу не запущен")
         await asyncio.to_thread(os.write, self._master, code.strip().encode() + b"\r")
-        text = await asyncio.to_thread(self._read_until, TOKEN_RE, self.token_timeout_s)
-        match = TOKEN_RE.search(text)
+        raw = await asyncio.to_thread(
+            self._read_until, lambda text: TOKEN_RE.search(strip_ansi(text)) is not None,
+            self.token_timeout_s)
+        match = TOKEN_RE.search(strip_ansi(raw))
         if not match:
             self.close()
             raise SetupError("код не принят или токен не выдан")
@@ -90,9 +129,9 @@ class SetupTokenFlow:
         )
         os.close(slave)
         self._master = master
-        self._buffer = ""
+        self._raw = ""
 
-    def _read_until(self, pattern: re.Pattern[str], timeout_s: float) -> str:
+    def _read_until(self, done: "Callable[[str], bool]", timeout_s: float) -> str:
         import select
 
         assert self._master is not None
@@ -109,10 +148,10 @@ class SetupTokenFlow:
                 break
             if not chunk:
                 break
-            self._buffer += strip_ansi(chunk.decode("utf-8", "replace"))
-            if pattern.search(self._buffer):
-                return self._buffer
-        return self._buffer
+            self._raw += chunk.decode("utf-8", "replace")
+            if done(self._raw):
+                return self._raw
+        return self._raw
 
 
 def credentials_present() -> bool:

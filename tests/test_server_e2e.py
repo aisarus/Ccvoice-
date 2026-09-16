@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+from pathlib import Path
 
 import pytest
 from websockets.asyncio.client import connect
@@ -189,14 +190,7 @@ def test_settings_read_the_deployment_environment(monkeypatch):
     assert settings.workspace_repo.endswith("repo.git")
 
 
-FAKE_SETUP = ["python3", "-c", """
-import sys
-print("https://claude.com/cai/oauth/authorize?code=true&client_id=demo&state=xyz")
-sys.stdout.write("Paste code here > "); sys.stdout.flush()
-code = sys.stdin.readline().strip()
-print("\\\\n" + ("sk-ant-oat01-" + "T"*40 if code == "good-code" else "Invalid code"))
-sys.stdout.flush()
-"""]
+FAKE_SETUP = ["python3", str(Path(__file__).resolve().parent / "fake_setup_token.py")]
 
 
 async def _auth_flow(code, token_env, tmp_path):
@@ -223,6 +217,8 @@ def test_subscription_can_be_connected_from_the_phone(tmp_path, monkeypatch):
     assert welcome["credential"] == "none"
     assert url_msg["id"] == "auth_url"
     assert url_msg["url"].startswith("https://claude.com/cai/oauth/authorize")
+    assert "redirect_uri=" in url_msg["url"]      # обрезанная ссылка ломает авторизацию
+    assert "code_challenge=" in url_msg["url"] and "state=" in url_msg["url"]
     assert result["id"] == "auth_token"
     assert result["token"].startswith("sk-ant-oat01-")
     assert result["credential"] == "subscription"
