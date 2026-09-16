@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate spec/voice-shell.v0.1.json.
+"""Validate spec/voice-shell.json.
 
 Runs JSON Schema validation when `jsonschema` is installed, and always runs
 stdlib-only consistency checks (cross-references between sections, threshold
@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SPEC = ROOT / "spec" / "voice-shell.v0.1.json"
+SPEC = ROOT / "spec" / "voice-shell.json"
 SCHEMA = ROOT / "spec" / "voice-shell.schema.json"
 
 
@@ -149,6 +149,63 @@ def consistency_check(spec, errors):
     if not spec["audio"]["capture"]["aec"]["enabled"]:
         errors.append("audio.capture.aec must be enabled: TTS echo would be read as speech")
 
+
+    # 13. Routing targets: ids unique, exactly one default, and it is non-mutating.
+    targets = spec["targets"]["list"]
+    tids = [t["id"] for t in targets]
+    if len(set(tids)) != len(tids):
+        errors.append("duplicate target ids: %s" % tids)
+    defaults = [t["id"] for t in targets if t.get("default")]
+    if defaults != ["chat"]:
+        errors.append("exactly one default target expected and it must be 'chat', got %s" % defaults)
+    router = spec["targets"]["router"]
+    if router["default_target"] not in tids:
+        errors.append("router.default_target %r is not a declared target" % router["default_target"])
+    default_target = next(t for t in targets if t["id"] == router["default_target"])
+    if default_target["mutating"]:
+        errors.append("router.default_target must be non-mutating: an ambiguous utterance "
+                      "must never execute anything")
+    for rule in router["explicit_prefix"]:
+        if rule["target"] not in tids:
+            errors.append("explicit_prefix rule routes to unknown target %r" % rule["target"])
+    if spec["config_defaults"]["targets"]["default_target"] != router["default_target"]:
+        errors.append("config_defaults.targets.default_target disagrees with router.default_target")
+
+    # 14. Ambient mode is off by default and keeps no raw audio.
+    amb = spec["ambient_mode"]
+    if amb["enabled_by_default"]:
+        errors.append("ambient_mode must be disabled by default")
+    submodes = {m["id"] for m in amb["submodes"]}
+    amb_defaults = [m["id"] for m in amb["submodes"] if m.get("default")]
+    if amb_defaults != ["off"]:
+        errors.append("ambient default submode must be 'off', got %s" % amb_defaults)
+    if spec["config_defaults"]["ambient"]["submode"] not in submodes:
+        errors.append("config_defaults.ambient.submode is not a declared submode")
+    if amb["buffer"]["raw_audio_retained"]:
+        errors.append("ambient buffer must not retain raw audio")
+    if spec["config_defaults"]["ambient"]["bystander_transcript"]:
+        errors.append("bystander transcript must default to off")
+    if spec["config_defaults"]["ambient"]["whisper_max_words"] != amb["whisper_output"]["max_words"]:
+        errors.append("whisper_max_words disagrees between config_defaults and ambient_mode")
+    for trig in amb["proactive"]["triggers"]:
+        if "assist" not in amb["proactive"]["enabled_in"]:
+            errors.append("proactive triggers declared but not enabled in any submode")
+            break
+
+    # 15. Discreet input must not rely on the wake word in company.
+    if spec["config_defaults"]["discreet"]["wake_word_in_ambient"]:
+        errors.append("wake word must default to off in ambient mode")
+    priorities = [c["priority"] for c in spec["discreet_input"]["channels"]]
+    if priorities.count("primary") != 1:
+        errors.append("discreet_input needs exactly one primary channel, got %s" % priorities)
+
+    # 16. Roadmap stages are ordered and each early stage states what it proves.
+    stage_ids = [st["id"] for st in spec["roadmap"]["stages"]]
+    if stage_ids != sorted(stage_ids, key=lambda s: int(s[1:])):
+        errors.append("roadmap stages are out of order: %s" % stage_ids)
+    for st in spec["roadmap"]["stages"][:5]:
+        if not st.get("proves"):
+            errors.append("roadmap stage %r must state what it proves" % st["id"])
 
 def main(argv):
     spec_path = Path(argv[1]) if len(argv) > 1 else SPEC

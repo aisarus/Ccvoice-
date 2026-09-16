@@ -4,39 +4,110 @@
   "title": "Voice Shell for Claude Code — spec schema",
   "type": "object",
   "required": [
-    "meta", "concept", "principles", "architecture", "activation", "audio",
-    "speaker_identification", "states", "conversation_window", "voice_formatter",
-    "command_passthrough", "daemon", "permissions", "interruptions",
-    "latency_targets", "background_work", "protocol", "config_defaults",
-    "definition_of_done"
+    "meta",
+    "concept",
+    "principles",
+    "architecture",
+    "activation",
+    "audio",
+    "speaker_identification",
+    "states",
+    "conversation_window",
+    "voice_formatter",
+    "command_passthrough",
+    "daemon",
+    "permissions",
+    "interruptions",
+    "latency_targets",
+    "background_work",
+    "protocol",
+    "config_defaults",
+    "definition_of_done",
+    "targets",
+    "ambient_mode",
+    "discreet_input",
+    "roadmap"
   ],
   "properties": {
-    "$schema": { "type": "string" },
+    "$schema": {
+      "type": "string"
+    },
     "meta": {
       "type": "object",
-      "required": ["id", "title", "version", "status"],
+      "required": [
+        "id",
+        "title",
+        "version",
+        "status"
+      ],
       "properties": {
-        "id": { "type": "string" },
-        "title": { "type": "string" },
-        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
-        "status": { "enum": ["draft", "review", "accepted", "superseded"] },
-        "spec_date": { "type": "string" },
-        "ux_languages": { "type": "array", "items": { "type": "string" } },
-        "primary_ux_language": { "type": "string" },
-        "license": { "type": "string" }
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "review",
+            "accepted",
+            "superseded"
+          ]
+        },
+        "spec_date": {
+          "type": "string"
+        },
+        "ux_languages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "primary_ux_language": {
+          "type": "string"
+        },
+        "license": {
+          "type": "string"
+        }
       }
     },
     "concept": {
       "type": "object",
-      "required": ["id", "summary", "chain"],
+      "required": [
+        "id",
+        "summary",
+        "chain"
+      ],
       "properties": {
-        "chain": { "type": "array", "items": { "type": "string" }, "minItems": 2 },
+        "chain": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2
+        },
         "canonical_interaction": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["actor", "text"],
-            "properties": { "actor": { "enum": ["user", "system", "claude"] } }
+            "required": [
+              "actor",
+              "text"
+            ],
+            "properties": {
+              "actor": {
+                "enum": [
+                  "user",
+                  "system",
+                  "claude"
+                ]
+              }
+            }
           }
         }
       }
@@ -46,90 +117,209 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["id", "statement"],
-        "properties": { "id": { "type": "string", "pattern": "^P[0-9]+$" } }
+        "required": [
+          "id",
+          "statement"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^P[0-9]+$"
+          }
+        }
       }
     },
     "architecture": {
       "type": "object",
-      "required": ["components", "transport", "dataflow"],
+      "required": [
+        "components",
+        "transport",
+        "dataflow"
+      ],
       "properties": {
         "components": {
           "type": "array",
           "minItems": 2,
           "items": {
             "type": "object",
-            "required": ["id", "name", "runs_on", "responsibilities"],
+            "required": [
+              "id",
+              "name",
+              "runs_on",
+              "responsibilities"
+            ],
             "properties": {
-              "runs_on": { "enum": ["phone", "desktop", "user"] },
-              "responsibilities": { "type": "array", "items": { "type": "string" } }
+              "runs_on": {
+                "enum": [
+                  "phone",
+                  "desktop",
+                  "user"
+                ]
+              },
+              "responsibilities": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
             }
           }
         },
         "transport": {
           "type": "object",
-          "required": ["protocol", "cloud_backend_required"],
-          "properties": { "cloud_backend_required": { "const": false } }
+          "required": [
+            "protocol",
+            "cloud_backend_required"
+          ],
+          "properties": {
+            "cloud_backend_required": {
+              "const": false
+            }
+          }
         }
       }
     },
     "activation": {
       "type": "object",
-      "required": ["universal_action", "methods"],
+      "required": [
+        "universal_action",
+        "methods"
+      ],
       "properties": {
         "methods": {
           "type": "array",
           "minItems": 3,
           "items": {
             "type": "object",
-            "required": ["id", "priority"],
-            "properties": { "priority": { "enum": ["primary", "shortcut", "fallback"] } }
+            "required": [
+              "id",
+              "priority"
+            ],
+            "properties": {
+              "priority": {
+                "enum": [
+                  "primary",
+                  "shortcut",
+                  "fallback"
+                ]
+              }
+            }
           }
         }
       }
     },
     "audio": {
       "type": "object",
-      "required": ["capture", "routing"],
+      "required": [
+        "capture",
+        "routing"
+      ],
       "properties": {
         "capture": {
           "type": "object",
-          "required": ["sample_rate_hz", "agc", "aec", "vad"],
+          "required": [
+            "sample_rate_hz",
+            "agc",
+            "aec",
+            "vad"
+          ],
           "properties": {
             "agc": {
               "type": "object",
-              "required": ["enabled"],
-              "properties": { "enabled": { "const": false } }
+              "required": [
+                "enabled"
+              ],
+              "properties": {
+                "enabled": {
+                  "const": false
+                }
+              }
             },
             "aec": {
               "type": "object",
-              "required": ["enabled"],
-              "properties": { "enabled": { "const": true } }
+              "required": [
+                "enabled"
+              ],
+              "properties": {
+                "enabled": {
+                  "const": true
+                }
+              }
             }
           }
         },
         "routing": {
           "type": "object",
-          "required": ["input_devices", "output_devices", "auto_policy"],
+          "required": [
+            "input_devices",
+            "output_devices",
+            "auto_policy"
+          ],
           "properties": {
-            "input_devices": { "type": "array", "items": { "enum": ["auto", "phone_mic", "sony_mic", "laptop_mic"] } },
-            "output_devices": { "type": "array", "items": { "enum": ["sony", "phone", "laptop"] } },
-            "sony_mic_required": { "const": false }
+            "input_devices": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "auto",
+                  "phone_mic",
+                  "sony_mic",
+                  "laptop_mic"
+                ]
+              }
+            },
+            "output_devices": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "sony",
+                  "phone",
+                  "laptop"
+                ]
+              }
+            },
+            "sony_mic_required": {
+              "const": false
+            }
           }
         }
       }
     },
     "speaker_identification": {
       "type": "object",
-      "required": ["goal", "design_rule", "roles", "signals", "scoring", "decision", "calibration", "policy", "claude_injection", "acceptance_criteria"],
+      "required": [
+        "goal",
+        "design_rule",
+        "roles",
+        "signals",
+        "scoring",
+        "decision",
+        "calibration",
+        "policy",
+        "claude_injection",
+        "acceptance_criteria"
+      ],
       "properties": {
         "roles": {
           "type": "array",
           "minItems": 4,
           "items": {
             "type": "object",
-            "required": ["id", "label_ru", "label_en", "description"],
-            "properties": { "id": { "enum": ["master", "bystander", "unknown", "self_echo"] } }
+            "required": [
+              "id",
+              "label_ru",
+              "label_en",
+              "description"
+            ],
+            "properties": {
+              "id": {
+                "enum": [
+                  "master",
+                  "bystander",
+                  "unknown",
+                  "self_echo"
+                ]
+              }
+            }
           }
         },
         "signals": {
@@ -137,24 +327,49 @@
           "minItems": 5,
           "items": {
             "type": "object",
-            "required": ["id", "name", "role", "measure", "why"],
-            "properties": { "role": { "enum": ["primary", "secondary", "optional", "bias"] } }
+            "required": [
+              "id",
+              "name",
+              "role",
+              "measure",
+              "why"
+            ],
+            "properties": {
+              "role": {
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "optional",
+                  "bias"
+                ]
+              }
+            }
           }
         },
         "scoring": {
           "type": "object",
-          "required": ["model", "formula", "weight_profiles"],
+          "required": [
+            "model",
+            "formula",
+            "weight_profiles"
+          ],
           "properties": {
             "weight_profiles": {
               "type": "array",
               "minItems": 1,
               "items": {
                 "type": "object",
-                "required": ["id", "weights"],
+                "required": [
+                  "id",
+                  "weights"
+                ],
                 "properties": {
                   "weights": {
                     "type": "object",
-                    "additionalProperties": { "type": "number", "minimum": 0 }
+                    "additionalProperties": {
+                      "type": "number",
+                      "minimum": 0
+                    }
                   }
                 }
               }
@@ -163,41 +378,95 @@
         },
         "decision": {
           "type": "object",
-          "required": ["thresholds", "hysteresis", "hard_gates"],
+          "required": [
+            "thresholds",
+            "hysteresis",
+            "hard_gates"
+          ],
           "properties": {
             "thresholds": {
               "type": "object",
-              "required": ["master_min_p", "bystander_max_p"],
+              "required": [
+                "master_min_p",
+                "bystander_max_p"
+              ],
               "properties": {
-                "master_min_p": { "type": "number", "minimum": 0, "maximum": 1 },
-                "bystander_max_p": { "type": "number", "minimum": 0, "maximum": 1 }
+                "master_min_p": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "bystander_max_p": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
               }
             },
             "hard_gates": {
               "type": "array",
               "minItems": 3,
-              "items": { "type": "object", "required": ["id", "rule"] }
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "rule"
+                ]
+              }
             }
           }
         },
         "policy": {
           "type": "object",
-          "required": ["roles_that_execute", "roles_that_can_wake", "roles_that_can_barge_in", "roles_that_can_answer_permission"],
+          "required": [
+            "roles_that_execute",
+            "roles_that_can_wake",
+            "roles_that_can_barge_in",
+            "roles_that_can_answer_permission"
+          ],
           "properties": {
-            "roles_that_execute": { "type": "array", "items": { "const": "master" } },
-            "roles_that_can_wake": { "type": "array", "items": { "const": "master" } },
-            "roles_that_can_barge_in": { "type": "array", "items": { "const": "master" } },
-            "roles_that_can_answer_permission": { "type": "array", "items": { "const": "master" } }
+            "roles_that_execute": {
+              "type": "array",
+              "items": {
+                "const": "master"
+              }
+            },
+            "roles_that_can_wake": {
+              "type": "array",
+              "items": {
+                "const": "master"
+              }
+            },
+            "roles_that_can_barge_in": {
+              "type": "array",
+              "items": {
+                "const": "master"
+              }
+            },
+            "roles_that_can_answer_permission": {
+              "type": "array",
+              "items": {
+                "const": "master"
+              }
+            }
           }
         },
         "claude_injection": {
           "type": "object",
-          "required": ["templates"],
+          "required": [
+            "templates"
+          ],
           "properties": {
             "templates": {
               "type": "object",
-              "required": ["master", "bystander", "unknown"],
-              "additionalProperties": { "type": "string" }
+              "required": [
+                "master",
+                "bystander",
+                "unknown"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
             }
           }
         }
@@ -205,148 +474,525 @@
     },
     "states": {
       "type": "object",
-      "required": ["enum", "definitions", "transitions", "earcons"],
+      "required": [
+        "enum",
+        "definitions",
+        "transitions",
+        "earcons"
+      ],
       "properties": {
         "enum": {
           "type": "array",
-          "items": { "enum": ["IDLE", "LISTENING", "THINKING", "SPEAKING", "WORKING"] },
+          "items": {
+            "enum": [
+              "IDLE",
+              "LISTENING",
+              "THINKING",
+              "SPEAKING",
+              "WORKING"
+            ]
+          },
           "minItems": 5,
           "maxItems": 5
         },
         "earcons": {
           "type": "array",
-          "items": { "type": "object", "required": ["id", "sound", "meaning"] }
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "sound",
+              "meaning"
+            ]
+          }
         }
       }
     },
     "conversation_window": {
       "type": "object",
-      "required": ["duration_s", "opens_after", "closes_on", "role_gate"],
-      "properties": { "duration_s": { "type": "number", "exclusiveMinimum": 0 } }
+      "required": [
+        "duration_s",
+        "opens_after",
+        "closes_on",
+        "role_gate"
+      ],
+      "properties": {
+        "duration_s": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
     },
     "voice_formatter": {
       "type": "object",
-      "required": ["rules", "applies_to", "never_applies_to"],
+      "required": [
+        "rules",
+        "applies_to",
+        "never_applies_to"
+      ],
       "properties": {
-        "applies_to": { "const": "output_of_claude_only" },
-        "never_applies_to": { "const": "речь пользователя" }
+        "applies_to": {
+          "const": "output_of_claude_only"
+        },
+        "never_applies_to": {
+          "const": "речь пользователя"
+        }
       }
     },
     "command_passthrough": {
       "type": "object",
-      "required": ["allowed_additions", "transcript_mutations_forbidden"]
+      "required": [
+        "allowed_additions",
+        "transcript_mutations_forbidden"
+      ]
     },
     "daemon": {
       "type": "object",
-      "required": ["name", "capabilities", "session_model"],
+      "required": [
+        "name",
+        "capabilities",
+        "session_model"
+      ],
       "properties": {
         "session_model": {
           "type": "object",
-          "required": ["one_long_lived_session", "never_spawn_per_request"],
+          "required": [
+            "one_long_lived_session",
+            "never_spawn_per_request"
+          ],
           "properties": {
-            "one_long_lived_session": { "const": true },
-            "never_spawn_per_request": { "const": true }
+            "one_long_lived_session": {
+              "const": true
+            },
+            "never_spawn_per_request": {
+              "const": true
+            }
           }
         }
       }
     },
     "permissions": {
       "type": "object",
-      "required": ["spoken_form", "answers", "safety"],
+      "required": [
+        "spoken_form",
+        "answers",
+        "safety"
+      ],
       "properties": {
         "safety": {
           "type": "object",
-          "required": ["only_master_can_answer", "min_confidence"],
+          "required": [
+            "only_master_can_answer",
+            "min_confidence"
+          ],
           "properties": {
-            "only_master_can_answer": { "const": true },
-            "min_confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+            "only_master_can_answer": {
+              "const": true
+            },
+            "min_confidence": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
           }
         }
       }
     },
     "interruptions": {
       "type": "object",
-      "required": ["barge_in", "commands"],
+      "required": [
+        "barge_in",
+        "commands"
+      ],
       "properties": {
         "barge_in": {
           "type": "object",
-          "required": ["enabled", "cutoff_ms", "requires_role"],
+          "required": [
+            "enabled",
+            "cutoff_ms",
+            "requires_role"
+          ],
           "properties": {
-            "enabled": { "const": true },
-            "requires_role": { "const": "master" }
+            "enabled": {
+              "const": true
+            },
+            "requires_role": {
+              "const": "master"
+            }
           }
         }
       }
     },
     "latency_targets": {
       "type": "object",
-      "required": ["unit", "targets"],
+      "required": [
+        "unit",
+        "targets"
+      ],
       "properties": {
         "targets": {
           "type": "array",
-          "items": { "type": "object", "required": ["id"] }
+          "items": {
+            "type": "object",
+            "required": [
+              "id"
+            ]
+          }
         }
       }
     },
     "background_work": {
       "type": "object",
-      "required": ["narration_policy", "events"],
+      "required": [
+        "narration_policy",
+        "events"
+      ],
       "properties": {
         "events": {
           "type": "array",
           "minItems": 4,
-          "items": { "type": "object", "required": ["id", "earcon", "spoken"] }
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "earcon",
+              "spoken"
+            ]
+          }
         }
       }
     },
     "protocol": {
       "type": "object",
-      "required": ["transport", "messages"],
+      "required": [
+        "transport",
+        "messages"
+      ],
       "properties": {
         "messages": {
           "type": "array",
           "minItems": 10,
           "items": {
             "type": "object",
-            "required": ["id", "dir"],
-            "properties": { "id": { "type": "string" } }
+            "required": [
+              "id",
+              "dir"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            }
           }
         }
       }
     },
     "config_defaults": {
       "type": "object",
-      "required": ["wake", "vad", "stt", "tts", "audio", "speaker_id"],
+      "required": [
+        "wake",
+        "vad",
+        "stt",
+        "tts",
+        "audio",
+        "speaker_id",
+        "targets",
+        "ambient",
+        "discreet"
+      ],
       "properties": {
         "speaker_id": {
           "type": "object",
-          "required": ["enabled", "master_min_p", "bystander_max_p", "bystander_mode", "unknown_mode"],
+          "required": [
+            "enabled",
+            "master_min_p",
+            "bystander_max_p",
+            "bystander_mode",
+            "unknown_mode"
+          ],
           "properties": {
-            "bystander_mode": { "enum": ["drop", "context"] },
-            "unknown_mode": { "enum": ["drop", "challenge_once", "context"] }
+            "bystander_mode": {
+              "enum": [
+                "drop",
+                "context"
+              ]
+            },
+            "unknown_mode": {
+              "enum": [
+                "drop",
+                "challenge_once",
+                "context"
+              ]
+            }
           }
         }
       }
     },
     "definition_of_done": {
       "type": "object",
-      "required": ["version", "setup", "scenario", "acceptance_criteria"],
+      "required": [
+        "version",
+        "setup",
+        "scenario",
+        "acceptance_criteria"
+      ],
       "properties": {
         "scenario": {
           "type": "array",
           "minItems": 5,
-          "items": { "type": "object", "required": ["step", "user", "expect"] }
+          "items": {
+            "type": "object",
+            "required": [
+              "step",
+              "user",
+              "expect"
+            ]
+          }
         },
         "acceptance_criteria": {
           "type": "array",
           "minItems": 3,
-          "items": { "type": "object", "required": ["id", "check"] }
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "check"
+            ]
+          }
         }
       }
     },
-    "multi_project": { "type": "object" },
-    "out_of_scope_v0_1": { "type": "array", "items": { "type": "string" } },
-    "risks": { "type": "array", "items": { "type": "object", "required": ["id", "risk", "mitigation"] } },
-    "open_questions": { "type": "array", "items": { "type": "object", "required": ["id", "question"] } }
+    "multi_project": {
+      "type": "object"
+    },
+    "out_of_scope_v0_1": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "risks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "risk",
+          "mitigation"
+        ]
+      }
+    },
+    "open_questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "question"
+        ]
+      }
+    },
+    "targets": {
+      "type": "object",
+      "required": [
+        "id",
+        "description",
+        "list",
+        "router"
+      ],
+      "properties": {
+        "list": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "name",
+              "backend",
+              "mutating",
+              "latency_budget_ms"
+            ],
+            "properties": {
+              "id": {
+                "enum": [
+                  "code",
+                  "chat",
+                  "note"
+                ]
+              },
+              "mutating": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "router": {
+          "type": "object",
+          "required": [
+            "order",
+            "default_target",
+            "safety_rule",
+            "classifier"
+          ],
+          "properties": {
+            "default_target": {
+              "const": "chat"
+            },
+            "order": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "explicit_prefix",
+                  "sticky_target",
+                  "classifier",
+                  "default_target"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "ambient_mode": {
+      "type": "object",
+      "required": [
+        "id",
+        "enabled_by_default",
+        "submodes",
+        "buffer",
+        "recall",
+        "whisper_output",
+        "consent_and_law"
+      ],
+      "properties": {
+        "enabled_by_default": {
+          "const": false
+        },
+        "submodes": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "description"
+            ]
+          }
+        },
+        "buffer": {
+          "type": "object",
+          "required": [
+            "duration_min",
+            "raw_audio_retained",
+            "wipe"
+          ],
+          "properties": {
+            "raw_audio_retained": {
+              "const": false
+            },
+            "duration_min": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
+        },
+        "whisper_output": {
+          "type": "object",
+          "required": [
+            "max_words",
+            "never_while_master_speaks"
+          ],
+          "properties": {
+            "max_words": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 25
+            },
+            "never_while_master_speaks": {
+              "const": true
+            }
+          }
+        },
+        "consent_and_law": {
+          "type": "object",
+          "required": [
+            "default_posture",
+            "note",
+            "controls"
+          ]
+        }
+      }
+    },
+    "discreet_input": {
+      "type": "object",
+      "required": [
+        "id",
+        "problem",
+        "channels",
+        "output_when_discreet"
+      ],
+      "properties": {
+        "channels": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "priority",
+              "description"
+            ],
+            "properties": {
+              "priority": {
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "fallback"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "roadmap": {
+      "type": "object",
+      "required": [
+        "id",
+        "stages",
+        "tech_choices"
+      ],
+      "properties": {
+        "stages": {
+          "type": "array",
+          "minItems": 5,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "name"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^S[0-9]+$"
+              }
+            }
+          }
+        },
+        "tech_choices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "area",
+              "choice",
+              "why"
+            ]
+          }
+        }
+      }
+    }
   }
 }
