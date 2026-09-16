@@ -25,7 +25,7 @@ Desktop daemon
 | [`scripts/validate_spec.py`](scripts/validate_spec.py) | Валидатор: схема + перекрёстные проверки согласованности |
 | [`daemon/`](daemon/) | `voice-claude-daemon`: роли говорящего, роутинг, формат речи, WebSocket |
 | [`client/web/`](client/web/index.html) | Клиент для Chrome на Android: push-to-talk, STT, TTS, earcons |
-| [`tests/`](tests/) | 54 теста, включая end-to-end по реальному протоколу |
+| [`tests/`](tests/) | 57 тестов, включая end-to-end по реальному протоколу |
 | [`Dockerfile`](Dockerfile) · [`render.yaml`](render.yaml) | Деплой одним нажатием, с телефона |
 | [`docs/DEPLOY.md`](docs/DEPLOY.md) | Пошаговый деплой без компьютера |
 
@@ -42,11 +42,15 @@ python3 scripts/validate_spec.py
 Браузер не даёт микрофон и распознавание речи на `http://` — нужен `https://`.
 Поэтому нормальный способ попробовать это без ПК — задеплоить.
 
-1. `console.anthropic.com` → создать API-ключ.
-2. `render.com` → Sign in with GitHub → **New +** → **Blueprint** → этот репозиторий → **Apply**.
+1. `render.com` → Sign in with GitHub → **New +** → **Blueprint** → этот репозиторий → **Apply**.
    Render прочитает [`render.yaml`](render.yaml) и соберёт [`Dockerfile`](Dockerfile).
-3. Вставить ключ в `ANTHROPIC_API_KEY`, забрать сгенерированный `VOICE_TOKEN`.
-4. Открыть в Chrome `https://<твой-сервис>.onrender.com/?token=<VOICE_TOKEN>`, разрешить микрофон.
+2. Забрать сгенерированный `VOICE_TOKEN` из **Environment**.
+3. Открыть в Chrome `https://<твой-сервис>.onrender.com/?token=<VOICE_TOKEN>`, разрешить микрофон.
+4. Нажать **подключить подписку** — приложение проведёт через `claude setup-token`
+   прямо с телефона и выдаст токен, который вставляется в `CLAUDE_CODE_OAUTH_TOKEN`.
+
+Отдельный API-ключ не нужен: работает твоя подписка Claude. `ANTHROPIC_API_KEY`
+остаётся альтернативой, если нужен отдельный биллинг.
 
 Пошагово, со всеми граблями (сон free-плана, GitHub-токен, чтобы работа не
 терялась, что уходит в Google при распознавании) — [`docs/DEPLOY.md`](docs/DEPLOY.md).
@@ -62,11 +66,12 @@ cd daemon && python -m voice_claude --workspace ~/твой-проект
 Клиент и WebSocket живут на одном порту (`8787` или `$PORT`), демон печатает
 токен при старте. На `http://` микрофон даст только `localhost`.
 
-Без `ANTHROPIC_API_KEY` цели `code` и `chat` отвечают заглушкой — петля проходит
-целиком, и в ухо приходит честное «Claude Code недоступен», а не выдуманный ответ.
+Без подключённой подписки (или `ANTHROPIC_API_KEY`) цели `code` и `chat` отвечают
+заглушкой — петля проходит целиком, и в ухо приходит честное «Claude недоступен»,
+а не выдуманный ответ.
 
 ```bash
-python3 -m pytest tests -q        # 54 passed
+python3 -m pytest tests -q        # 57 passed
 python3 scripts/validate_spec.py  # OK: voice-shell-for-claude-code v0.2.0
 ```
 

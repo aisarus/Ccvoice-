@@ -54,6 +54,31 @@
   <button class="chip" id="ambient" aria-pressed="false">ambient: off</button>
 </div>
 
+<div id="authbox" hidden style="padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);margin-bottom:12px">
+  <div style="color:var(--dim);font-size:13px;margin-bottom:8px" id="authtext">
+    Claude не подключён. Можно подключить подписку — API-ключ не нужен.
+  </div>
+  <div class="row" style="margin:0">
+    <button class="chip" id="authstart">подключить подписку</button>
+    <a class="chip" id="authlink" hidden target="_blank" rel="noopener">открыть авторизацию ↗</a>
+  </div>
+  <div class="row" id="authcoderow" hidden style="margin:8px 0 0">
+    <input id="authcode" placeholder="вставь код со страницы" autocomplete="off"
+           style="flex:1;min-width:180px;padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:inherit;font-size:13px">
+    <button class="chip" id="authsend">готово</button>
+  </div>
+  <div id="authtoken" hidden style="margin-top:8px">
+    <div style="color:var(--dim);font-size:12px;margin-bottom:6px">
+      Работает сразу. Чтобы пережило перезапуск — вставь это в Render → Environment →
+      <code>CLAUDE_CODE_OAUTH_TOKEN</code>.
+    </div>
+    <div class="row" style="margin:0">
+      <input id="authtokenvalue" readonly style="flex:1;min-width:180px;padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:inherit;font-size:12px">
+      <button class="chip" id="authcopy">копировать</button>
+    </div>
+  </div>
+</div>
+
 <button id="ptt">удерживай и говори</button>
 <div id="meter"><div id="meterfill"></div></div>
 <p class="hint" id="hint">S0: push-to-talk, STT и TTS браузера, роль по уровню сигнала.</p>
@@ -186,6 +211,20 @@ el("ambient").onclick = () => {
   send({id:"ambient_control", submode: ambient, wipe: ambient === "off"});
 };
 
+/* ---------- подключение подписки ---------- */
+el("authstart").onclick = () => {
+  el("authstart").textContent = "запрашиваю ссылку…";
+  send({id:"auth_start"});
+};
+el("authsend").onclick = () => {
+  const code = el("authcode").value.trim();
+  if (code) send({id:"auth_code", code});
+};
+el("authcopy").onclick = async () => {
+  try { await navigator.clipboard.writeText(el("authtokenvalue").value); el("authcopy").textContent = "скопировано"; }
+  catch(e){ el("authtokenvalue").select(); }
+};
+
 /* ---------- websocket ---------- */
 function send(obj){ ws && ws.readyState === 1 && ws.send(JSON.stringify(obj)); }
 function setState(s){ el("dot").className = s; el("statetext").textContent = s; }
@@ -209,7 +248,9 @@ function connect(){
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
     if (m.id === "welcome"){
-      el("hint").textContent = `code: ${m.code_available?"ready":"stub"} · chat: ${m.chat_available?"ready":"stub"} · ${m.active_session}`;
+      const cred = {subscription:"подписка", api_key:"api-ключ", none:"нет доступа"}[m.credential] || m.credential;
+      el("hint").textContent = `code: ${m.code_available?"ready":"stub"} · chat: ${m.chat_available?"ready":"stub"} · ${cred}`;
+      el("authbox").hidden = m.credential !== "none";
     } else if (m.id === "state"){ setState(m.state);
     } else if (m.id === "route"){
       if (m.earcon) earcon(m.earcon);
@@ -220,6 +261,22 @@ function connect(){
     } else if (m.id === "permission_request"){
       earcon("needs_approval"); addMsg("approval", m.spoken); speak(m.spoken);
       window.__approval = m.request_id;
+    } else if (m.id === "auth_url"){
+      el("authstart").hidden = true;
+      el("authlink").hidden = false; el("authlink").href = m.url;
+      el("authcoderow").hidden = false;
+      el("authtext").textContent = "Открой авторизацию, войди в свой аккаунт Claude и вставь код сюда.";
+    } else if (m.id === "auth_token"){
+      el("authcoderow").hidden = true; el("authlink").hidden = true;
+      el("authtoken").hidden = false; el("authtokenvalue").value = m.token;
+      el("authtext").textContent = "Подписка подключена.";
+      el("hint").textContent = `code: ${m.code_available?"ready":"stub"} · chat: ${m.chat_available?"ready":"stub"} · подписка`;
+      earcon("finished");
+    } else if (m.id === "auth_error"){
+      earcon("error");
+      el("authtext").textContent = "Не вышло: " + m.message + ". Попробуй ещё раз.";
+      el("authstart").hidden = false; el("authstart").textContent = "подключить подписку";
+      el("authcoderow").hidden = true; el("authlink").hidden = true;
     } else if (m.id === "whisper"){ addMsg("whisper", m.text); speak(m.text);
     } else if (m.id === "error"){
       earcon("error"); addMsg("error", m.message);

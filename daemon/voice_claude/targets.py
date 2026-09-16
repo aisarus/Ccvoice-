@@ -1,17 +1,20 @@
-"""Backends behind the routing targets.
+"""Бэкенды целей роутинга.
 
-`code` drives one long-lived Claude Code session through the Claude Agent SDK,
-`chat` is a separate conversational thread on the Messages API, `note` appends
-to a local inbox. Each backend degrades to an offline stub so the whole voice
-loop can be exercised without keys — the stub says so instead of pretending.
+Обе разговорные цели ходят через Claude Agent SDK, поэтому годится и подписка
+Claude (`CLAUDE_CODE_OAUTH_TOKEN`), и API-ключ: отдельный ключ с потокенной
+оплатой не обязателен. `code` — долгая сессия с инструментами и голосовыми
+подтверждениями, `chat` — та же авторизация, но инструменты выключены, поэтому
+цель ничего не может изменить. `note` пишет в локальный инбокс.
 """
 from __future__ import annotations
 
 import asyncio
-import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable
+
+from .auth import credential_kind, credentials_present
 
 PermissionHook = Callable[[str, dict[str, Any]], Awaitable[bool]]
 
@@ -24,46 +27,53 @@ class Reply:
     stubbed: bool = False
 
 
-class CodeTarget:
-    """One persistent Claude Code session. Never spawned per request."""
+def sdk_available() -> bool:
+    try:
+        import claude_agent_sdk  # noqa: F401
+    except ImportError:
+        return False
+    return credentials_present()
 
-    def __init__(self, workspace: str | Path, permission_hook: PermissionHook | None = None) -> None:
-        self.workspace = Path(workspace).expanduser()
-        self.permission_hook = permission_hook
+
+def _stub_reason() -> str:
+    try:
+        import claude_agent_sdk  # noqa: F401
+    except ImportError:
+        return "не установлен claude-agent-sdk"
+    return "не подключена подписка Claude"
+
+
+class _SdkTarget:
+    """Общая часть: одна долгая сессия, которую не пересоздают на каждый запрос."""
+
+    target_id = "sdk"
+
+    def __init__(self, cwd: str | Path) -> None:
+        self.cwd = Path(cwd).expanduser()
         self._client: Any | None = None
         self._lock = asyncio.Lock()
 
     @property
     def available(self) -> bool:
-        try:
-            import claude_agent_sdk  # noqa: F401
-        except ImportError:
-            return False
-        return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"))
+        return sdk_available()
+
+    def _options(self) -> Any:  # pragma: no cover - переопределяется
+        raise NotImplementedError
 
     async def connect(self) -> None:
         if self._client is not None or not self.available:
             return
-        from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient  # type: ignore
+        from claude_agent_sdk import ClaudeSDKClient  # type: ignore
 
-        async def can_use_tool(tool_name: str, input_data: dict[str, Any], _ctx: Any) -> Any:
-            from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny  # type: ignore
-            if self.permission_hook is None:
-                return PermissionResultAllow()
-            approved = await self.permission_hook(tool_name, input_data)
-            return PermissionResultAllow() if approved else PermissionResultDeny(message="Отклонено голосом")
-
-        options = ClaudeAgentOptions(cwd=str(self.workspace), can_use_tool=can_use_tool)
-        self._client = ClaudeSDKClient(options=options)
+        self.cwd.mkdir(parents=True, exist_ok=True)
+        self._client = ClaudeSDKClient(options=self._options())
         await self._client.connect()
 
     async def send(self, text: str, preamble: str = "", role_line: str = "") -> Reply:
-        message = "\n".join(p for p in (preamble, role_line, "", text) if p is not None).strip()
+        message = "\n".join(part for part in (preamble, role_line, "", text) if part).strip()
         if not self.available:
-            return Reply(
-                text="Claude Code недоступен: нет claude-agent-sdk или ключа.",
-                full_output=message, target="code", stubbed=True,
-            )
+            return Reply(text=f"Claude недоступен: {_stub_reason()}.",
+                         full_output=message, target=self.target_id, stubbed=True)
         await self.connect()
         async with self._lock:
             assert self._client is not None
@@ -75,56 +85,87 @@ class CodeTarget:
                     if chunk:
                         chunks.append(chunk)
         full = "\n".join(chunks)
-        return Reply(text=full, full_output=full, target="code")
+        return Reply(text=full, full_output=full, target=self.target_id)
 
     async def interrupt(self) -> None:
         if self._client is not None:
             await self._client.interrupt()
 
+    async def reset(self) -> None:
+        """Сбросить клиент — например, после того как подключили подписку."""
+        client, self._client = self._client, None
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:  # pragma: no cover - клиент мог уже умереть
+                pass
 
-class ChatTarget:
-    """Conversational Claude. Non-mutating, so it is the safe default route."""
 
-    def __init__(self, model: str = "claude-sonnet-5", system: str | None = None) -> None:
+class CodeTarget(_SdkTarget):
+    """Одна долгая Claude Code-сессия. Никогда не поднимается на каждый запрос."""
+
+    target_id = "code"
+
+    def __init__(self, workspace: str | Path, permission_hook: PermissionHook | None = None) -> None:
+        super().__init__(workspace)
+        self.permission_hook = permission_hook
+
+    @property
+    def workspace(self) -> Path:
+        return self.cwd
+
+    def _options(self) -> Any:
+        from claude_agent_sdk import ClaudeAgentOptions  # type: ignore
+
+        async def can_use_tool(tool_name: str, input_data: dict[str, Any], _ctx: Any) -> Any:
+            from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny  # type: ignore
+            if self.permission_hook is None:
+                return PermissionResultAllow()
+            approved = await self.permission_hook(tool_name, input_data)
+            return PermissionResultAllow() if approved else PermissionResultDeny(
+                message="Отклонено голосом")
+
+        return ClaudeAgentOptions(cwd=str(self.cwd), can_use_tool=can_use_tool)
+
+
+class ChatTarget(_SdkTarget):
+    """Разговорная цель: та же авторизация, но без инструментов, поэтому
+    ничего не меняет. Именно поэтому она безопасный дефолт роутера."""
+
+    target_id = "chat"
+
+    def __init__(self, cwd: str | Path | None = None, model: str | None = None,
+                 system: str | None = None) -> None:
+        super().__init__(cwd or Path(tempfile.gettempdir()) / "voice-claude-chat")
         self.model = model
         self.system = system or (
             "Ты голосовой собеседник в наушнике. Отвечай одним-двумя короткими "
-            "предложениями, без списков и разметки."
+            "предложениями, без списков и разметки. У тебя нет инструментов: "
+            "если для ответа нужно что-то сделать в репозитории, скажи об этом."
         )
-        self.history: list[dict[str, str]] = []
 
-    @property
-    def available(self) -> bool:
-        try:
-            import anthropic  # noqa: F401
-        except ImportError:
-            return False
-        return bool(os.environ.get("ANTHROPIC_API_KEY"))
+    def _options(self) -> Any:
+        from claude_agent_sdk import ClaudeAgentOptions  # type: ignore
 
-    async def send(self, text: str, preamble: str = "", role_line: str = "") -> Reply:
-        if not self.available:
-            return Reply(text="Чат недоступен: нет anthropic SDK или ключа.",
-                         full_output=text, target="chat", stubbed=True)
-        import anthropic  # type: ignore
-
-        client = anthropic.AsyncAnthropic()
-        self.history.append({"role": "user", "content": "\n".join(p for p in (role_line, text) if p)})
-        response = await client.messages.create(
-            model=self.model, max_tokens=300, system=self.system, messages=self.history,
-        )
-        spoken = "".join(block.text for block in response.content if block.type == "text")
-        self.history.append({"role": "assistant", "content": spoken})
-        del self.history[:-20]
-        return Reply(text=spoken, full_output=spoken, target="chat")
+        options: dict[str, Any] = {
+            "cwd": str(self.cwd),
+            "system_prompt": self.system,
+            "allowed_tools": [],
+            "max_turns": 1,
+        }
+        if self.model:
+            options["model"] = self.model
+        return ClaudeAgentOptions(**options)
 
 
 class NoteTarget:
-    """Capture a thought without an answer."""
+    """Захват мысли без ответа."""
+
+    target_id = "note"
+    available = True
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path).expanduser()
-
-    available = True
 
     async def send(self, text: str, preamble: str = "", role_line: str = "") -> Reply:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -145,3 +186,11 @@ class TargetSet:
 
     def __getitem__(self, target: str) -> Any:
         return self._by_id[target]
+
+    @property
+    def credential_kind(self) -> str:
+        return credential_kind()
+
+    async def reset_sessions(self) -> None:
+        await self.code.reset()
+        await self.chat.reset()

@@ -40,7 +40,19 @@ origin, что и страница. Микрофон браузер даст т�
 | `--ambient off\|passive\|assist` | `AMBIENT_SUBMODE` | стартовый режим «второго уха» |
 | `--note-path` | `NOTE_PATH` | файл инбокса для цели `note` |
 
+| — | `CLAUDE_CODE_OAUTH_TOKEN` | подписка Claude (основной способ авторизации) |
+| — | `ANTHROPIC_API_KEY` | альтернатива: обычный API-ключ |
+
 `GET /healthz` отвечает `ok` — это health check для хостинга.
+
+## Авторизация
+
+Обе разговорные цели ходят через Claude Agent SDK, поэтому подписки Claude
+достаточно — отдельный API-ключ не нужен. Токен подписки выдаёт
+`claude setup-token`; на хостинге терминала нет, поэтому демон умеет провести
+этот флоу сам: `auth_start` → ссылка → `auth_code` → долгоживущий токен
+(`auth.py`, секция спеки `daemon.authentication`). Токен применяется сразу и
+пересоздаёт сессии; чтобы пережить перезапуск, его кладут в переменную окружения.
 
 ## Модули
 
@@ -51,7 +63,8 @@ origin, что и страница. Микрофон браузер даст т�
 | `formatter.py` | `voice_formatter` — вывод в 1–3 предложения, approvals речью |
 | `ambient.py` | `ambient_mode` — кольцевой буфер, whisper-гейт, rate limit |
 | `state.py` | `states`, `conversation_window` |
-| `targets.py` | бэкенды целей (Agent SDK, Messages API, инбокс) |
+| `targets.py` | бэкенды целей: Agent SDK с инструментами (`code`), без инструментов (`chat`), инбокс |
+| `auth.py` | `daemon.authentication` — подключение подписки через pty |
 | `server.py` | `protocol` — WebSocket |
 
 Пороги и веса не продублированы в коде: `spec.py` читает их из

@@ -1015,7 +1015,7 @@
       {
         "id": "code",
         "name": "Claude Code session",
-        "backend": "Claude Agent SDK, persistent session",
+        "backend": "Claude Agent SDK, persistent session (авторизация подпиской Claude или API-ключом)",
         "capabilities": [
           "репозиторий",
           "shell",
@@ -1031,7 +1031,7 @@
       {
         "id": "chat",
         "name": "Conversational Claude",
-        "backend": "Messages API, отдельный тред с историей",
+        "backend": "Claude Agent SDK с выключенными инструментами — та же авторизация, но цель физически ничего не может изменить",
         "capabilities": [
           "вопросы",
           "расчёты",
@@ -1042,7 +1042,7 @@
         "mutating": false,
         "latency_budget_ms": 1200,
         "default": true,
-        "note": "Быстрее и безопаснее code: ничего не ломает, поэтому именно сюда уходит любая неоднозначность."
+        "note": "Быстрее и безопаснее code: инструменты выключены, поэтому ничего не ломает. Именно сюда уходит любая неоднозначность."
       },
       {
         "id": "note",
@@ -1366,7 +1366,41 @@
         "cmd": "voice-claude-daemon sessions",
         "description": "список рабочих сессий"
       }
-    ]
+    ],
+    "authentication": {
+      "modes": [
+        {
+          "id": "subscription",
+          "default": true,
+          "env": "CLAUDE_CODE_OAUTH_TOKEN",
+          "description": "Долгоживущий (1 год) токен подписки Claude. Отдельный API-ключ и потокенная оплата не нужны.",
+          "obtained_by": "claude setup-token"
+        },
+        {
+          "id": "api_key",
+          "default": false,
+          "env": "ANTHROPIC_API_KEY",
+          "description": "Обычный API-ключ. Оплата по токенам, отдельно от подписки."
+        }
+      ],
+      "setup_flow": {
+        "problem": "На хостинге нет терминала, а `claude setup-token` интерактивна: печатает ссылку и ждёт код.",
+        "solution": "Команда запускается демоном в pty, а ссылка и код ходят через тот же WebSocket, что и голос. Весь путь проходится с телефона.",
+        "steps": [
+          "телефон: auth_start",
+          "демон запускает claude setup-token и отдаёт OAuth-ссылку (auth_url)",
+          "человек открывает ссылку, входит в свой аккаунт Claude, копирует код",
+          "телефон: auth_code",
+          "демон отдаёт долгоживущий токен (auth_token), применяет его немедленно и пересоздаёт сессии"
+        ],
+        "persistence": "Токен действует сразу, но контейнер эфемерный: чтобы пережить перезапуск, его вставляют в переменную окружения CLAUDE_CODE_OAUTH_TOKEN.",
+        "security": [
+          "auth_start и auth_code принимаются только от аутентифицированного клиента",
+          "токен — доступ ко всему аккаунту Claude: хранить только в переменных окружения хостинга",
+          "при подозрении на утечку — перевыпуск через тот же флоу, старый отзывается в аккаунте"
+        ]
+      }
+    }
   },
   "multi_project": {
     "id": "multi_project",
@@ -1648,7 +1682,8 @@
           "v": "int",
           "sessions": "array<session>",
           "active_session": "string",
-          "daemon_version": "string"
+          "daemon_version": "string",
+          "credential": "subscription|api_key|none"
         }
       },
       {
@@ -1859,6 +1894,46 @@
           "trigger": "recall|explicit_watch|number_or_name|commitment|contradiction",
           "max_words": "int"
         }
+      },
+      {
+        "id": "auth_start",
+        "dir": "phone→daemon",
+        "fields": {
+          "command": "array<string>?"
+        },
+        "note": "command переопределяет запускаемую команду и используется только в тестах"
+      },
+      {
+        "id": "auth_url",
+        "dir": "daemon→phone",
+        "fields": {
+          "url": "string"
+        }
+      },
+      {
+        "id": "auth_code",
+        "dir": "phone→daemon",
+        "fields": {
+          "code": "string"
+        }
+      },
+      {
+        "id": "auth_token",
+        "dir": "daemon→phone",
+        "fields": {
+          "token": "string",
+          "credential": "subscription|api_key|none",
+          "code_available": "bool",
+          "chat_available": "bool",
+          "persist_hint": "string"
+        }
+      },
+      {
+        "id": "auth_error",
+        "dir": "daemon→phone",
+        "fields": {
+          "message": "string"
+        }
       }
     ]
   },
@@ -1947,6 +2022,11 @@
       "vad_threshold_scale": 0.6,
       "wake_word_in_ambient": false,
       "text_fallback": true
+    },
+    "auth": {
+      "mode": "subscription",
+      "env": "CLAUDE_CODE_OAUTH_TOKEN",
+      "fallback_env": "ANTHROPIC_API_KEY"
     }
   },
   "definition_of_done": {
@@ -2140,8 +2220,8 @@
       },
       {
         "area": "chat-цель",
-        "choice": "Messages API, быстрая модель",
-        "why": "отдельный тред, низкая задержка, никаких инструментов и побочных эффектов"
+        "choice": "Claude Agent SDK с пустым allowed_tools",
+        "why": "Та же авторизация, что и у code, поэтому хватает подписки Claude без отдельного API-ключа; выключенные инструменты делают цель физически неспособной изменить репозиторий"
       },
       {
         "area": "STT",
@@ -2167,6 +2247,12 @@
         "area": "аудио",
         "choice": "A2DP-выход + микрофон телефона по умолчанию",
         "why": "HFP-профиль роняет качество всего звука; микрофон Sony — только когда телефон далеко"
+      },
+      {
+        "area": "авторизация",
+        "choice": "подписка Claude через CLAUDE_CODE_OAUTH_TOKEN",
+        "why": "не требует отдельного API-ключа и потокенной оплаты; токен выдаётся `claude setup-token` и живёт год",
+        "alternative": "ANTHROPIC_API_KEY, если нужен отдельный биллинг или нет подписки"
       }
     ],
     "risks_to_hit_first": [

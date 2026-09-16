@@ -1,3 +1,2 @@
 websockets>=13
-anthropic>=0.40           # цель chat
-claude-agent-sdk>=0.1     # цель code (нужен ещё CLI @anthropic-ai/claude-code)
+claude-agent-sdk>=0.1     # цели code и chat; нужен CLI @anthropic-ai/claude-code

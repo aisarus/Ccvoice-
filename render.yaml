@@ -8,12 +8,17 @@ services:
     healthCheckPath: /healthz
     autoDeploy: true
     envVars:
-      # Вписывается руками в дашборде Render.
-      - key: ANTHROPIC_API_KEY
-        sync: false
-      # Генерируется Render'ом: это пароль от твоего голосового доступа.
+      # Пароль от голосового доступа. Render сгенерирует сам.
       - key: VOICE_TOKEN
         generateValue: true
+      # Подписка Claude. Можно оставить пустым и подключить прямо из приложения:
+      # кнопка «подключить подписку» проведёт через claude setup-token, а токен
+      # потом вставляется сюда, чтобы пережить перезапуск.
+      - key: CLAUDE_CODE_OAUTH_TOKEN
+        sync: false
+      # Альтернатива подписке: обычный API-ключ с оплатой по токенам.
+      - key: ANTHROPIC_API_KEY
+        sync: false
       # Необязательно: репозиторий, в котором Claude Code будет работать.
       - key: WORKSPACE_REPO
         sync: false

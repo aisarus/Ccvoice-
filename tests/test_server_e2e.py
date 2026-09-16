@@ -1,6 +1,7 @@
 """End-to-end over the real WebSocket protocol, with stubbed targets."""
 import asyncio
 import json
+import os
 
 import pytest
 from websockets.asyncio.client import connect
@@ -179,3 +180,56 @@ def test_settings_read_the_deployment_environment(monkeypatch):
     settings = Settings.from_env()
     assert (settings.port, settings.token) == (10000, "from-env")
     assert settings.workspace_repo.endswith("repo.git")
+
+
+FAKE_SETUP = ["python3", "-c", """
+import sys
+print("https://claude.com/cai/oauth/authorize?code=true&client_id=demo&state=xyz")
+sys.stdout.write("Paste code here > "); sys.stdout.flush()
+code = sys.stdin.readline().strip()
+print("\\\\n" + ("sk-ant-oat01-" + "T"*40 if code == "good-code" else "Invalid code"))
+sys.stdout.flush()
+"""]
+
+
+async def _auth_flow(code, token_env, tmp_path):
+    settings = Settings(workspace=".", port=0, token="t", note_path=str(tmp_path / "i.md"))
+    daemon = Daemon(settings)
+    async with serve(daemon.handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        async with connect(f"ws://127.0.0.1:{port}") as ws:
+            await ws.send(json.dumps({"id": "hello", "v": 1, "token": token_env}))
+            first = json.loads(await ws.recv())
+            if first.get("id") != "welcome":
+                return first, None, None
+            await ws.send(json.dumps({"id": "auth_start", "command": FAKE_SETUP}))
+            url_msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+            await ws.send(json.dumps({"id": "auth_code", "code": code}))
+            result = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+            return first, url_msg, result
+
+
+def test_subscription_can_be_connected_from_the_phone(tmp_path, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    welcome, url_msg, result = asyncio.run(_auth_flow("good-code", "t", tmp_path))
+    assert welcome["credential"] == "none"
+    assert url_msg["id"] == "auth_url"
+    assert url_msg["url"].startswith("https://claude.com/cai/oauth/authorize")
+    assert result["id"] == "auth_token"
+    assert result["token"].startswith("sk-ant-oat01-")
+    assert result["credential"] == "subscription"
+    assert os.environ["CLAUDE_CODE_OAUTH_TOKEN"] == result["token"]
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+
+
+def test_a_wrong_code_reports_an_error_instead_of_a_token(tmp_path, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    _, _, result = asyncio.run(_auth_flow("nope", "t", tmp_path))
+    assert result["id"] == "auth_error"
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in os.environ
+
+
+def test_setup_flow_requires_an_authenticated_client(tmp_path):
+    welcome, _, _ = asyncio.run(_auth_flow("good-code", "wrong-token", tmp_path))
+    assert welcome["id"] == "error" and welcome["code"] == "unauthorized"

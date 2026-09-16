@@ -20,6 +20,7 @@ from typing import Any
 
 from . import formatter, state
 from .ambient import AmbientBuffer, RateLimiter, WhisperGate
+from .auth import SetupError, SetupTokenFlow, apply_token, credential_kind
 from .router import Router
 from .speaker import Decision, Features, SegmentContext, SpeakerClassifier, debug_record
 from .spec import defaults, load_spec
@@ -73,6 +74,7 @@ class Daemon:
         self.telemetry: list[dict[str, Any]] = []
         self._pending: dict[str, asyncio.Future[bool]] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._setup: SetupTokenFlow | None = None
 
     # -- transport -------------------------------------------------------
     async def handler(self, websocket: Any) -> None:
@@ -106,6 +108,7 @@ class Daemon:
                 "ambient": self.ambient.submode,
                 "code_available": self.targets.code.available,
                 "chat_available": self.targets.chat.available,
+                "credential": credential_kind(),
             })
         elif kind == "speech_segment":
             await self._on_segment(ws, msg)
@@ -125,6 +128,8 @@ class Daemon:
             self.router.sticky_target = msg.get("target")
             await self._send(ws, {"id": "route", "target": self.router.sticky_target,
                                   "reason": "explicit_prefix", "confidence": 1.0})
+        elif kind in ("auth_start", "auth_code"):
+            await self._on_auth(ws, msg)
         elif kind == "ping":
             await self._send(ws, {"id": "ping", "ts": int(time.time() * 1000)})
         else:
@@ -208,6 +213,40 @@ class Daemon:
         self.telemetry.append(debug_record(decision, features, ctx))
         del self.telemetry[:-200]
         return decision
+
+    # -- подключение подписки --------------------------------------------
+    async def _on_auth(self, ws: Any, msg: dict[str, Any]) -> None:
+        """Проводит `claude setup-token` через телефон: ссылка -> код -> токен."""
+        if ws not in self.clients:
+            await self._send(ws, {"id": "error", "code": "unauthorized",
+                                  "message": "нужен токен доступа", "recoverable": False})
+            return
+        try:
+            if msg["id"] == "auth_start":
+                if self._setup is not None:
+                    self._setup.close()
+                self._setup = SetupTokenFlow(command=tuple(msg["command"])) \
+                    if msg.get("command") else SetupTokenFlow()
+                url = await self._setup.start()
+                await self._send(ws, {"id": "auth_url", "url": url})
+                return
+
+            if self._setup is None:
+                raise SetupError("флоу не запущен")
+            token = await self._setup.submit(msg.get("code", ""))
+            self._setup = None
+            apply_token(token)
+            await self.targets.reset_sessions()
+            await self._send(ws, {"id": "auth_token", "token": token,
+                                  "credential": credential_kind(),
+                                  "code_available": self.targets.code.available,
+                                  "chat_available": self.targets.chat.available,
+                                  "persist_hint": "CLAUDE_CODE_OAUTH_TOKEN"})
+        except (SetupError, FileNotFoundError, KeyError) as exc:
+            if self._setup is not None:
+                self._setup.close()
+                self._setup = None
+            await self._send(ws, {"id": "auth_error", "message": str(exc)})
 
     # -- approvals -------------------------------------------------------
     async def _ask_permission(self, tool_name: str, input_data: dict[str, Any]) -> bool:
