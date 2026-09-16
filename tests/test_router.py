@@ -1,0 +1,65 @@
+"""Routing: an ambiguous utterance must never execute anything."""
+import pytest
+
+from voice_claude.router import Router
+
+
+@pytest.fixture
+def router():
+    return Router()
+
+
+def test_repo_work_goes_to_code(router):
+    route = router.route("исправь ошибку в auth.ts и запусти тесты")
+    assert route.target == "code"
+    assert route.confidence >= 0.7
+
+
+def test_plain_question_goes_to_chat(router):
+    assert router.route("посчитай сколько будет семнадцать процентов от 4200").target == "chat"
+
+
+def test_unclassifiable_utterance_falls_back_to_chat_not_code(router):
+    route = router.route("ну такое себе, конечно")
+    assert route.target == "chat"
+    assert route.reason == "default"
+    assert not router.is_mutating(route.target)
+
+
+def test_explicit_prefix_wins_and_is_stripped(router):
+    route = router.route("в код добей и закоммить")
+    assert (route.target, route.reason) == ("code", "explicit_prefix")
+    assert route.text == "добей и закоммить"
+
+
+def test_note_prefix_captures_without_answering(router):
+    assert router.route("запиши идею про второе ухо").target == "note"
+
+
+def test_sticky_target_holds_inside_the_conversation_window(router):
+    router.route("в код почини билд")
+    route = router.route("продолжай", ms_since_last=4000)
+    assert (route.target, route.reason) == ("code", "sticky")
+
+
+def test_sticky_target_expires_after_the_window(router):
+    router.route("в код почини билд")
+    route = router.route("а что думаешь про отпуск", ms_since_last=60_000)
+    assert route.target == "chat"
+
+
+def test_misroute_recovery_clears_the_sticky_target(router):
+    router.route("в код почини билд")
+    assert router.is_misroute_recovery("не туда, я не про код")
+    router.sticky_target = None
+    assert router.route("ну такое себе").target == "chat"
+
+
+def test_handoff_is_detected_both_ways(router):
+    assert router.handoff("перекинь это в код") is not None
+    assert router.handoff("объясни попроще") is not None
+    assert router.handoff("просто фраза") is None
+
+
+def test_earcons_differ_per_target(router):
+    assert router.earcon_for("code") != router.earcon_for("chat")

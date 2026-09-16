@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Voice Shell</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --line:#30363d; --text:#e6edf3; --dim:#8b949e;
+    --master:#3fb950; --bystander:#d29922; --unknown:#8b949e; --code:#58a6ff; --chat:#bc8cff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:16px;background:var(--bg);color:var(--text);
+       font:15px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;-webkit-tap-highlight-color:transparent}
+  h1{font-size:15px;margin:0 0 12px;letter-spacing:.08em;color:var(--dim);text-transform:uppercase}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .chip{padding:6px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);
+        color:var(--dim);font-size:13px;cursor:pointer}
+  .chip[aria-pressed="true"]{color:var(--text);border-color:var(--code)}
+  #state{display:flex;align-items:center;gap:8px;padding:10px 14px;border:1px solid var(--line);
+         border-radius:10px;background:var(--panel);margin-bottom:12px}
+  #dot{width:10px;height:10px;border-radius:50%;background:var(--dim)}
+  #dot.LISTENING{background:var(--master)} #dot.THINKING{background:var(--code)}
+  #dot.SPEAKING{background:var(--chat)} #dot.WORKING{background:var(--bystander)}
+  #ptt{width:100%;padding:28px;font:inherit;font-size:17px;border-radius:14px;border:1px solid var(--line);
+       background:var(--panel);color:var(--text);touch-action:manipulation}
+  #ptt.on{border-color:var(--master);color:var(--master)}
+  #meter{height:6px;border-radius:3px;background:var(--line);margin:12px 0;overflow:hidden}
+  #meterfill{height:100%;width:0;background:var(--master);transition:width .06s linear}
+  #log{margin-top:12px;display:flex;flex-direction:column;gap:8px}
+  .msg{padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+  .msg .who{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+  .msg.master .who{color:var(--master)} .msg.bystander .who{color:var(--bystander)}
+  .msg.code .who{color:var(--code)} .msg.chat .who{color:var(--chat)}
+  .hint{color:var(--dim);font-size:12px}
+</style>
+</head>
+<body>
+<h1>Voice Shell</h1>
+
+<div id="state"><span id="dot"></span><span id="statetext">не подключено</span></div>
+
+<div class="row">
+  <button class="chip" id="t-auto" aria-pressed="true">авто</button>
+  <button class="chip" id="t-code" aria-pressed="false">код</button>
+  <button class="chip" id="t-chat" aria-pressed="false">чат</button>
+  <button class="chip" id="t-note" aria-pressed="false">заметка</button>
+  <button class="chip" id="ambient" aria-pressed="false">ambient: off</button>
+</div>
+
+<button id="ptt">удерживай и говори</button>
+<div id="meter"><div id="meterfill"></div></div>
+<p class="hint" id="hint">S0: push-to-talk, STT и TTS браузера, роль по уровню сигнала.</p>
+<div id="log"></div>
+
+<script>
+const qs = new URLSearchParams(location.search);
+const WS_PORT = qs.get("port") || 8787;
+const TOKEN = qs.get("token") || "";
+const WS_URL = `ws://${location.hostname}:${WS_PORT}`;
+
+const el = id => document.getElementById(id);
+let ws, audioCtx, analyser, micStream, recog;
+let speaking = false, holding = false;
+let noiseFloor = -60, baseline = null, lastLevel = -60, segStart = 0;
+
+/* ---------- earcons ---------- */
+function earcon(kind){
+  const ctx = audioCtx || (audioCtx = new (window.AudioContext||window.webkitAudioContext)());
+  const tones = {activation:[[880,0.09]], accepted:[[560,0.05]], error:[[300,0.14]],
+                 needs_approval:[[740,0.06],[740,0.06]], finished:[[660,0.1],[990,0.12]],
+                 to_code:[[420,0.06]], to_chat:[[900,0.06]]}[kind] || [[700,0.06]];
+  let t = ctx.currentTime;
+  for (const [freq, dur] of tones){
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.frequency.value = freq; osc.type = "sine";
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.25, t + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(gain).connect(ctx.destination); osc.start(t); osc.stop(t + dur + 0.02);
+    t += dur + 0.04;
+  }
+}
+
+/* ---------- mic metering: level, noise floor, HF ratio ---------- */
+async function startMeter(){
+  micStream = await navigator.mediaDevices.getUserMedia({audio:{
+    echoCancellation:true, noiseSuppression:false, autoGainControl:false}});
+  audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)();
+  const src = audioCtx.createMediaStreamSource(micStream);
+  analyser = audioCtx.createAnalyser(); analyser.fftSize = 1024;
+  src.connect(analyser);
+  const time = new Float32Array(analyser.fftSize), freq = new Float32Array(analyser.frequencyBinCount);
+  let peak = -90, hf = 0, frames = 0;
+  setInterval(() => {
+    analyser.getFloatTimeDomainData(time); analyser.getFloatFrequencyData(freq);
+    let sum = 0; for (const v of time) sum += v*v;
+    const db = 20*Math.log10(Math.sqrt(sum/time.length) + 1e-9);
+    lastLevel = db;
+    el("meterfill").style.width = Math.max(0, Math.min(100, (db + 60) / 60 * 100)) + "%";
+    if (!holding) noiseFloor = Math.min(-25, noiseFloor*0.98 + db*0.02);
+    if (holding){
+      peak = Math.max(peak, db); frames++;
+      const bin = audioCtx.sampleRate / analyser.fftSize;
+      let lo = 0, hi = 0, nlo = 0, nhi = 0;
+      freq.forEach((v,i) => { const f = i*bin;
+        if (f>200 && f<1000){ lo += v; nlo++; } else if (f>2000 && f<8000){ hi += v; nhi++; } });
+      hf = (nhi? hi/nhi : 0) - (nlo? lo/nlo : 0);
+      window.__seg = {peak, hf, frames};
+    } else { peak = -90; frames = 0; }
+  }, 50);
+}
+
+function features(){
+  const seg = window.__seg || {peak:lastLevel, hf:0, frames:10};
+  if (baseline === null && seg.peak > -45) baseline = seg.peak;   // first close utterance calibrates
+  return {
+    level_rel_db: seg.peak - (baseline ?? seg.peak),
+    snr_db: seg.peak - noiseFloor,
+    hf_ratio_db: seg.hf,
+    lf_proximity_db: 2.0
+  };
+}
+
+/* ---------- speech recognition ---------- */
+function startRecognition(){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR){ addMsg("system", "браузер без SpeechRecognition — используй Chrome на Android"); return; }
+  recog = new SR(); recog.lang = "ru-RU"; recog.interimResults = false; recog.continuous = false;
+  recog.onresult = e => {
+    const text = e.results[e.results.length-1][0].transcript.trim();
+    if (!text) return;
+    addMsg("master", text);
+    send({id:"speech_segment", segment_id: String(Date.now()), transcript: text,
+          device:"phone_mic", duration_ms: Date.now()-segStart,
+          voiced_frames: (window.__seg?.frames ?? 30), features: features()});
+    earcon("accepted");
+  };
+  recog.onerror = () => earcon("error");
+  recog.start();
+}
+
+/* ---------- push to talk ---------- */
+const ptt = el("ptt");
+function holdStart(ev){
+  ev.preventDefault();
+  if (speaking){ speechSynthesis.cancel(); speaking = false; send({id:"barge_in", ts:Date.now()}); }
+  holding = true; segStart = Date.now(); ptt.classList.add("on"); ptt.textContent = "говори…";
+  earcon("activation"); startRecognition();
+}
+function holdEnd(){
+  if (!holding) return;
+  holding = false; ptt.classList.remove("on"); ptt.textContent = "удерживай и говори";
+  try { recog && recog.stop(); } catch(e){}
+}
+ptt.addEventListener("pointerdown", holdStart);
+ptt.addEventListener("pointerup", holdEnd);
+ptt.addEventListener("pointercancel", holdEnd);
+
+/* ---------- targets & ambient ---------- */
+let forced = null;
+for (const id of ["auto","code","chat","note"]){
+  el("t-"+id).onclick = () => {
+    forced = id === "auto" ? null : id;
+    for (const other of ["auto","code","chat","note"])
+      el("t-"+other).setAttribute("aria-pressed", String(other === id));
+    if (forced) send({id:"target_switch", target: forced, sticky:true});
+  };
+}
+let ambient = "off";
+el("ambient").onclick = () => {
+  ambient = {off:"passive", passive:"assist", assist:"off"}[ambient];
+  el("ambient").textContent = "ambient: " + ambient;
+  el("ambient").setAttribute("aria-pressed", String(ambient !== "off"));
+  send({id:"ambient_control", submode: ambient, wipe: ambient === "off"});
+};
+
+/* ---------- websocket ---------- */
+function send(obj){ ws && ws.readyState === 1 && ws.send(JSON.stringify(obj)); }
+function setState(s){ el("dot").className = s; el("statetext").textContent = s; }
+function addMsg(who, text, cls){
+  const div = document.createElement("div");
+  div.className = "msg " + (cls || who);
+  div.innerHTML = `<div class="who">${who}</div><div>${text.replace(/</g,"&lt;")}</div>`;
+  el("log").prepend(div);
+}
+function speak(text){
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "ru-RU"; u.rate = 1.05;
+  u.onstart = () => speaking = true; u.onend = () => speaking = false;
+  speechSynthesis.speak(u);
+}
+function connect(){
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => { setState("IDLE"); send({id:"hello", v:1, token:TOKEN, device_id:"web", app_version:"0.2.0"}); };
+  ws.onclose = () => { setState("не подключено"); setTimeout(connect, 2000); };
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.id === "welcome"){
+      el("hint").textContent = `code: ${m.code_available?"ready":"stub"} · chat: ${m.chat_available?"ready":"stub"} · ${m.active_session}`;
+    } else if (m.id === "state"){ setState(m.state);
+    } else if (m.id === "route"){
+      if (m.earcon) earcon(m.earcon);
+      if (!m.target) addMsg(m.label || m.reason, "реплика не исполнена (" + m.reason + ")", "bystander");
+    } else if (m.id === "voice_summary"){
+      addMsg(m.target, m.text, m.target); speak(m.text);
+      earcon(m.is_question ? "needs_approval" : "finished");
+    } else if (m.id === "permission_request"){
+      earcon("needs_approval"); addMsg("approval", m.spoken); speak(m.spoken);
+      window.__approval = m.request_id;
+    } else if (m.id === "whisper"){ addMsg("whisper", m.text); speak(m.text);
+    } else if (m.id === "error"){ earcon("error"); addMsg("error", m.message); }
+  };
+}
+startMeter().catch(() => el("hint").textContent = "нет доступа к микрофону");
+connect();
+</script>
+</body>
+</html>

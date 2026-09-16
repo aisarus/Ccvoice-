@@ -1,0 +1,137 @@
+"""End-to-end over the real WebSocket protocol, with stubbed targets."""
+import asyncio
+import json
+
+import pytest
+from websockets.asyncio.client import connect
+from websockets.asyncio.server import serve
+
+from voice_claude.server import Daemon, Settings
+
+MASTER = {"level_rel_db": 1.0, "snr_db": 30.0, "drr_db": 10.0, "c50_db": 14.0,
+          "hf_ratio_db": 1.0, "lf_proximity_db": 4.0}
+BYSTANDER = {"level_rel_db": -14.0, "snr_db": 9.0, "drr_db": -1.0, "c50_db": 2.0,
+             "hf_ratio_db": -7.0, "lf_proximity_db": -2.0}
+
+
+async def _session(segments, note_path):
+    settings = Settings(workspace=".", ws_port=0, token="test-token", note_path=str(note_path))
+    daemon = Daemon(settings)
+    received = []
+    async with serve(daemon.handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        async with connect(f"ws://127.0.0.1:{port}") as ws:
+            await ws.send(json.dumps({"id": "hello", "v": 1, "token": "test-token"}))
+            received.append(json.loads(await ws.recv()))
+            for segment in segments:
+                await ws.send(json.dumps(segment))
+                try:
+                    while True:
+                        received.append(json.loads(
+                            await asyncio.wait_for(ws.recv(), timeout=1.5)))
+                except asyncio.TimeoutError:
+                    pass
+    return daemon, received
+
+
+def run(segments, note_path):
+    return asyncio.run(_session(segments, note_path))
+
+
+def segment(text, features, **over):
+    payload = {"id": "speech_segment", "segment_id": "s1", "transcript": text,
+               "device": "phone_mic", "duration_ms": 1400, "voiced_frames": 45,
+               "features": features}
+    payload.update(over)
+    return payload
+
+
+def kinds(received, kind):
+    return [m for m in received if m.get("id") == kind]
+
+
+def test_handshake_reports_target_availability(tmp_path):
+    _, received = run([], tmp_path / "inbox.md")
+    welcome = kinds(received, "welcome")[0]
+    assert welcome["state"] == "IDLE"
+    assert set(welcome["targets"]) == {"code", "chat", "note"}
+
+
+def test_master_utterance_is_routed_and_answered(tmp_path):
+    _, received = run([segment("запиши идею про второе ухо", MASTER)], tmp_path / "inbox.md")
+    route = kinds(received, "route")[0]
+    assert route["target"] == "note"
+    assert route["role"] == "master"
+    summary = kinds(received, "voice_summary")[0]
+    assert summary["text"] == "Записал."
+    assert (tmp_path / "inbox.md").read_text(encoding="utf-8").strip().endswith("второе ухо")
+
+
+def test_bystander_speech_is_never_executed(tmp_path):
+    _, received = run([segment("запиши что я сказал", BYSTANDER)], tmp_path / "inbox.md")
+    route = kinds(received, "route")[0]
+    assert route["target"] is None
+    assert route["reason"] == "role_gate"
+    assert route["label"] == "говорит собеседник"
+    assert not kinds(received, "voice_summary")
+    assert not (tmp_path / "inbox.md").exists()
+
+
+def test_self_echo_is_dropped_silently(tmp_path):
+    _, received = run([segment("записал", MASTER, echo_correlation=0.95)], tmp_path / "inbox.md")
+    assert not kinds(received, "route")
+    assert not kinds(received, "voice_summary")
+
+
+def test_code_target_reports_stub_instead_of_pretending(tmp_path):
+    daemon, received = run([segment("почини auth.ts и запусти тесты", MASTER)],
+                           tmp_path / "inbox.md")
+    route = kinds(received, "route")[0]
+    assert route["target"] == "code"
+    summary = kinds(received, "voice_summary")[0]
+    assert summary["stubbed"] is True
+    assert "недоступен" in summary["text"]
+
+
+def test_bad_token_is_rejected(tmp_path):
+    async def attempt():
+        settings = Settings(workspace=".", token="right", note_path=str(tmp_path / "i.md"))
+        daemon = Daemon(settings)
+        async with serve(daemon.handler, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            async with connect(f"ws://127.0.0.1:{port}") as ws:
+                await ws.send(json.dumps({"id": "hello", "v": 1, "token": "wrong"}))
+                return json.loads(await ws.recv())
+
+    error = asyncio.run(attempt())
+    assert error["id"] == "error" and error["code"] == "unauthorized"
+
+
+def test_telemetry_keeps_features_but_no_audio(tmp_path):
+    daemon, _ = run([segment("почини auth.ts", MASTER)], tmp_path / "inbox.md")
+    record = daemon.telemetry[0]
+    assert record["role"] == "master"
+    assert "level_rel_db" in record and "p_master" in record
+    assert not any("audio" in key or "pcm" in key for key in record)
+
+
+def test_ambient_control_switches_and_wipes(tmp_path):
+    async def flow():
+        settings = Settings(workspace=".", token="t", note_path=str(tmp_path / "i.md"))
+        daemon = Daemon(settings)
+        async with serve(daemon.handler, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            async with connect(f"ws://127.0.0.1:{port}") as ws:
+                await ws.send(json.dumps({"id": "hello", "v": 1, "token": "t"}))
+                await ws.recv()
+                await ws.send(json.dumps({"id": "ambient_control", "submode": "passive"}))
+                reply = json.loads(await ws.recv())
+                daemon.ambient.add("master", "секрет")
+                await ws.send(json.dumps({"id": "ambient_control", "submode": "off", "wipe": True}))
+                await ws.recv()
+                return reply, daemon
+
+    reply, daemon = asyncio.run(flow())
+    assert reply["submode"] == "passive"
+    assert daemon.ambient.submode == "off"
+    assert daemon.ambient.lines() == []

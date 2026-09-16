@@ -23,6 +23,9 @@ Desktop daemon
 | [`spec/voice-shell.json`](spec/voice-shell.json) | Полная спека в машиночитаемом виде — единственный источник истины |
 | [`spec/voice-shell.schema.json`](spec/voice-shell.schema.json) | JSON Schema (draft 2020-12) для спеки |
 | [`scripts/validate_spec.py`](scripts/validate_spec.py) | Валидатор: схема + перекрёстные проверки согласованности |
+| [`daemon/`](daemon/) | `voice-claude-daemon`: роли говорящего, роутинг, формат речи, WebSocket |
+| [`client/web/`](client/web/index.html) | Клиент для Chrome на Android: push-to-talk, STT, TTS, earcons |
+| [`tests/`](tests/) | 52 теста, включая end-to-end по реальному протоколу |
 
 ```bash
 python3 scripts/validate_spec.py
@@ -31,6 +34,33 @@ python3 scripts/validate_spec.py
 
 Валидатор работает без зависимостей (тогда проверяются только кросс-ссылки);
 `pip install jsonschema` добавляет проверку по схеме.
+
+## Запустить прямо сейчас (S0)
+
+```bash
+pip install -r daemon/requirements.txt
+cd daemon && python -m voice_claude --workspace ~/твой-проект
+```
+
+Демон напечатает адрес вида `http://<хост>:8788/?port=8787&token=XXXX` — открой
+его в Chrome на Android (дома по локальному IP, снаружи по имени в Tailscale),
+держи кнопку и говори. STT и TTS берутся из браузера, роль говорящего считается
+по уровню, SNR и ВЧ-содержанию прямо на телефоне.
+
+Без `claude-agent-sdk` и ключа цели `code` и `chat` отвечают заглушкой — петля
+проходит целиком, и в ухо приходит честное «Claude Code недоступен», а не
+выдуманный ответ.
+
+```bash
+python3 -m pytest tests -q        # 52 passed
+python3 scripts/validate_spec.py  # OK: voice-shell-for-claude-code v0.2.0
+```
+
+Что уже настоящее: классификация говорящего с профилями (включая шёпот),
+роутинг chat/code/note с безопасным дефолтом, суммаризация вывода в 1–3
+предложения, голосовые approvals, ambient-буфер с ролями и стиранием,
+WebSocket-протокол из спеки и push-to-talk клиент. Чего ещё нет: wake word,
+VAD-endpointing на устройстве, voiceprint, мультипроект — это S1–S6.
 
 ## Ключевые решения
 

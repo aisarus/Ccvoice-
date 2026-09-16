@@ -546,8 +546,38 @@
             "channel_prior": 0.9,
             "continuity_prior": 0.6
           }
+        },
+        {
+          "id": "whisper",
+          "default": false,
+          "applies_when": "сегмент заметно тише базового уровня мастера (z_level < -1.0), но признаки близости положительные (z_drr > 0.3 или z_lf_proximity > 0.3): шёпот у микрофона, а не человек в другом конце комнаты",
+          "weights": {
+            "level_rel_db": 0.4,
+            "snr_db": 0.6,
+            "drr_db": 1.6,
+            "c50_db": 0.8,
+            "hf_ratio_db": 0.3,
+            "lf_proximity_db": 1.2,
+            "voiceprint_similarity": 2.0,
+            "channel_prior": 0.6,
+            "continuity_prior": 0.6
+          },
+          "rationale": "Громкость — это прокси расстояния. Когда есть прямое измерение расстояния (DRR и proximity-эффект), оно должно доминировать над прокси, иначе тихий голос мастера уезжает в bystander."
         }
-      ]
+      ],
+      "profile_selection": {
+        "order": [
+          "narrowband",
+          "whisper",
+          "with_voiceprint",
+          "acoustic_only"
+        ],
+        "narrowband": "вход — HFP-микрофон гарнитуры",
+        "whisper": "z_level < -1.0 и (z_drr > 0.3 или z_lf_proximity > 0.3)",
+        "with_voiceprint": "voiceprint включён, enrollment качественный и эмбеддинг посчитан",
+        "fallback": "acoustic_only",
+        "note": "Профиль выбирается на сегмент и сообщается в telemetry, чтобы пороги можно было чинить отдельно для каждого режима."
+      }
     },
     "decision": {
       "thresholds": {
@@ -732,6 +762,11 @@
         "id": "SI-6",
         "metric": "тихая речь мастера вблизи микрофона (шёпот с 15 см)",
         "target": ">= 80% распознаётся как master, остальное — unknown, не bystander"
+      },
+      {
+        "id": "SI-7",
+        "metric": "шёпот у микрофона в running-диалоге (окно диалога открыто)",
+        "target": "master; в холодном старте без voiceprint допустим unknown, но не bystander"
       }
     ]
   },
@@ -1251,7 +1286,9 @@
           "id": "whisper",
           "description": "низкий абсолютный уровень при высоком DRR и proximity-эффекте → master, а не bystander",
           "see": "speaker_identification.acceptance_criteria SI-6"
-        }
+        },
+        "requires_voiceprint_for_cold_start": true,
+        "cold_start_behavior": "Без voiceprint шёпот с холодного старта даёт unknown и один короткий переспрос: уверенности честно не хватает. Внутри окна диалога и на микрофоне гарнитуры шёпот проходит как master и без voiceprint."
       },
       {
         "id": "headset_button_hold",
