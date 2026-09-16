@@ -87,6 +87,24 @@ python3 scripts/validate_spec.py  # OK: voice-shell-for-claude-code v0.2.0
 WebSocket-протокол из спеки и push-to-talk клиент. Чего ещё нет: wake word,
 VAD-endpointing на устройстве, voiceprint, мультипроект — это S1–S6.
 
+## На своём сервере
+
+Лучший вариант: не засыпает, Claude Code получает настоящую оболочку, адрес
+постоянный. Ставится по ssh одной командой — можно с телефона:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aisarus/Ccvoice-/claude/voice-shell-claude-code-77wwh2/scripts/install-server.sh | sudo bash
+```
+
+С доменом, указывающим на сервер, добавится автоматический HTTPS:
+
+```bash
+curl -fsSL <тот же адрес> | sudo DOMAIN=voice.example.com bash
+```
+
+Скрипт ставит зависимости и CLI, прогоняет тесты, оформляет systemd-службу с
+автозапуском и печатает адрес с токеном для приложения.
+
 ## Демон на своём компьютере
 
 Облачный сервис не видит твою машину. Чтобы Claude Code работал с настоящими
