@@ -78,6 +78,25 @@ class MainActivity : AppCompatActivity() {
             if (missingPermissions().isEmpty()) launchService() else requestPermissions()
         }
 
+        // Реплика текстом: проверить всё, кроме микрофона, не издав ни звука.
+        val say = findViewById<EditText>(R.id.say)
+        findViewById<Button>(R.id.saySend).setOnClickListener {
+            val text = say.text.toString().trim()
+            if (text.isEmpty()) return@setOnClickListener
+            startService(
+                Intent(this, VoiceService::class.java)
+                    .setAction(VoiceService.ACTION_SAY)
+                    .putExtra(VoiceService.EXTRA_TEXT, text)
+            )
+            say.setText("")
+            status.text = "отправлено: $text"
+        }
+
+        val mute = findViewById<Button>(R.id.mute)
+        fun paintMute() { mute.text = if (prefs.mute) "озвучка: выкл" else "озвучка: вкл" }
+        paintMute()
+        mute.setOnClickListener { prefs.mute = !prefs.mute; paintMute() }
+
         findViewById<Button>(R.id.battery).setOnClickListener { askForBackgroundFreedom() }
 
         // Подключение подписки Claude — тот же флоу, что в веб-клиенте.

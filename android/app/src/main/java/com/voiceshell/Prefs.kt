@@ -24,6 +24,11 @@ class Prefs(context: Context) {
         get() = sp.getString("last_error", "") ?: ""
         set(value) = sp.edit().putString("last_error", value).apply()
 
+    /** Ночной режим: отвечать текстом в лог, не озвучивая. */
+    var mute: Boolean
+        get() = sp.getBoolean("mute", false)
+        set(value) = sp.edit().putBoolean("mute", value).apply()
+
     val isConfigured: Boolean get() = server.isNotBlank() && token.isNotBlank()
 
     /**

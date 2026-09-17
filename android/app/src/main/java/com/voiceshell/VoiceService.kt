@@ -50,6 +50,7 @@ class VoiceService : Service() {
         const val ACTION_LISTEN = "com.voiceshell.LISTEN"
         const val ACTION_AUTH_START = "com.voiceshell.AUTH_START"
         const val ACTION_AUTH_CODE = "com.voiceshell.AUTH_CODE"
+        const val ACTION_SAY = "com.voiceshell.SAY"
         const val EXTRA_TEXT = "text"
         const val EXTRA_CODE = "code"
         const val EXTRA_AUTH_URL = "auth_url"
@@ -116,6 +117,10 @@ class VoiceService : Service() {
         when (intent?.action) {
             ACTION_STOP -> { stopSelf(); return START_NOT_STICKY }
             ACTION_LISTEN -> armWindow()
+            ACTION_SAY -> {
+                val text = intent.getStringExtra(EXTRA_TEXT).orEmpty().trim()
+                if (text.isNotEmpty()) deliver(text)
+            }
             ACTION_AUTH_START -> {
                 report("запрашиваю ссылку авторизации…")
                 send(JSONObject().put("id", "auth_start"))
@@ -336,7 +341,7 @@ class VoiceService : Service() {
     }
 
     private fun speak(text: String) {
-        if (text.isBlank()) return
+        if (text.isBlank() || prefs.mute) return
         runCatching {
             tts?.language = Locale.forLanguageTag(Intents.scriptLanguage(text, prefs.language))
             tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "voice-shell")

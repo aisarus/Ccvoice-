@@ -74,6 +74,34 @@
             android:layout_marginTop="8dp"
             android:text="остановить" />
 
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:textSize="12sp"
+            android:text="сказать текстом — когда говорить нельзя" />
+
+        <EditText
+            android:id="@+id/say"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="скажи привет"
+            android:inputType="textCapSentences"
+            android:importantForAutofill="no" />
+
+        <Button
+            android:id="@+id/saySend"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="отправить" />
+
+        <Button
+            android:id="@+id/mute"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="озвучка: вкл" />
+
         <Button
             android:id="@+id/battery"
             android:layout_width="match_parent"
