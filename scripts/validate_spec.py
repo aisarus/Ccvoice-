@@ -143,6 +143,17 @@ def consistency_check(spec, errors):
     if not seg or "role" not in seg["fields"] or "confidence" not in seg["fields"]:
         errors.append("protocol.speech_segment must carry role and confidence")
 
+    # 11a. Partial measurement must stay honest: a phone measures two signals
+    # of six, and over-amplifying them would make a guess sound like a verdict.
+    partial = si["scoring"].get("partial_measurement")
+    if partial:
+        if partial["min_measured_signals"] < 2:
+            errors.append("partial_measurement needs at least two signals: one "
+                          "signal is a guess, not a verdict")
+        if not 1.0 < partial["max_scale"] <= 3.0:
+            errors.append("partial_measurement.max_scale must be above 1 and at "
+                          "most 3, got %r" % partial["max_scale"])
+
     # 12. AGC off / AEC on — the loudness features depend on it.
     if spec["audio"]["capture"]["agc"]["enabled"]:
         errors.append("audio.capture.agc must be disabled: AGC destroys absolute levels")

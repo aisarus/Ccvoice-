@@ -24,6 +24,11 @@ ACOUSTIC_FEATURES = (
     "voiceprint_similarity",
 )
 
+# Сколько признаков нужно, чтобы вообще выносить приговор.
+MIN_MEASURED_SIGNALS = 2
+# Насколько можно разносить вес недостающих признаков на измеренные.
+MAX_PARTIAL_SCALE = 2.0
+
 # Pseudo-features: not measured from the signal, derived from context.
 PRIOR_FEATURES = ("channel_prior", "continuity_prior")
 
@@ -34,12 +39,12 @@ CHANNEL_PRIOR = {"sony_mic": 1.0, "phone_mic": 0.5, "laptop_mic": -0.5}
 class Features:
     """One speech segment, already measured on the device."""
 
-    level_rel_db: float
-    snr_db: float
-    drr_db: float
-    c50_db: float
-    hf_ratio_db: float
-    lf_proximity_db: float
+    level_rel_db: float | None = None
+    snr_db: float | None = None
+    drr_db: float | None = None
+    c50_db: float | None = None
+    hf_ratio_db: float | None = None
+    lf_proximity_db: float | None = None
     voiceprint_similarity: float | None = None
 
     def as_dict(self) -> dict[str, float | None]:
@@ -200,6 +205,23 @@ class SpeakerClassifier:
         if "clipping" in gates:
             # The level is untrustworthy; drop that one weight, keep the rest.
             weights["level_rel_db"] = 0.0
+
+        measured = [n for n in ACOUSTIC_FEATURES if weights.get(n, 0.0) > 0.0]
+        if len(measured) < MIN_MEASURED_SIGNALS:
+            # Одного признака мало для приговора: пусть решает тот, кто знает
+            # больше. Роль, присланную клиентом, разбирает вызывающий.
+            return self._remember(Decision("unknown", 0.5, 0.0, profile, gates, z))
+        # Телефон меряет два признака из шести, и профиль весов рассчитан на
+        # полный набор: без пересчёта даже безупречная реплика хозяина не
+        # дотягивает до порога и молча не исполняется. Разносим вес
+        # недостающих на измеренные — но не больше чем вдвое, иначе два
+        # признака зазвучали бы увереннее шести.
+        total = sum(self._weights(profile).get(n, 0.0) for n in ACOUSTIC_FEATURES)
+        got = sum(weights[n] for n in measured)
+        if got > 0:
+            scale = min(total / got, MAX_PARTIAL_SCALE)
+            for name in measured:
+                weights[name] *= scale
 
         score = self._spec["scoring"]["bias_b0"]
         score += sum(weights.get(name, 0.0) * value for name, value in z.items())

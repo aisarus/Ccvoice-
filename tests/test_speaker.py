@@ -112,3 +112,45 @@ def test_voiceprint_profile_falls_back_without_enrollment(classifier):
     c = SpeakerClassifier(profile="with_voiceprint", calibration=Calibration.neutral())
     d = c.classify(close_speech(), SegmentContext())
     assert d.profile == "acoustic_only"
+
+
+def test_two_measured_signals_are_enough_to_recognise_the_master():
+    """Телефон меряет два признака из шести. Профиль весов рассчитан на
+    полный набор, и без пересчёта безупречная реплика хозяина не дотягивала
+    до порога — то есть команда молча не исполнялась."""
+    classifier = SpeakerClassifier()
+    context = SegmentContext(device="phone_mic", duration_ms=1400, voiced_frames=45)
+    decision = classifier.classify(Features(level_rel_db=1.0, snr_db=30.0), context)
+    assert decision.role == "master", decision
+
+
+def test_the_same_two_signals_still_catch_a_bystander():
+    """Пересчёт не должен делать всех хозяевами."""
+    classifier = SpeakerClassifier()
+    context = SegmentContext(device="phone_mic", duration_ms=1400, voiced_frames=45)
+    decision = classifier.classify(Features(level_rel_db=-14.0, snr_db=9.0), context)
+    assert decision.role == "bystander", decision
+
+
+def test_one_signal_is_not_a_verdict():
+    """Одного признака мало: лучше «не знаю», чем уверенная ошибка."""
+    classifier = SpeakerClassifier()
+    context = SegmentContext(device="phone_mic", duration_ms=1400, voiced_frames=45)
+    decision = classifier.classify(Features(level_rel_db=1.0), context)
+    assert decision.role == "unknown"
+    assert decision.confidence == 0.0
+
+
+def test_a_missing_feature_is_not_a_bad_measurement():
+    """Прежде демон подставлял «разумные» числа за телефон, и молчание
+    превращалось в измеренный плохой результат."""
+    classifier = SpeakerClassifier()
+    context = SegmentContext(device="phone_mic", duration_ms=1400, voiced_frames=45)
+    неполные = classifier.classify(Features(level_rel_db=1.0, snr_db=30.0), context)
+    classifier._last = None
+    полные = classifier.classify(
+        Features(level_rel_db=1.0, snr_db=30.0, drr_db=10.0, c50_db=14.0,
+                 hf_ratio_db=1.0, lf_proximity_db=4.0), context)
+    assert неполные.role == полные.role == "master"
+    # Неполный набор не должен звучать увереннее полного.
+    assert неполные.p_master <= полные.p_master

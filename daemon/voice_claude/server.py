@@ -572,14 +572,30 @@ class Daemon:
             role = msg.get("role", "unknown")
             return Decision(role, 1.0 if role == "master" else 0.0,
                             0.8 if role == "master" else 0.0, "client_provided")
+        def measured(name: str) -> float | None:
+            """Не прислали — значит не мерили.
+
+            Прежде сюда подставлялись «разумные» числа, и молчание телефона
+            превращалось в измеренный плохой результат: хозяин выходил
+            соседом, и команда молча не исполнялась. Отсутствие признака —
+            это отсутствие, а не плохое значение.
+            """
+            value = raw.get(name)
+            if value is None:
+                return None
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
         features = Features(
-            level_rel_db=float(raw.get("level_rel_db", 0.0)),
-            snr_db=float(raw.get("snr_db", 20.0)),
-            drr_db=float(raw.get("drr_db", 6.0)),
-            c50_db=float(raw.get("c50_db", 10.0)),
-            hf_ratio_db=float(raw.get("hf_ratio_db", 0.0)),
-            lf_proximity_db=float(raw.get("lf_proximity_db", 2.0)),
-            voiceprint_similarity=raw.get("voiceprint_similarity"),
+            level_rel_db=measured("level_rel_db"),
+            snr_db=measured("snr_db"),
+            drr_db=measured("drr_db"),
+            c50_db=measured("c50_db"),
+            hf_ratio_db=measured("hf_ratio_db"),
+            lf_proximity_db=measured("lf_proximity_db"),
+            voiceprint_similarity=measured("voiceprint_similarity"),
         )
         ctx = SegmentContext(
             device=msg.get("device", "phone_mic"),
