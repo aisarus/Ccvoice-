@@ -22,7 +22,7 @@ from typing import Any
 from websockets.datastructures import Headers
 from websockets.http11 import Response
 
-from . import formatter, glossary, state
+from . import formatter, glossary, policy, state
 from .ambient import AmbientBuffer, RateLimiter, WhisperGate
 from .auth import (SetupError, SetupTokenFlow, apply_token, credential_kind,
                    credential_problem, persist_token, token_problem)
@@ -49,6 +49,9 @@ class Settings:
     note_path: str = "~/voice-claude/inbox.md"
     ambient_submode: str = "off"
     workspace_repo: str | None = None
+    # Долгая работа не должна молчать: первое «работаю» и повторы.
+    first_ack_s: float = 0.0
+    progress_gap_s: float = 0.0
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -85,6 +88,9 @@ class Daemon:
         self._setup: SetupTokenFlow | None = None
         self._pending_tools: dict[str, str] = {}
         self._glossary: str | None = None
+        background = load_spec()["config_defaults"]["background"]
+        self._first_ack_s = settings.first_ack_s or background["first_ack_after_ms"] / 1000
+        self._progress_gap_s = settings.progress_gap_s or background["min_interval_between_events_s"]
         self.preapproved: set[str] = set()
 
     # -- transport -------------------------------------------------------
@@ -205,7 +211,8 @@ class Daemon:
         if route.target == "chat" and AmbientBuffer.is_recall(text) and self.ambient.enabled:
             role_line += "\n[ambient] последние реплики:\n" + self.ambient.transcript()
 
-        reply = await self.targets[route.target].send(route.text, preamble, role_line)
+        reply = await self._await_with_progress(
+            self.targets[route.target].send(route.text, preamble, role_line))
         summary = await self._voice_summary(reply, route.target)
 
         self.machine.to(state.SPEAKING)
@@ -214,6 +221,33 @@ class Daemon:
                                "is_question": summary.is_question, "target": route.target,
                                "stubbed": reply.stubbed, "full_output": reply.full_output})
         await self._broadcast_state()
+
+    async def _await_with_progress(self, coro: Any) -> Any:
+        """Ждать ответ, не молча.
+
+        Спека (`latency_targets.long_task_rule`): если работа затянулась, через
+        пару секунд надо сказать об этом, а потом изредка напоминать, что она
+        идёт — тишина в наушнике неотличима от поломки.
+        """
+        task = asyncio.ensure_future(coro)
+        said = 0
+        while True:
+            timeout = self._first_ack_s if said == 0 else self._progress_gap_s
+            try:
+                return await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+            except asyncio.TimeoutError:
+                said += 1
+                if said == 1:
+                    self.machine.to(state.WORKING)
+                    await self._broadcast_state()
+                    await self._say("Работаю.")
+                else:
+                    await self._say("Ещё работаю.")
+
+    async def _say(self, text: str, target: str = "code") -> None:
+        await self._broadcast({"id": "voice_summary", "text": text, "is_question": False,
+                               "target": target, "stubbed": False, "full_output": text,
+                               "progress": True})
 
     def _glossary_hint(self) -> str:
         if self._glossary is None:
@@ -304,7 +338,11 @@ class Daemon:
     # -- approvals -------------------------------------------------------
     async def _ask_permission(self, tool_name: str, input_data: dict[str, Any]) -> bool:
         raw = f"{tool_name} {json.dumps(input_data, ensure_ascii=False)[:200]}"
-        if tool_name in self.preapproved:
+        # Безопасное делаем молча: спрашивать про каждый git status — издевательство.
+        if policy.decide(tool_name, input_data) == "allow":
+            log.info("разрешено политикой: %s", tool_name)
+            return True
+        if tool_name in self.preapproved and policy.may_remember(tool_name, input_data):
             return True
         request_id = secrets.token_hex(6)
         future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
@@ -344,7 +382,14 @@ class Daemon:
                                   "role": decision.role, "confidence": decision.confidence})
         approved = action.startswith("approve")
         if action == "approve_and_remember_rule":
-            self.preapproved.add(self._pending_tools.get(request_id, ""))
+            raw = self._pending_tools.get(request_id, "")
+            if policy.may_remember(raw.split(" ", 1)[0], {"command": raw}):
+                self.preapproved.add(raw)
+            else:
+                await self._broadcast({"id": "voice_summary",
+                                       "text": "Разрешил один раз. Это я запоминать не буду.",
+                                       "is_question": False, "target": "code",
+                                       "stubbed": False, "full_output": raw})
         await self._broadcast({"id": "permission_result", "request_id": request_id,
                                "approved": approved, "remembered": action.endswith("rule"),
                                "earcon": "accepted" if approved else "error"})

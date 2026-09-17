@@ -114,3 +114,45 @@ def test_stop_work_interrupts_and_says_so(tmp_path):
     # у второго клиента подключения ещё не было к моменту первой команды
     assert not [m for m in voice_only.sent if m.get("id") == "voice_summary"]
     assert [m for m in voice_only.sent if m.get("id") == "state"]
+
+
+def test_long_work_says_so_instead_of_going_silent(tmp_path):
+    """Тишина в наушнике неотличима от поломки."""
+    async def flow():
+        daemon = Daemon(Settings(workspace=".", port=0, token="t",
+                                 note_path=str(tmp_path / "i.md"),
+                                 first_ack_s=0.05, progress_gap_s=0.05))
+        ws = FakeWS()
+        daemon.clients.add(ws)
+
+        async def slow():
+            await asyncio.sleep(0.2)
+            return "готово"
+
+        result = await daemon._await_with_progress(slow())
+        return result, ws
+
+    result, ws = asyncio.run(flow())
+    spoken = [m["text"] for m in ws.sent if m.get("id") == "voice_summary"]
+    assert result == "готово"
+    assert spoken[0] == "Работаю."
+    assert "Ещё работаю." in spoken[1:]
+    assert all(m.get("progress") for m in ws.sent if m.get("id") == "voice_summary")
+
+
+def test_a_quick_answer_says_nothing_extra(tmp_path):
+    async def flow():
+        daemon = Daemon(Settings(workspace=".", port=0, token="t",
+                                 note_path=str(tmp_path / "i.md"),
+                                 first_ack_s=5.0, progress_gap_s=5.0))
+        ws = FakeWS()
+        daemon.clients.add(ws)
+
+        async def quick():
+            return "быстро"
+
+        return await daemon._await_with_progress(quick()), ws
+
+    result, ws = asyncio.run(flow())
+    assert result == "быстро"
+    assert not [m for m in ws.sent if m.get("id") == "voice_summary"]
