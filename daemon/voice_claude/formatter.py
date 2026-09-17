@@ -166,20 +166,38 @@ def approval_to_speech(raw: str) -> str:
 
 # Технический текст ошибки в ухо не годится: там стек, коды и пути. Но и
 # «что-то пошло не так» бесполезно — человек должен понять, чинить ли ему
-# что-то самому.
+# что-то самому. Частные причины идут первыми: «сессия не поднялась» написано
+# на любой поломке CLI и перебивало собой и кончившийся лимит, и полный диск.
 FAILURE_HINTS = (
     (r"root/sudo privileges", "служба работает от root, и CLI не принял режим без вопросов"),
-    (r"exit code 1\b|Command failed", "сессия Claude не поднялась"),
-    (r"credit|quota|rate.?limit", "кончился лимит подписки"),
-    (r"ENOTFOUND|ECONNREFUSED|Temporary failure|getaddrinfo", "нет сети"),
-    (r"timed? ?out", "ответ не пришёл вовремя"),
-    (r"not found|No such file", "не нашёлся нужный файл"),
-    (r"permission denied", "не хватило прав"),
+    (r"credit|quota|rate.?limit|too low", "кончился лимит подписки"),
+    (r"overloaded|529\b|503\b", "Claude сейчас перегружен"),
+    (r"No space left|ENOSPC|disk quota", "на диске кончилось место"),
+    (r"ENOTFOUND|ECONNREFUSED|Temporary failure|getaddrinfo|fetch failed|"
+     r"EAI_AGAIN|ENETUNREACH|socket hang up", "нет сети"),
+    (r"not a git repository|Not a git repo", "рабочий каталог — не репозиторий"),
+    (r"timed? ?out|ETIMEDOUT", "ответ не пришёл вовремя"),
+    (r"permission denied|EACCES", "не хватило прав"),
+    (r"not found|No such file|ENOENT", "не нашёлся нужный файл"),
+    (r"exit code 1\b|Command failed|exit code: 1\b", "сессия Claude не поднялась"),
 )
+
+# То же самое, но по структуре, а не по словам: SDK кладёт причину отказа
+# в поля, и угадывать её по тексту незачем.
+API_STATUS_HINTS = {
+    401: "токен доступа не принят", 403: "токен доступа не принят",
+    429: "кончился лимит подписки", 500: "Claude сейчас перегружен",
+    503: "Claude сейчас перегружен", 529: "Claude сейчас перегружен",
+}
 
 
 def reason_for_voice(exc: BaseException) -> str:
     """Одна короткая фраза о причине — без стека, кодов и путей."""
+    status = getattr(exc, "api_error_status", None)
+    if isinstance(status, int):
+        return (API_STATUS_HINTS.get(status) or "Claude ответил ошибкой").capitalize() + "."
+    if getattr(exc, "subtype", None) == "error_max_turns":
+        return "Работа не уложилась в отведённые шаги."
     text = f"{type(exc).__name__}: {exc}"
     for pattern, phrase in FAILURE_HINTS:
         if re.search(pattern, text, re.I):

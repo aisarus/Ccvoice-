@@ -85,8 +85,21 @@ class _SdkTarget:
         self._client = ClaudeSDKClient(options=self._options())
         await self._client.connect()
 
+    @staticmethod
+    def compose(text: str, preamble: str = "", role_line: str = "") -> str:
+        """Служебные строки, пустая строка, реплика человека.
+
+        Пустую строку отфильтровывало вместе с пустыми служебными, и реплика
+        прилипала к метаданным. На живом прогоне Claude отвечал на это
+        «похоже, это системное сообщение об окружении, а не задача от вас» —
+        то есть человека попросту не было слышно. Формат задан в спеке:
+        `speaker_identification.claude_injection.example.sent_to_claude`.
+        """
+        head = "\n".join(part for part in (preamble, role_line) if part)
+        return f"{head}\n\n{text}".strip() if head else text.strip()
+
     async def send(self, text: str, preamble: str = "", role_line: str = "") -> Reply:
-        message = "\n".join(part for part in (preamble, role_line, "", text) if part).strip()
+        message = self.compose(text, preamble, role_line)
         if not self.available:
             return Reply(text=f"Claude недоступен: {_stub_reason()}.",
                          full_output=message, target=self.target_id, stubbed=True)
