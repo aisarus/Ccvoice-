@@ -72,6 +72,14 @@ class VoiceService : Service() {
         private const val WINDOW_MS = 15_000L
         /** Столько ждём, что человек начнёт говорить, прежде чем взять расслышанное. */
         private const val FALLBACK_MS = 3_500L
+        /** Распознаватель обязан ответить хоть чем-то; молчит дольше — он мёртв. */
+        private const val RECOGNIZER_DEADLINE_MS = 15_000L
+        /** Сколько ждать конца произнесения, если движок забыл сказать «готово». */
+        private const val SPEECH_MARGIN_MS = 5_000L
+        private const val SPEECH_PER_CHAR_MS = 80L
+        private const val SPEECH_CAP_MS = 120_000L
+        /** Раз в полминуты проверяем, что нас всё ещё можно позвать. */
+        private const val HEARTBEAT_MS = 30_000L
         private const val TAG = "VoiceShell"
     }
 
@@ -139,6 +147,7 @@ class VoiceService : Service() {
         report(route?.describe().orEmpty().ifBlank { "микрофон: телефон" })
 
         Thread { prepareWakeWord() }.start()
+        main.postDelayed(heartbeat, HEARTBEAT_MS)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -220,6 +229,7 @@ class VoiceService : Service() {
     }
 
     override fun onDestroy() {
+        main.removeCallbacksAndMessages(null)
         runCatching { route?.release() }
         runCatching { wake?.release() }
         runCatching { cloud?.destroy() }
@@ -348,6 +358,50 @@ class VoiceService : Service() {
      * которой не будет. Ждать его собственный таймаут — это секунды тишины
      * в ухе, поэтому обрываем сами и отправляем то, что расслышали локально.
      */
+    /**
+     * Сторож распознавателя.
+     *
+     * Он может не ответить ни результатом, ни ошибкой — тогда awaitingCommand
+     * остаётся поднятым навсегда: wake word остановлен, новые реплики не
+     * принимаются. Первая проходит, вторая — уже нет.
+     */
+    private val recognizerWatchdog = Runnable {
+        if (awaitingCommand) {
+            report("распознаватель не ответил — слушаю снова")
+            runCatching { cloud?.cancel() }
+            finishCommand()
+            deliverFallback()
+        }
+    }
+
+    /**
+     * Сторож синтеза: если движок не скажет «готово», speaking останется
+     * поднятым, и каждая следующая реплика отбросится на первой же строке.
+     */
+    private val speechWatchdog = Runnable {
+        if (speaking) {
+            speaking = false
+            spokeAt = System.currentTimeMillis()
+            windowUntil = System.currentTimeMillis() + WINDOW_MS
+            report("синтез не отчитался — слушаю снова")
+            if (!awaitingCommand) resumeWake()
+        }
+    }
+
+    /**
+     * Последняя линия обороны: раз в полминуты проверяем, что нас можно
+     * позвать. Любая причина, по которой слушатель встал, лечится одинаково.
+     */
+    private val heartbeat = object : Runnable {
+        override fun run() {
+            if (wakeReady && !speaking && !awaitingCommand && wake?.isRunning != true) {
+                report("слушатель стоял — перезапустил")
+                resumeWake()
+            }
+            main.postDelayed(this, HEARTBEAT_MS)
+        }
+    }
+
     private val fallbackTimer = Runnable {
         if (awaitingCommand && fallbackText.isNotBlank()) {
             runCatching { cloud?.cancel() }
@@ -380,6 +434,7 @@ class VoiceService : Service() {
                 cloud?.setRecognitionListener(commandListener())
                 cloud?.startListening(intent)
                 if (fallback.isNotBlank()) main.postDelayed(fallbackTimer, FALLBACK_MS)
+                main.postDelayed(recognizerWatchdog, RECOGNIZER_DEADLINE_MS)
             } catch (t: Throwable) {
                 awaitingCommand = false
                 report("распознавание недоступно: ${t.javaClass.simpleName}")
@@ -440,6 +495,7 @@ class VoiceService : Service() {
     private fun finishCommand() {
         awaitingCommand = false
         main.removeCallbacks(fallbackTimer)
+        main.removeCallbacks(recognizerWatchdog)
         main.postDelayed({ if (!awaitingCommand) resumeWake() }, 300)
     }
 
@@ -521,6 +577,7 @@ class VoiceService : Service() {
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) { speaking = true }
                     override fun onDone(utteranceId: String?) {
+                        main.removeCallbacks(speechWatchdog)
                         speaking = false
                         spokeAt = System.currentTimeMillis()
                         windowUntil = System.currentTimeMillis() + WINDOW_MS
@@ -528,7 +585,12 @@ class VoiceService : Service() {
                         main.postDelayed({ if (!speaking && !awaitingCommand) resumeWake() }, 600)
                     }
                     @Deprecated("deprecated in API 21")
-                    override fun onError(utteranceId: String?) { speaking = false }
+                    override fun onError(utteranceId: String?) {
+                        main.removeCallbacks(speechWatchdog)
+                        speaking = false
+                        // Молчание после ошибки — это тоже глухота.
+                        main.postDelayed({ if (!speaking && !awaitingCommand) resumeWake() }, 300)
+                    }
                 })
             } else {
                 report("синтез речи не запустился (код $code)")
@@ -577,11 +639,20 @@ class VoiceService : Service() {
             tts?.speak(Stress.render(text, prefs.stressStyle, prefs.engine),
                        TextToSpeech.QUEUE_FLUSH, speechParams(), "voice-shell")
         }
+        // Сторож на случай, если движок не отчитается о конце речи.
+        main.removeCallbacks(speechWatchdog)
+        main.postDelayed(
+            speechWatchdog,
+            (SPEECH_MARGIN_MS + text.length * SPEECH_PER_CHAR_MS).coerceAtMost(SPEECH_CAP_MS)
+        )
     }
 
     private fun silence() {
+        main.removeCallbacks(speechWatchdog)
         runCatching { tts?.stop() }
         speaking = false
+        // Оборвали речь сами — значит слушаем дальше, не дожидаясь движка.
+        main.postDelayed({ if (!speaking && !awaitingCommand) resumeWake() }, 300)
     }
 
     // ---------- связь ----------
