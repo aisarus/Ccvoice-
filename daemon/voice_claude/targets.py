@@ -158,11 +158,13 @@ class ChatTarget(_SdkTarget):
         from claude_agent_sdk import ClaudeAgentOptions  # type: ignore
 
         async def can_use_tool(tool_name: str, input_data: dict[str, Any], _ctx: Any) -> Any:
-            # Разрешение выдаём сами: интерактивного запроса здесь некому показать,
-            # а список держим узким, чтобы цель осталась неспособной что-то менять.
-            from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny  # type: ignore
-            if tool_name in self.READ_ONLY_TOOLS:
-                return PermissionResultAllow()
+            """Отказ всему, кроме чтения мира.
+
+            Два разрешённых инструмента SDK одобряет сам по списку и сюда не
+            заходит — колбэк нужен для всех остальных: без него запрос на
+            разрешение повис бы, показать его здесь некому.
+            """
+            from claude_agent_sdk import PermissionResultDeny  # type: ignore
             return PermissionResultDeny(
                 message=f"{tool_name} недоступен в разговорной цели — скажи «в код», если нужно действие"
             )

@@ -14,6 +14,7 @@ import mimetypes
 import os
 import secrets
 import time
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -454,6 +455,10 @@ async def run(settings: Settings) -> None:
     # Health check стучится раз в секунду: без этого лог состоит из него одного.
     if not log.isEnabledFor(logging.DEBUG):
         logging.getLogger("websockets.server").setLevel(logging.WARNING)
+    # SDK предупреждает, что для разрешённых списком инструментов колбэк не
+    # вызывается. Так и задумано: список разрешает чтение, колбэк запрещает
+    # остальное. В логе это только шум.
+    warnings.filterwarnings("ignore", message=".*can_use_tool will not be invoked.*")
 
     print(f"voice-claude-daemon\n"
           f"  workspace : {Path(settings.workspace).expanduser()}\n"
