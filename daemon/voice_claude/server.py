@@ -108,7 +108,15 @@ class Daemon:
 
     # -- transport -------------------------------------------------------
     async def handler(self, websocket: Any) -> None:
+        """Читать не переставая.
+
+        Реплику нельзя обрабатывать прямо в цикле чтения: пока Claude работает
+        над прошлой, сокет не читается — ни новая реплика, ни «стоп» не
+        доходят, и телефон выглядит оглохшим. Поэтому всё, кроме приветствия,
+        уходит в отдельную задачу, а цикл возвращается к чтению.
+        """
         self._loop = asyncio.get_running_loop()
+        working: set[asyncio.Task[Any]] = set()
         try:
             async for raw in websocket:
                 try:
@@ -117,8 +125,20 @@ class Daemon:
                     await self._send(websocket, {"id": "error", "code": "bad_json",
                                                  "message": "not JSON", "recoverable": True})
                     continue
-                await self._dispatch(websocket, message)
+                # Приветствие решает, пускать ли вообще, — оно по порядку.
+                if message.get("id") == "hello":
+                    await self._dispatch(websocket, message)
+                    continue
+                if websocket not in self.clients:
+                    await self._send(websocket, {"id": "error", "code": "unauthorized",
+                                                 "message": "сначала hello", "recoverable": False})
+                    continue
+                task = asyncio.create_task(self._dispatch(websocket, message))
+                working.add(task)
+                task.add_done_callback(working.discard)
         finally:
+            # Начатую работу не обрываем: телефон переподключается сам, а
+            # брошенная посреди дела правка — худшее, что можно сделать.
             self.clients.discard(websocket)
 
     async def _dispatch(self, ws: Any, msg: dict[str, Any]) -> None:
