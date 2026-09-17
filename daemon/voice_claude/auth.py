@@ -186,8 +186,22 @@ def token_problem(value: str) -> str | None:
     return None
 
 
+def cli_credentials_path() -> Path:
+    """Куда CLI кладёт собственный вход, если человек авторизовался им напрямую."""
+    base = os.environ.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")
+    return Path(base) / ".credentials.json"
+
+
+def cli_authenticated() -> bool:
+    """CLI вошёл сам — тогда переменная с токеном не нужна вовсе."""
+    try:
+        return cli_credentials_path().stat().st_size > 2
+    except OSError:
+        return False
+
+
 def credentials_present() -> bool:
-    """Подписка (OAuth-токен) или API-ключ — годится любое, но настоящее."""
+    """Подписка, ключ или собственный вход CLI — годится любое, но настоящее."""
     return credential_kind() != "none"
 
 
@@ -198,6 +212,8 @@ def credential_kind() -> str:
     key = os.environ.get("ANTHROPIC_API_KEY", "")
     if key and token_problem(key) is None:
         return "api_key"
+    if cli_authenticated():
+        return "cli"
     return "none"
 
 
@@ -209,6 +225,9 @@ def credential_problem() -> str | None:
             problem = token_problem(value)
             if problem:
                 return f"{name}: {problem}"
+    if credential_kind() == "none":
+        return ("нет ни токена подписки, ни ключа, и CLI не авторизован — "
+                "войди на сервере командой claude setup-token")
     return None
 
 

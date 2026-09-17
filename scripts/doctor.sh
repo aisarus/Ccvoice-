@@ -33,6 +33,16 @@ else
     echo "нет файла $ENV_FILE"
 fi
 
+line "вход CLI"
+CRED="${CLAUDE_CONFIG_DIR:-/root/.claude}/.credentials.json"
+if [ -s "$CRED" ]; then
+    echo "CLI авторизован сам ($CRED) — переменная с токеном не обязательна"
+else
+    echo "CLI своего входа не имеет: работает только переменная с токеном"
+fi
+echo -n "прямая проверка CLI: "
+timeout 90 env -u CLAUDE_CODE_OAUTH_TOKEN claude -p "ответь одним словом: работает" 2>&1 | head -3
+
 line "порт"
 ss -lntp 2>/dev/null | grep -E ":${PORT_VALUE:-8787}\b" || echo "никто не слушает ${PORT_VALUE:-8787}"
 

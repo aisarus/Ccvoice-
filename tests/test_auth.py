@@ -108,3 +108,21 @@ def test_missing_environment_file_is_reported_not_created(tmp_path):
     from voice_claude.auth import persist_token
 
     assert not persist_token("sk-ant-oat01-" + "T" * 40, str(tmp_path / "нет-такого.env"))
+
+
+def test_cli_login_counts_as_a_credential(tmp_path, monkeypatch):
+    """Если CLI вошёл сам, переменная с токеном не нужна — и демон не должен врать «none»."""
+    from voice_claude.auth import cli_authenticated, credential_kind
+
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    config = tmp_path / "claude"
+    config.mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+
+    assert not cli_authenticated()
+    assert credential_kind() == "none"
+
+    (config / ".credentials.json").write_text('{"oauth": "..."}', encoding="utf-8")
+    assert cli_authenticated()
+    assert credential_kind() == "cli"
