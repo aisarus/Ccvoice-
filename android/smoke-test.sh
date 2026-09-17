@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Дымовая проверка на эмуляторе: приложение должно установиться, открыться,
-# пережить выдачу разрешений и запуск фоновой службы.
+# пережить выдачу разрешений и не соврать про то, чем оно слушает.
 set -euo pipefail
 
 APK="android/app/build/outputs/apk/debug/app-debug.apk"
@@ -20,25 +20,24 @@ crash=$(adb logcat -d -b crash || true)
 [ -z "$crash" ] || fail "приложение упало при старте" echo "$crash"
 [ -n "$(adb shell pidof $PKG | tr -d '\r')" ] || fail "процесс не живёт" adb logcat -d -t 120
 
-echo "== разрешения и служба =="
+echo "== разрешения =="
 adb shell pm grant "$PKG" android.permission.RECORD_AUDIO
 adb shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS
+
+# Службу из оболочки запустить нельзя: она не exported, и `am
+# start-foreground-service` отвечает «Requires permission not exported from
+# uid ...». Раньше эта ошибка гасилась через `|| true`, и всё, что шло дальше,
+# проверяло живой экран, делая вид, что проверяет службу. Поэтому код, который
+# трогает системный звук, проверяется инструментальными тестами — они идут
+# внутри самого приложения, с его правами.
+echo "== инструментальные тесты =="
 adb logcat -c
-adb shell am start-foreground-service -n "$PKG/.VoiceService" || true
-sleep 10
+( cd android && gradle --no-daemon connectedDebugAndroidTest )
 
 crash=$(adb logcat -d -b crash || true)
-[ -z "$crash" ] || fail "служба упала" echo "$crash"
-[ -n "$(adb shell pidof $PKG | tr -d '\r')" ] || fail "процесс умер после запуска службы" adb logcat -d -t 200
+[ -z "$crash" ] || fail "что-то упало во время тестов" echo "$crash"
 
-echo "== маршрут микрофона =="
-# На эмуляторе гарнитуры нет, но строку о выбранном микрофоне служба обязана
-# сказать: если её нет, разбор устройств упал молча.
-mic=$(adb logcat -d -s VoiceShell:I | grep -o 'микрофон:.*' | tail -1 || true)
-[ -n "$mic" ] || fail "служба не сказала, куда смотрит микрофон" adb logcat -d -s VoiceShell:*
-echo "$mic"
-
-echo "== что сказала служба =="
+echo "== что сказало приложение =="
 adb logcat -d -s VoiceShell:* | tail -20 || true
 
-echo "OK: приложение и служба живы"
+echo "OK: приложение живо, маршрут микрофона проверен на устройстве"
