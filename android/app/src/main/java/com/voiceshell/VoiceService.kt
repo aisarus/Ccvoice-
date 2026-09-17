@@ -69,6 +69,7 @@ class VoiceService : Service() {
     private var awaitingCommand = false
     private var windowUntil = 0L
     private var wakeReady = false
+    private var unauthorized = false
 
     override fun onCreate() {
         super.onCreate()
@@ -340,6 +341,7 @@ class VoiceService : Service() {
         val request = Request.Builder().url(prefs.socketUrl()).build()
         socket = http.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                unauthorized = false
                 webSocket.send(
                     JSONObject().put("id", "hello").put("v", 1)
                         .put("token", prefs.token).put("device_id", "android")
@@ -365,7 +367,8 @@ class VoiceService : Service() {
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                main.postDelayed({ connect() }, 2000)
+                // С неверным токеном долбиться раз в две секунды бессмысленно.
+                main.postDelayed({ connect() }, if (unauthorized) 30_000 else 2000)
             }
         })
     }
@@ -384,7 +387,15 @@ class VoiceService : Service() {
                 speak(spoken)
             }
             "whisper" -> speak(message.optString("text"))
-            "error" -> report("ошибка: ${message.optString("message")}")
+            "error" -> {
+                val code = message.optString("code")
+                if (code == "unauthorized") {
+                    unauthorized = true
+                    report("токен не подошёл — вставь только значение, без VOICE_TOKEN=")
+                } else {
+                    report("ошибка: ${message.optString("message")}")
+                }
+            }
         }
     }
 

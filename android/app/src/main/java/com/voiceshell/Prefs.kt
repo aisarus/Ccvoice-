@@ -12,7 +12,7 @@ class Prefs(context: Context) {
 
     var token: String
         get() = sp.getString("token", "") ?: ""
-        set(value) = sp.edit().putString("token", value.trim()).apply()
+        set(value) = sp.edit().putString("token", clean(value)).apply()
 
     /** Язык реплик: ru-RU, en-US, he-IL. Wake word всегда слушается локально. */
     var language: String
@@ -25,6 +25,17 @@ class Prefs(context: Context) {
         set(value) = sp.edit().putString("last_error", value).apply()
 
     val isConfigured: Boolean get() = server.isNotBlank() && token.isNotBlank()
+
+    /**
+     * Токен обычно копируют из вывода `grep VOICE_TOKEN /etc/voice-shell.env`,
+     * вместе с именем переменной, знаком равенства и кавычками. Чистим сами,
+     * а не заставляем человека вглядываться в строку.
+     */
+    private fun clean(raw: String): String = raw.trim()
+        .removePrefix("VOICE_TOKEN")
+        .trimStart('=', ' ')
+        .trim('"', '\'', ' ')
+        .substringBefore(' ')
 
     /** https://host -> wss://host, http://host -> ws://host. */
     fun socketUrl(): String {
