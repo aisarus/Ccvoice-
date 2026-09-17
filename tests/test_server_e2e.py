@@ -213,6 +213,57 @@ def test_the_answer_carries_clean_text_and_a_spoken_one(tmp_path):
     assert "spoken" not in daemon._voice("Привет, рад тебя слышать.")
 
 
+def test_a_long_task_does_not_make_the_daemon_deaf(tmp_path):
+    """Живая проверка: первая реплика сделала змейку, вторую уже не слышали —
+    сокет не читался, пока Claude работал."""
+    async def flow():
+        settings = Settings(workspace=".", token="t", note_path=str(tmp_path / "i.md"))
+        daemon = Daemon(settings)
+        started, release = asyncio.Event(), asyncio.Event()
+
+        class SlowCode:
+            target_id = "code"
+            available = True
+            workspace = Path(".")
+
+            async def send(self, text, preamble="", role_line=""):
+                from voice_claude.targets import Reply
+                started.set()
+                await release.wait()
+                return Reply(text="Готово.", full_output="Готово.", target="code")
+
+            async def interrupt(self):
+                release.set()
+
+            async def reset(self):
+                return None
+
+        daemon.targets.code = SlowCode()
+        daemon.targets._by_id["code"] = daemon.targets.code
+
+        seen = []
+        async with serve(daemon.handler, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            async with connect(f"ws://127.0.0.1:{port}") as ws:
+                await ws.send(json.dumps({"id": "hello", "v": 1, "token": "t"}))
+                await ws.recv()
+                await ws.send(json.dumps(segment("почини падающий тест", MASTER)))
+                await asyncio.wait_for(started.wait(), timeout=5)
+
+                # Claude ещё работает — а нас должно быть слышно.
+                await ws.send(json.dumps({"id": "interrupt", "scope": "work"}))
+                for _ in range(20):
+                    msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+                    seen.append(msg)
+                    if "Остановил" in str(msg.get("text", "")):
+                        break
+        return seen
+
+    seen = asyncio.run(flow())
+    assert any("Остановил" in str(m.get("text", "")) for m in seen), \
+        "«стоп» не дошёл, пока шла работа"
+
+
 def test_ambient_control_switches_and_wipes(tmp_path):
     async def flow():
         settings = Settings(workspace=".", token="t", note_path=str(tmp_path / "i.md"))
