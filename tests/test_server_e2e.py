@@ -16,9 +16,11 @@ BYSTANDER = {"level_rel_db": -14.0, "snr_db": 9.0, "drr_db": -1.0, "c50_db": 2.0
              "hf_ratio_db": -7.0, "lf_proximity_db": -2.0}
 
 
-async def _session(segments, note_path):
+async def _session(segments, note_path, prepare=None):
     settings = Settings(workspace=".", port=0, token="test-token", note_path=str(note_path))
     daemon = Daemon(settings)
+    if prepare is not None:
+        prepare(daemon)
     received = []
     async with serve(daemon.handler, "127.0.0.1", 0) as server:
         port = server.sockets[0].getsockname()[1]
@@ -36,8 +38,8 @@ async def _session(segments, note_path):
     return daemon, received
 
 
-def run(segments, note_path):
-    return asyncio.run(_session(segments, note_path))
+def run(segments, note_path, prepare=None):
+    return asyncio.run(_session(segments, note_path, prepare))
 
 
 def segment(text, features, **over):
@@ -149,6 +151,43 @@ def test_alternatives_are_a_hint_and_never_a_rewrite(tmp_path):
         tmp_path / "inbox.md",
     )
     assert kinds(received, "route")[0]["target"] == "code"
+
+
+def _intent(answer, asked=None):
+    """Подменяем цель-маршрутизатор: в тестах SDK недоступен."""
+    def prepare(daemon):
+        async def classify(text, timeout=2.5):
+            if asked is not None:
+                asked.append(text)
+            return answer
+        daemon.targets.intent.classify = classify
+    return prepare
+
+
+def test_the_model_routes_what_the_lexicon_does_not_know(tmp_path):
+    """«Сделай, чтобы форма не отправлялась дважды» — работа без единого
+    ключевого слова: словарь молчит, решает модель."""
+    _, received = run([segment("сделай чтобы форма не отправлялась дважды", MASTER)],
+                      tmp_path / "inbox.md", prepare=_intent("code"))
+    route = kinds(received, "route")[0]
+    assert (route["target"], route["reason"]) == ("code", "intent_model")
+
+
+def test_a_spoken_prefix_is_never_second_guessed(tmp_path):
+    asked = []
+    _, received = run([segment("в код почини падающий тест", MASTER)],
+                      tmp_path / "inbox.md", prepare=_intent("chat", asked))
+    route = kinds(received, "route")[0]
+    assert (route["target"], route["reason"]) == ("code", "explicit_prefix")
+    assert asked == [], "модель спросили там, где человек уже сказал сам"
+
+
+def test_a_silent_model_leaves_the_lexicon_in_charge(tmp_path):
+    """Таймаут или отсутствие подписки не должны задерживать реплику."""
+    _, received = run([segment("сделай чтобы форма не отправлялась дважды", MASTER)],
+                      tmp_path / "inbox.md", prepare=_intent(None))
+    route = kinds(received, "route")[0]
+    assert (route["target"], route["reason"]) == ("chat", "default")
 
 
 def test_ambient_control_switches_and_wipes(tmp_path):

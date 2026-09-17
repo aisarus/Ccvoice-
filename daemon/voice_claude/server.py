@@ -49,6 +49,8 @@ class Settings:
     note_path: str = "~/voice-claude/inbox.md"
     ambient_submode: str = "off"
     workspace_repo: str | None = None
+    # auto — спрашивать модель, когда словарь не уверен; off — только словарь.
+    router_model: str = "auto"
     # Долгая работа не должна молчать: первое «работаю» и повторы.
     first_ack_s: float = 0.0
     progress_gap_s: float = 0.0
@@ -64,6 +66,7 @@ class Settings:
             note_path=os.environ.get("NOTE_PATH", "/tmp/workspace/inbox.md"),
             ambient_submode=os.environ.get("AMBIENT_SUBMODE", "off"),
             workspace_repo=os.environ.get("WORKSPACE_REPO") or None,
+            router_model=os.environ.get("ROUTER_MODEL", "auto"),
         )
 
 
@@ -72,7 +75,8 @@ class Daemon:
         self.settings = settings
         self.machine = state.Machine(on_change=self._on_state_change)
         self.classifier = SpeakerClassifier()
-        self.router = Router()
+        self.router = Router(config={**defaults("targets"),
+                                     "intent_model": settings.router_model})
         self.ambient = AmbientBuffer(submode=settings.ambient_submode)
         self.whisper = WhisperGate()
         self.proactive_limit = RateLimiter()
@@ -208,6 +212,11 @@ class Daemon:
 
         route = self.router.route(text, ms_since_last=self.machine.ms_since_window(),
                                   learned=self.examples.suggest(text))
+        if self.router.needs_intent_model(route) and self.targets.intent is not None:
+            guess = await self.targets.intent.classify(route.text,
+                                                       timeout=self.router.intent_timeout)
+            if guess:
+                route = self.router.apply_intent(route, guess)
         await self._send(ws, {"id": "route", "target": route.target, "reason": route.reason,
                               "confidence": round(route.confidence, 3),
                               "earcon": self.router.earcon_for(route.target),

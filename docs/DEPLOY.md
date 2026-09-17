@@ -167,6 +167,7 @@ https://ТВОЙ-СЕРВИС.onrender.com/?token=ТОКЕН_ИЗ_ШАГА_2
 | `WORKSPACE_REPO` | нет | репозиторий, который склонируется на старте |
 | `GITHUB_TOKEN` | нет | чтобы Claude мог пушить |
 | `AMBIENT_SUBMODE` | нет | стартовый режим: `off`, `passive`, `assist` |
+| `ROUTER_MODEL` | нет | `auto` — на неуверенной реплике цель выбирает модель; `off` — только словарь, без лишнего круга к Claude |
 | `PORT`, `WORKSPACE_DIR`, `NOTE_PATH` | нет | задаются платформой или по умолчанию |
 
 ---

@@ -231,6 +231,48 @@ class SummaryTarget(_SdkTarget):
         return spoken or None
 
 
+class IntentTarget(_SdkTarget):
+    """Маршрут по смыслу задачи, а не по словарю.
+
+    Словарь — это и есть кодовые слова: он ловит «git» и «тест», но живая речь
+    ими не пользуется. Эта цель видит реплику до маршрутизации и отвечает одним
+    словом. Инструментов у неё нет, и ответ её ни на что не влияет, кроме
+    выбора цели.
+    """
+
+    target_id = "intent"
+    VALID = ("code", "chat", "note")
+    SYSTEM = (
+        "Ты маршрутизатор голосовых реплик. Ответь ровно одним словом: code, chat или note.\n"
+        "code — человек хочет что-то сделать в проекте или на сервере: посмотреть, изменить, "
+        "починить, запустить, собрать, выкатить, проверить состояние.\n"
+        "chat — человек хочет ответ: объяснение, совет, расчёт, перевод, факт, мнение.\n"
+        "note — человек проговаривает мысль, чтобы её записали, и ответа не ждёт.\n"
+        "Сомневаешься между code и chat — отвечай chat: эта цель ничего не меняет.\n"
+        "Никаких пояснений и знаков препинания, только одно слово."
+    )
+
+    def __init__(self, cwd: str | Path | None = None) -> None:
+        super().__init__(cwd or Path(tempfile.gettempdir()) / "voice-claude-intent")
+
+    def _options(self) -> Any:
+        from claude_agent_sdk import ClaudeAgentOptions  # type: ignore
+
+        return ClaudeAgentOptions(cwd=str(self.cwd), system_prompt=self.SYSTEM,
+                                  allowed_tools=[], max_turns=1)
+
+    async def classify(self, text: str, timeout: float = 2.5) -> str | None:
+        """Цель или None — тогда остаётся решение словаря."""
+        if not self.available or not text.strip():
+            return None
+        try:
+            reply = await asyncio.wait_for(self.send(text), timeout=timeout)
+        except (asyncio.TimeoutError, Exception):  # pragma: no cover - сеть/SDK
+            return None
+        word = reply.text.strip().lower().strip(".,!?:;\"'«»").split(" ")[0]
+        return word if word in self.VALID else None
+
+
 class NoteTarget:
     """Захват мысли без ответа."""
 
@@ -253,10 +295,12 @@ class TargetSet:
     chat: ChatTarget
     note: NoteTarget
     summary: "SummaryTarget | None" = None
+    intent: "IntentTarget | None" = None
     _by_id: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.summary = self.summary or SummaryTarget()
+        self.intent = self.intent or IntentTarget()
         self._by_id = {"code": self.code, "chat": self.chat, "note": self.note}
 
     def __getitem__(self, target: str) -> Any:
@@ -271,3 +315,5 @@ class TargetSet:
         await self.chat.reset()
         if self.summary is not None:
             await self.summary.reset()
+        if self.intent is not None:
+            await self.intent.reset()

@@ -1103,6 +1103,7 @@
       "explicit_prefix": [
         {
           "utterances": [
+            "код",
             "в код",
             "клод код",
             "в проекте"
@@ -1111,6 +1112,7 @@
         },
         {
           "utterances": [
+            "чат",
             "просто скажи",
             "вопрос",
             "в чат"
@@ -1176,6 +1178,21 @@
         }
       ],
       "announcement": "смена цели обозначается earcon'ом (to_code / to_chat), а не фразой",
+      "intent_model": {
+        "why": "Словарь ключевых слов — это и есть кодовые слова: он ловит «git» и «тест», но живая речь ими не пользуется. «Сделай, чтобы форма не отправлялась дважды» — работа, «а как вообще устроены дебаунсы» — разговор, и ни в одной фразе нет слова из словаря.",
+        "used_when": "словарь промолчал или ответил неуверенно",
+        "min_confidence_to_skip": 0.8,
+        "never_overrides": [
+          "explicit_prefix",
+          "forced",
+          "learned",
+          "sticky"
+        ],
+        "timeout_s": 2.5,
+        "fallback": "решение словаря — модель не должна задерживать реплику",
+        "reason_in_protocol": "intent_model",
+        "cost": "лишний круг к модели на неуверенных репликах; на явном префиксе и внутри окна диалога его нет"
+      },
       "misroute_recovery": {
         "utterances": [
           "не туда",
@@ -2139,6 +2156,7 @@
       "default_target": "chat",
       "sticky_window_s": 15,
       "min_confidence_for_code": 0.7,
+      "intent_model": "auto",
       "note_path": "~/voice-claude/inbox.md"
     },
     "ambient": {

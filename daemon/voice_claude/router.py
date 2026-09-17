@@ -135,6 +135,33 @@ class Router:
             return "chat", min(0.95, 0.6 + 0.1 * chat_hits)
         return None, 0.0
 
+    # -- маршрут по смыслу ------------------------------------------------
+    @property
+    def intent_timeout(self) -> float:
+        cfg = self._router.get("intent_model") or {}
+        return float(cfg.get("timeout_s", 2.5))
+
+    def needs_intent_model(self, route: Route) -> bool:
+        """Спрашивать ли модель.
+
+        Только там, где словарь не знает ответа. Произнесённый префикс, чип
+        в интерфейсе, прошлая поправка и цель внутри окна диалога — это уже
+        решение человека, и переспрашивать его нельзя.
+        """
+        cfg = self._router.get("intent_model")
+        if not cfg or self._cfg.get("intent_model", "auto") != "auto":
+            return False
+        if route.reason not in ("classifier", "default"):
+            return False
+        return route.confidence < cfg["min_confidence_to_skip"]
+
+    def apply_intent(self, route: Route, target: str) -> Route:
+        """Ответ модели вместо догадки словаря. Чужое слово — игнорируем."""
+        if target not in self._targets:
+            return route
+        self.sticky_target = target
+        return Route(target, "intent_model", 0.85, route.text)
+
     def force(self, target: str | None) -> None:
         """Чип в интерфейсе: None возвращает к автоматическому выбору."""
         if target is not None and target not in self._targets:

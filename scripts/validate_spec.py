@@ -183,6 +183,22 @@ def consistency_check(spec, errors):
     if spec["config_defaults"]["targets"]["default_target"] != router["default_target"]:
         errors.append("config_defaults.targets.default_target disagrees with router.default_target")
 
+    # 13a. The intent model guesses; it must never overrule what the human said.
+    intent = router.get("intent_model")
+    if intent:
+        human = {"explicit_prefix", "forced", "learned", "sticky"}
+        missing = human - set(intent["never_overrides"])
+        if missing:
+            errors.append("intent_model must never override %s: those are the human's "
+                          "own decision" % sorted(missing))
+        if not intent.get("fallback"):
+            errors.append("intent_model needs a declared fallback: a slow model must not "
+                          "hold up the utterance")
+        mode = spec["config_defaults"]["targets"].get("intent_model")
+        if mode not in ("auto", "off"):
+            errors.append("config_defaults.targets.intent_model must be auto or off, got %r"
+                          % mode)
+
     # 14. Ambient mode is off by default and keeps no raw audio.
     amb = spec["ambient_mode"]
     if amb["enabled_by_default"]:
