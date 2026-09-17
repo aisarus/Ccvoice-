@@ -17,7 +17,11 @@ BYSTANDER = {"level_rel_db": -14.0, "snr_db": 9.0, "drr_db": -1.0, "c50_db": 2.0
 
 
 async def _session(segments, note_path, prepare=None):
-    settings = Settings(workspace=".", port=0, token="test-token", note_path=str(note_path))
+    # Рабочий каталог — всегда временный, никогда не сам репозиторий. Демон
+    # в нём коммитит и делает `git reset --hard`: на живом прогоне такой тест
+    # закоммитил несохранённую работу в историю проекта и тут же откатил её.
+    settings = Settings(workspace=str(Path(note_path).parent), port=0,
+                        token="test-token", note_path=str(note_path))
     daemon = Daemon(settings)
     if prepare is not None:
         prepare(daemon)
@@ -99,7 +103,7 @@ def test_code_target_reports_stub_instead_of_pretending(tmp_path):
 
 def test_bad_token_is_rejected(tmp_path):
     async def attempt():
-        settings = Settings(workspace=".", token="right", note_path=str(tmp_path / "i.md"))
+        settings = Settings(workspace=str(tmp_path), token="right", note_path=str(tmp_path / "i.md"))
         daemon = Daemon(settings)
         async with serve(daemon.handler, "127.0.0.1", 0) as server:
             port = server.sockets[0].getsockname()[1]
@@ -205,7 +209,7 @@ def test_the_answer_carries_clean_text_and_a_spoken_one(tmp_path):
     said = [m for m in kinds(received, "voice_summary") if not m.get("progress")][0]
     assert "+" not in said["text"], "знаки ударения не должны попадать на экран"
 
-    daemon = Daemon(Settings(workspace=".", token="t", note_path=str(tmp_path / "i.md")))
+    daemon = Daemon(Settings(workspace=str(tmp_path), token="t", note_path=str(tmp_path / "i.md")))
     payload = daemon._voice("Откатил конфиг, тесты зелёные.")
     assert payload["text"] == "Откатил конфиг, тесты зелёные."
     assert payload["spoken"] == "Откат+ил конф+иг, т+есты зелёные."
@@ -217,14 +221,14 @@ def test_a_long_task_does_not_make_the_daemon_deaf(tmp_path):
     """Живая проверка: первая реплика сделала змейку, вторую уже не слышали —
     сокет не читался, пока Claude работал."""
     async def flow():
-        settings = Settings(workspace=".", token="t", note_path=str(tmp_path / "i.md"))
+        settings = Settings(workspace=str(tmp_path), token="t", note_path=str(tmp_path / "i.md"))
         daemon = Daemon(settings)
         started, release = asyncio.Event(), asyncio.Event()
 
         class SlowCode:
             target_id = "code"
             available = True
-            workspace = Path(".")
+            workspace = Path(tmp_path)
 
             async def send(self, text, preamble="", role_line=""):
                 from voice_claude.targets import Reply
@@ -266,7 +270,7 @@ def test_a_long_task_does_not_make_the_daemon_deaf(tmp_path):
 
 def test_ambient_control_switches_and_wipes(tmp_path):
     async def flow():
-        settings = Settings(workspace=".", token="t", note_path=str(tmp_path / "i.md"))
+        settings = Settings(workspace=str(tmp_path), token="t", note_path=str(tmp_path / "i.md"))
         daemon = Daemon(settings)
         async with serve(daemon.handler, "127.0.0.1", 0) as server:
             port = server.sockets[0].getsockname()[1]
@@ -293,7 +297,7 @@ def test_same_port_serves_the_client_and_health_check(tmp_path):
     from voice_claude.server import make_process_request
 
     async def flow():
-        settings = Settings(workspace=".", port=0, token="t", note_path=str(tmp_path / "i.md"))
+        settings = Settings(workspace=str(tmp_path), port=0, token="t", note_path=str(tmp_path / "i.md"))
         daemon = Daemon(settings)
         async with serve(daemon.handler, "127.0.0.1", 0,
                          process_request=make_process_request()) as server:
@@ -370,7 +374,7 @@ FAKE_SETUP = ["python3", str(Path(__file__).resolve().parent / "fake_setup_token
 
 
 async def _auth_flow(code, token_env, tmp_path):
-    settings = Settings(workspace=".", port=0, token="t", note_path=str(tmp_path / "i.md"))
+    settings = Settings(workspace=str(tmp_path), port=0, token="t", note_path=str(tmp_path / "i.md"))
     daemon = Daemon(settings)
     async with serve(daemon.handler, "127.0.0.1", 0) as server:
         port = server.sockets[0].getsockname()[1]
@@ -423,7 +427,7 @@ def test_a_token_can_be_pasted_straight_into_the_app(tmp_path, monkeypatch):
     good = "sk-ant-oat01-" + "T" * 40
 
     async def flow(token):
-        settings = Settings(workspace=".", port=0, token="t", note_path=str(tmp_path / "i.md"))
+        settings = Settings(workspace=str(tmp_path), port=0, token="t", note_path=str(tmp_path / "i.md"))
         daemon = Daemon(settings)
         async with serve(daemon.handler, "127.0.0.1", 0) as server:
             port = server.sockets[0].getsockname()[1]

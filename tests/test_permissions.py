@@ -30,7 +30,7 @@ def segment(text, features):
 
 
 async def _answer(text, features, tmp_path):
-    daemon = Daemon(Settings(workspace=".", port=0, token="t", note_path=str(tmp_path / "i.md")))
+    daemon = Daemon(Settings(workspace=str(tmp_path), port=0, token="t", note_path=str(tmp_path / "i.md")))
     ws = FakeWS()
     daemon.clients.add(ws)
     future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
@@ -99,7 +99,7 @@ def test_request_is_phrased_like_a_human():
 def test_stop_work_interrupts_and_says_so(tmp_path):
     """«стоп» гасит голос, «останови работу» — саму работу."""
     async def flow():
-        daemon = Daemon(Settings(workspace=".", port=0, token="t", note_path=str(tmp_path / "i.md")))
+        daemon = Daemon(Settings(workspace=str(tmp_path), port=0, token="t", note_path=str(tmp_path / "i.md")))
         ws = FakeWS()
         daemon.clients.add(ws)
         await daemon._dispatch(ws, {"id": "interrupt", "scope": "work"})
@@ -119,7 +119,7 @@ def test_stop_work_interrupts_and_says_so(tmp_path):
 def test_long_work_says_so_instead_of_going_silent(tmp_path):
     """Тишина в наушнике неотличима от поломки."""
     async def flow():
-        daemon = Daemon(Settings(workspace=".", port=0, token="t",
+        daemon = Daemon(Settings(workspace=str(tmp_path), port=0, token="t",
                                  note_path=str(tmp_path / "i.md"),
                                  first_ack_s=0.05, progress_gap_s=0.05))
         ws = FakeWS()
@@ -142,7 +142,7 @@ def test_long_work_says_so_instead_of_going_silent(tmp_path):
 
 def test_a_quick_answer_says_nothing_extra(tmp_path):
     async def flow():
-        daemon = Daemon(Settings(workspace=".", port=0, token="t",
+        daemon = Daemon(Settings(workspace=str(tmp_path), port=0, token="t",
                                  note_path=str(tmp_path / "i.md"),
                                  first_ack_s=5.0, progress_gap_s=5.0))
         ws = FakeWS()

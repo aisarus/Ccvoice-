@@ -29,7 +29,7 @@ from .ambient import AmbientBuffer, RateLimiter, WhisperGate
 from .auth import (SetupError, SetupTokenFlow, apply_token, credential_kind,
                    credential_problem, forget_cli_probe, github_ready, persist_token,
                    probe_cli, token_problem)
-from .router import Router
+from .router import Route, Router
 from .speaker import Decision, Features, SegmentContext, SpeakerClassifier, debug_record
 from .spec import defaults, load_spec
 from .targets import ChatTarget, CodeTarget, NoteTarget, TargetSet
@@ -99,12 +99,24 @@ class Daemon:
         self.journal = checkpoints.Journal(settings.workspace)
         self.examples = learning.Examples(settings.workspace)
         self._last_utterance: tuple[str, str] | None = None   # текст и куда ушло
+        self._last_output: dict[str, str] = {}                # что ответила каждая цель
         self.watcher = watcher.Watcher(settings.workspace)
         self._pending_news: list[str] = []
         background = load_spec()["config_defaults"]["background"]
         self._first_ack_s = settings.first_ack_s or background["first_ack_after_ms"] / 1000
         self._progress_gap_s = settings.progress_gap_s or background["min_interval_between_events_s"]
         self.preapproved: set[str] = set()
+        # Реплики обрабатываются параллельно, а Claude-сессия, рабочая копия и
+        # состояние машины — одни на всех. Счётчик говорит, сколько реплик ещё
+        # в работе; замок держит целиком «запомнить HEAD — поработать —
+        # закоммитить», иначе точка отката указывает не туда, куда обещали.
+        self._busy = 0
+        self._code_turn = asyncio.Lock()
+        self._undo_wait_s = 15.0
+        self._last_progress_at = 0.0
+        # О том, что точку отката записать не вышло, говорим один раз: это
+        # свойство рабочего каталога, а не новость каждой реплики.
+        self._warned_no_undo = False
 
     # -- transport -------------------------------------------------------
     async def handler(self, websocket: Any) -> None:
@@ -133,13 +145,35 @@ class Daemon:
                     await self._send(websocket, {"id": "error", "code": "unauthorized",
                                                  "message": "сначала hello", "recoverable": False})
                     continue
-                task = asyncio.create_task(self._dispatch(websocket, message))
+                task = asyncio.create_task(self._guarded(websocket, message))
                 working.add(task)
                 task.add_done_callback(working.discard)
         finally:
             # Начатую работу не обрываем: телефон переподключается сам, а
             # брошенная посреди дела правка — худшее, что можно сделать.
             self.clients.discard(websocket)
+
+    async def _guarded(self, ws: Any, msg: dict[str, Any]) -> None:
+        """Ни одна поломка не имеет права стать тишиной.
+
+        Пока реплика обрабатывалась в цикле чтения, любое исключение рвало
+        связь — телефон это видел и переподключался. Теперь каждая реплика
+        живёт в своей задаче, и необработанное исключение не видно вообще
+        никак: связь цела, а ответа нет и не будет. Поэтому здесь ловится всё,
+        что не поймали ниже, и превращается в короткую фразу в ухо.
+        """
+        try:
+            await self._dispatch(ws, msg)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:                  # noqa: BLE001 - причин много
+            log.exception("не смог обработать %s", msg.get("id"))
+            self.machine.to(state.SPEAKING)
+            self.machine.open_window()
+            await self._say(f"Сбой в оболочке. {formatter.reason_for_voice(exc)}")
+            await self._send(ws, {"id": "error", "code": "internal",
+                                  "message": str(exc)[:400], "recoverable": True})
+            await self._broadcast_state()
 
     async def _dispatch(self, ws: Any, msg: dict[str, Any]) -> None:
         kind = msg.get("id")
@@ -231,6 +265,13 @@ class Daemon:
             await self._reroute(ws, text, decision, device)
             return
 
+        # «Перекинь это в код», «объясни попроще» — это уже выбранная цель,
+        # спрашивать про неё словарь и модель незачем.
+        handoff = self.router.handoff_target(text)
+        if handoff is not None:
+            await self._handoff(ws, text, decision, device, handoff)
+            return
+
         route = self.router.route(text, ms_since_last=self.machine.ms_since_window(),
                                   learned=self.examples.suggest(text))
         if self.router.needs_intent_model(route) and self.targets.intent is not None:
@@ -254,52 +295,139 @@ class Daemon:
         if route.target == "chat" and AmbientBuffer.is_recall(text) and self.ambient.enabled:
             role_line += "\n[ambient] последние реплики:\n" + self.ambient.transcript()
 
+        await self._speak_turn(ws, route, preamble, role_line)
+
+    async def _speak_turn(self, ws: Any, route: Any, preamble: str, role_line: str,
+                          remember: str | None = None) -> None:
+        """Реплика целиком: очередь на сессию, точка отката, ответ вслух."""
+        self._last_utterance = (remember or route.text, route.target)
+        self._busy += 1
+        try:
+            if route.target == "code":
+                # Замок на всю реплику, а не только на запрос к сессии: две
+                # реплики подряд запоминали один и тот же HEAD, первая
+                # закоммитывала правки обеих, а вторая не находила что
+                # коммитить. Откат по такой точке снимал и чужую работу.
+                async with self._code_turn:
+                    reply = await self._run_turn(ws, route, preamble, role_line)
+            else:
+                reply = await self._run_turn(ws, route, preamble, role_line)
+            if reply is None:
+                return
+            summary = await self._voice_summary(reply, route.target)
+            # Последний вывод цели нужен передаче: «объясни попроще» без него
+            # уезжает в чат без единого слова о том, что объяснять.
+            self._last_output[route.target] = reply.full_output
+            await self._broadcast(self._voice(summary.text, is_question=summary.is_question,
+                                              target=route.target, stubbed=reply.stubbed,
+                                              full_output=reply.full_output))
+            await self._finish_turn()
+        finally:
+            self._busy -= 1
+            if self._busy == 0:
+                # Работы больше нет — следующая реплика вправе снова сказать
+                # «работаю», даже если прошлая говорила это только что.
+                self._last_progress_at = 0.0
+
+    async def _handoff(self, ws: Any, text: str, decision: Decision, device: str,
+                       target: str) -> None:
+        """Передача разговора между целями вместе с контекстом.
+
+        Спека (`targets.router.handoff`) обещает именно перенос: «объясни
+        попроще» без прошлого вывода — это вопрос ни о чём, а «перекинь это
+        в код» без него заставляет человека пересказывать себя.
+        """
+        source = self.router.other_target(target)
+        context = self._last_output.get(source, "")
+        if not context:
+            await self._say("Пока нечего перекидывать.", "chat")
+            return
+        lines = [f"[передача из цели «{source}»]"]
+        if self._last_utterance and self._last_utterance[1] == source:
+            lines.append(f"спрашивали: {self._last_utterance[0]}")
+        lines.append(f"ответ был: {context}")
+        route = Route(target, "handoff", 1.0, "\n".join(lines) + "\n\n" + text)
+
+        await self._send(ws, {"id": "route", "target": target, "reason": "handoff",
+                              "confidence": 1.0, "from": source,
+                              "earcon": self.router.earcon_for(target),
+                              "role": decision.role, "label": decision.label_ru})
+        self.machine.to(state.THINKING)
+        await self._broadcast_state()
+        await self._speak_turn(ws, route, self._preamble(),
+                               self.classifier.role_line(decision, device), remember=text)
+
+    async def _run_turn(self, ws: Any, route: Any, preamble: str, role_line: str) -> Any:
+        """Один заход к цели вместе с точкой отката. None — уже всё сказано."""
         workspace = self.targets.code.workspace
         tracked = route.target == "code" and checkpoints.is_repo(workspace)
         before = checkpoints.head(workspace) if tracked else ""
-
-        self._last_utterance = (route.text, route.target)
         try:
             reply = await self._await_with_progress(
-                self.targets[route.target].send(route.text, preamble, role_line))
+                self.targets[route.target].send(route.text, preamble, role_line),
+                target=route.target)
         except Exception as exc:                      # noqa: BLE001 - причин много
             # Сессия Claude могла не подняться или упасть посреди работы.
             # Молча уронить связь нельзя: в ухе это тишина, а на телефоне —
             # переподключение без единого слова о том, что случилось.
             log.exception("цель %s не ответила", route.target)
             await self._recover_from(ws, route.target, exc)
-            return
+            return None
 
-        # Изменения закрываем коммитом: без этого «откати последнее» не на что опереть.
-        if tracked and not reply.stubbed:
+        if route.target == "code" and not reply.stubbed:
+            await self._checkpoint(workspace, tracked, before, route.text)
+        return reply
+
+    async def _checkpoint(self, workspace: Path, tracked: bool, before: str, said: str) -> None:
+        """Изменения закрываем коммитом: без этого «откати последнее» не на что опереть."""
+        if tracked and before:
             try:
-                after = checkpoints.commit_all(workspace, f"голосом: {route.text[:60]}")
+                after = checkpoints.commit_all(workspace, f"голосом: {said[:60]}")
                 if after:
-                    self.journal.add(before, after, route.text)
+                    self.journal.add(before, after, said)
+                return
             except (RuntimeError, OSError) as exc:
                 log.warning("не удалось записать точку отката: %s", exc)
-        summary = await self._voice_summary(reply, route.target)
+        elif tracked:
+            # Репозиторий без единого коммита: возвращаться некуда, но сам
+            # коммит сделать надо — со следующей реплики откат заработает.
+            try:
+                checkpoints.commit_all(workspace, f"голосом: {said[:60]}")
+                return
+            except (RuntimeError, OSError) as exc:
+                log.warning("не удалось сделать первый коммит: %s", exc)
+        # Человек должен знать, что откатывать будет нечем, — но узнать об этом
+        # один раз, а не после каждой правки.
+        if not self._warned_no_undo:
+            self._warned_no_undo = True
+            await self._say("Точку отката записать не вышло: «откати последнее» здесь не сработает.")
 
-        self.machine.to(state.SPEAKING)
+    async def _finish_turn(self) -> None:
+        """Закрыть реплику: окно диалога открыто, состояние — честное.
+
+        Пока другая реплика ещё в работе, «говорю» — враньё: телефон погасит
+        индикатор работы и решит, что всё закончилось.
+        """
         self.machine.open_window()
-        await self._broadcast(self._voice(summary.text, is_question=summary.is_question,
-                                          target=route.target, stubbed=reply.stubbed,
-                                          full_output=reply.full_output))
+        self.machine.to(state.SPEAKING if self._busy <= 1 else state.WORKING)
         await self._broadcast_state()
 
     async def _recover_from(self, ws: Any, target: str, exc: Exception) -> None:
         """Сказать вслух, что не вышло, и вернуться в исходное состояние."""
         spoken = f"{target}: не смог выполнить. {formatter.reason_for_voice(exc)}"
-        await self.targets.reset_sessions()
-        self.machine.to(state.SPEAKING)
-        self.machine.open_window()
+        # Пересоздаём только ту сессию, которая сломалась. Общий сброс ронял
+        # долгую Claude Code-сессию из-за того, что не записался инбокс или
+        # икнула разговорная цель, — и работа начиналась с чистого листа.
+        failed = self.targets[target]
+        if hasattr(failed, "reset"):
+            await failed.reset()
         await self._broadcast(self._voice(spoken, target=target, stubbed=True,
                                           full_output=str(exc)))
         await self._send(ws, {"id": "error", "code": "target_failed",
                               "message": str(exc)[:400], "recoverable": True})
-        await self._broadcast_state()
+        await self._finish_turn()
 
-    async def _await_with_progress(self, coro: Any) -> Any:
+    async def _await_with_progress(self, coro: Any, target: str = "code") -> Any:
         """Ждать ответ, не молча.
 
         Спека (`latency_targets.long_task_rule`): если работа затянулась, через
@@ -317,9 +445,20 @@ class Daemon:
                 if said == 1:
                     self.machine.to(state.WORKING)
                     await self._broadcast_state()
-                    await self._say("Работаю.", progress=True)
-                else:
-                    await self._say("Ещё работаю.", progress=True)
+                await self._progress(target, "Работаю." if said == 1 else "Ещё работаю.")
+
+    async def _progress(self, target: str, text: str) -> None:
+        """«Работаю» — про весь демон, а не про каждую реплику.
+
+        Две реплики подряд начинали работу одновременно и говорили это хором:
+        в ухе получалось «работаю работаю». Напоминание одно на всех и не чаще
+        того же интервала, которым разрежены остальные фоновые события.
+        """
+        now = time.monotonic()
+        if now - self._last_progress_at < self._progress_gap_s:
+            return
+        self._last_progress_at = now
+        await self._say(text, target=target, progress=True)
 
     async def watch_loop(self, interval_s: float = 60.0) -> None:
         """Смотрит наружу и заговаривает первым. Остановить — PROACTIVE=off."""
@@ -327,14 +466,16 @@ class Daemon:
             await asyncio.sleep(interval_s)
             try:
                 events = await asyncio.to_thread(self.watcher.check)
+                for event in events:
+                    log.info("проактивно: %s", event.text)
+                    await self._announce(event.text)
+                    if watcher.mode() == "fix" and event.fix_prompt:
+                        await self._fix_it(event)
             except Exception as exc:            # наблюдатель не должен ронять демон
+                # Починка внутри цикла тоже: упавший «fix» уносил с собой весь
+                # цикл, и проактивность молча выключалась до перезапуска.
                 log.warning("наблюдатель: %s", exc)
                 continue
-            for event in events:
-                log.info("проактивно: %s", event.text)
-                await self._announce(event.text)
-                if watcher.mode() == "fix" and event.fix_prompt:
-                    await self._fix_it(event)
 
     async def _announce(self, text: str) -> None:
         """Сказать сейчас или придержать до того, как кто-то подключится."""
@@ -345,9 +486,14 @@ class Daemon:
             del self._pending_news[:-10]
 
     async def _fix_it(self, event: Any) -> None:
-        """Режим «fix»: не только сказать, но и починить."""
-        reply = await self._await_with_progress(
-            self.targets.code.send(event.fix_prompt, self._preamble(), ""))
+        """Режим «fix»: не только сказать, но и починить.
+
+        Замок тот же, что у реплик: чинить в обход очереди — значит писать в
+        рабочую копию, пока над ней работает сказанное голосом.
+        """
+        async with self._code_turn:
+            reply = await self._await_with_progress(
+                self.targets.code.send(event.fix_prompt, self._preamble(), ""))
         summary = await self._voice_summary(reply, "code")
         await self._announce(summary.text)
 
@@ -563,17 +709,10 @@ class Daemon:
         self.machine.to(state.THINKING)
         await self._broadcast_state()
 
-        preamble = self._preamble()
-        reply = await self._await_with_progress(
-            self.targets[target].send(said, preamble, self.classifier.role_line(decision, device)))
-        summary = await self._voice_summary(reply, target)
-        self._last_utterance = (said, target)
-        self.machine.to(state.SPEAKING)
-        self.machine.open_window()
-        await self._broadcast(self._voice(summary.text, is_question=summary.is_question,
-                                          target=target, stubbed=reply.stubbed,
-                                          full_output=reply.full_output))
-        await self._broadcast_state()
+        # Поправка — такая же реплика: и точку отката ей надо, и от поломки её
+        # надо прикрыть, и замок на сессию действует тот же.
+        await self._speak_turn(ws, Route(target, "corrected", 1.0, said), self._preamble(),
+                               self.classifier.role_line(decision, device))
 
     async def _undo(self) -> None:
         workspace = self.targets.code.workspace
@@ -581,15 +720,28 @@ class Daemon:
         if point is None or not checkpoints.is_repo(workspace):
             await self._say("Откатывать нечего.")
             return
+        # `git reset --hard` посреди работы — это откат под руками у Claude:
+        # часть правок уже на диске, часть ещё нет, и вернётся мешанина.
+        # Работу останавливаем и ждём, пока реплика свернётся сама.
+        if self._code_turn.locked():
+            await self.targets.code.interrupt()
         try:
-            changed = checkpoints.summary(workspace, point.before, point.after)
-            checkpoints.reset_to(workspace, point.before)
-        except (RuntimeError, OSError) as exc:
-            await self._say(f"Откатить не вышло: {exc}")
+            await asyncio.wait_for(self._code_turn.acquire(), timeout=self._undo_wait_s)
+        except asyncio.TimeoutError:
+            await self._say("Работа ещё идёт, откатывать сейчас опасно. Скажи «останови работу».")
             return
-        self.journal.pop()
-        await self.targets.code.reset()      # сессия должна увидеть новое состояние
-        await self._say(f"Откатил {changed}. Сказано было: {point.title}")
+        try:
+            try:
+                changed = checkpoints.summary(workspace, point.before, point.after)
+                checkpoints.reset_to(workspace, point.before)
+            except (RuntimeError, OSError) as exc:
+                await self._say(f"Откатить не вышло: {formatter.reason_for_voice(exc)}")
+                return
+            self.journal.pop()
+            await self.targets.code.reset()  # сессия должна увидеть новое состояние
+            await self._say(f"Откатил {changed}. Сказано было: {point.title}")
+        finally:
+            self._code_turn.release()
 
     async def _recent_changes(self) -> None:
         points = self.journal.recent(3)
@@ -787,9 +939,32 @@ async def run(settings: Settings) -> None:
         await asyncio.Future()
 
 
+def is_own_checkout(workspace: Path) -> bool:
+    """Это сам voice-shell, а не чей-то проект."""
+    return (workspace / "daemon" / "voice_claude" / "server.py").is_file()
+
+
+def refuse_own_checkout(workspace: Path) -> None:
+    """Свой репозиторий рабочим каталогом быть не может.
+
+    Демон складывает в коммит всё, что найдёт в рабочем каталоге. Наведённый
+    на собственную копию, он закоммитил незаконченную работу человека от лица
+    «Voice Shell» и тут же откатил её по первому «откати последнее». Молчать
+    об этом нельзя: цена ошибки — чужой рабочий день.
+    """
+    if not is_own_checkout(workspace):
+        return
+    raise SystemExit(
+        f"рабочий каталог {workspace} — это сам voice-shell.\n"
+        "Демон коммитит всё, что найдёт в рабочем каталоге, и закоммитил бы\n"
+        "незаконченную работу от чужого имени. Укажи --workspace на проект."
+    )
+
+
 async def bootstrap_workspace(settings: Settings) -> None:
     """On a host with no checkout, clone the repo Claude Code will work in."""
     workspace = Path(settings.workspace).expanduser()
+    refuse_own_checkout(workspace.resolve() if workspace.exists() else workspace)
     workspace.mkdir(parents=True, exist_ok=True)
     if not settings.workspace_repo or (workspace / ".git").exists():
         return
