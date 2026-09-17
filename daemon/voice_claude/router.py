@@ -176,10 +176,23 @@ class Router:
 
     def handoff(self, text: str) -> str | None:
         """Detect a cross-target handoff phrase, return the phrase id."""
+        return self._handoff_rule(text)["effect"] if self._handoff_rule(text) else None
+
+    def handoff_target(self, text: str) -> str | None:
+        """Куда переезжает разговор вместе с контекстом.
+
+        Цель названа в самой спеке: раньше её приходилось бы угадывать из
+        прозы «уходит в code-сессию», а фраза-эффект пишется для человека.
+        """
+        rule = self._handoff_rule(text)
+        target = rule.get("target") if rule else None
+        return target if target in self._targets else None
+
+    def _handoff_rule(self, text: str) -> dict[str, Any] | None:
         lowered = text.lower()
         for rule in self._router["handoff"]:
             if any(u in lowered for u in rule["utterances"]):
-                return rule["effect"]
+                return rule
         return None
 
     def is_misroute_recovery(self, text: str) -> bool:
