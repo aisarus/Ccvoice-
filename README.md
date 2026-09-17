@@ -1,8 +1,9 @@
 # Voice Shell for Claude Code
 
-Hands-free голосовой интерфейс поверх **уже работающей** Claude Code-сессии:
-второе ухо и второй мозг. Не новый агент — транспорт голоса, роутинг и слой
-представления.
+Голос поверх Claude Code. Телефон в кармане, гарнитура на голове, руки
+свободны: говоришь — Claude работает в репозитории и отвечает в ухо. Не новый
+агент, а транспорт голоса, роутинг и слой представления над уже работающей
+сессией.
 
 ```
 Человек
@@ -16,6 +17,65 @@ Desktop daemon
 репозиторий / shell / git / tests
 ```
 
+---
+
+## Пользоваться прямо сейчас
+
+**1. Поставить приложение.**
+[Скачать APK](https://github.com/aisarus/Ccvoice-/releases/download/apk-latest/app-debug.apk)
+— он пересобирается на каждом пуше. Разреши микрофон и уведомления: без
+уведомлений фоновая служба работать не имеет права.
+
+**2. Поднять сервер.** По ssh, можно с телефона:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aisarus/Ccvoice-/claude/voice-shell-claude-code-77wwh2/scripts/install-server.sh | sudo bash
+```
+
+В конце скрипт печатает адрес и токен — их вписать в приложение (три поля:
+адрес, токен, язык). С доменом, указывающим на сервер, добавится HTTPS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aisarus/Ccvoice-/claude/voice-shell-claude-code-77wwh2/scripts/install-server.sh | sudo DOMAIN=voice.example.com bash
+```
+
+**3. Говорить в два такта.** Это главное:
+
+> «Клод» · пауза · дождись сигнала · «прогони тесты»
+
+Обращение слышит маленькая локальная модель, саму реплику — распознаватель
+телефона, он на порядок точнее, но включается не мгновенно. Сказанное одним
+куском тоже работает, просто хуже.
+
+Все фразы, которые система понимает сама — цели, откат, память, стоп —
+[`docs/ГОЛОС.md`](docs/ГОЛОС.md).
+
+Сервера нет и ставить некуда? Тот же путь через браузер и Render, целиком с
+телефона — [`docs/DEPLOY.md`](docs/DEPLOY.md). Медленнее и без приложения, зато
+без ssh.
+
+### Обновить сервер
+
+```bash
+sudo bash /opt/voice-shell/scripts/update-server.sh
+```
+
+Не `git pull`: он останавливается на разошедшихся ветках. Здесь fetch + reset,
+с рассказом о том, что пропадёт, и с меткой, по которой прежнее состояние
+возвращается.
+
+### Если не работает
+
+```bash
+sudo bash /opt/voice-shell/scripts/doctor.sh --fast
+```
+
+Один отчёт обо всём: код, служба, токены, доступ к Claude, ответ демона.
+Внизу — «итог» со списком найденного. Симптом за симптомом —
+[`docs/ЕСЛИ-НЕ-РАБОТАЕТ.md`](docs/ЕСЛИ-НЕ-РАБОТАЕТ.md).
+
+---
+
 ## Что здесь
 
 | Файл | Что это |
@@ -25,15 +85,18 @@ Desktop daemon
 | [`scripts/validate_spec.py`](scripts/validate_spec.py) | Валидатор: схема + перекрёстные проверки согласованности |
 | [`daemon/`](daemon/) | `voice-claude-daemon`: роли говорящего, роутинг, формат речи, WebSocket |
 | [`client/web/`](client/web/index.html) | Клиент для Chrome на Android: push-to-talk, STT, TTS, earcons |
-| [`tests/`](tests/) | 57 тестов, включая end-to-end по реальному протоколу |
+| [`tests/`](tests/) | 174 теста, включая end-to-end по реальному протоколу |
 | [`Dockerfile`](Dockerfile) · [`render.yaml`](render.yaml) | Деплой одним нажатием, с телефона |
+| [`docs/ГОЛОС.md`](docs/ГОЛОС.md) | Все фразы, которые система понимает сама |
+| [`docs/ЕСЛИ-НЕ-РАБОТАЕТ.md`](docs/ЕСЛИ-НЕ-РАБОТАЕТ.md) | Симптом → что проверить → чем починить |
 | [`docs/DEPLOY.md`](docs/DEPLOY.md) | Пошаговый деплой без компьютера |
 | [`docs/desktop-handoff.json`](docs/desktop-handoff.json) | Машиночитаемое задание для Claude Code-сессии на твоём ПК |
 | [`android/`](android/) | Приложение: локальный wake word, фон, кнопка наушников |
+| [`scripts/doctor.sh`](scripts/doctor.sh) · [`scripts/update-server.sh`](scripts/update-server.sh) | Проверить состояние · обновить сервер |
 
 ```bash
 python3 scripts/validate_spec.py
-# OK: voice-shell-for-claude-code v0.2.0 (27 top-level sections)
+# OK: voice-shell-for-claude-code v0.2.0 (29 top-level sections)
 ```
 
 Валидатор работает без зависимостей (тогда проверяются только кросс-ссылки);
@@ -65,8 +128,8 @@ Serverless — Vercel, Netlify, Cloudflare Workers — **не** подойдёт
 ## Запустить локально
 
 ```bash
-pip install -r daemon/requirements-dev.txt
-cd daemon && python -m voice_claude --workspace ~/твой-проект
+pip3 install -r daemon/requirements-dev.txt
+cd daemon && python3 -m voice_claude --workspace ~/твой-проект
 ```
 
 Клиент и WebSocket живут на одном порту (`8787` или `$PORT`), демон печатает
@@ -77,15 +140,21 @@ cd daemon && python -m voice_claude --workspace ~/твой-проект
 а не выдуманный ответ.
 
 ```bash
-python3 -m pytest tests -q        # 57 passed
+python3 -m pytest tests -q        # 174 passed
 python3 scripts/validate_spec.py  # OK: voice-shell-for-claude-code v0.2.0
 ```
 
-Что уже настоящее: классификация говорящего с профилями (включая шёпот),
-роутинг chat/code/note с безопасным дефолтом, суммаризация вывода в 1–3
-предложения, голосовые approvals, ambient-буфер с ролями и стиранием,
-WebSocket-протокол из спеки и push-to-talk клиент. Чего ещё нет: wake word,
-VAD-endpointing на устройстве, voiceprint, мультипроект — это S1–S6.
+Что уже настоящее: обращение «Клод» на самом устройстве, классификация
+говорящего с профилями (включая шёпот), роутинг chat/code/note с безопасным
+дефолтом и поправкой «не туда», точки отката, долговременная память,
+суммаризация вывода в 1–3 предложения, голосовые approvals, ударения для
+синтеза, наблюдатель за упавшими сборками, ambient-буфер с ролями и стиранием,
+WebSocket-протокол из спеки и push-to-talk клиент.
+
+Чего ещё нет: VAD-endpointing на устройстве, voiceprint, мультипроект,
+распознавание на своём сервере, проактивные подсказки по триггерам в ambient.
+Handoff между целями («перекинь это в код») написан в роутере, но демон его не
+вызывает — на живом цикле он не работает.
 
 ## На своём сервере
 
@@ -99,11 +168,19 @@ curl -fsSL https://raw.githubusercontent.com/aisarus/Ccvoice-/claude/voice-shell
 С доменом, указывающим на сервер, добавится автоматический HTTPS:
 
 ```bash
-curl -fsSL <тот же адрес> | sudo DOMAIN=voice.example.com bash
+curl -fsSL https://raw.githubusercontent.com/aisarus/Ccvoice-/claude/voice-shell-claude-code-77wwh2/scripts/install-server.sh | sudo DOMAIN=voice.example.com bash
 ```
 
 Скрипт ставит зависимости и CLI, прогоняет тесты, оформляет systemd-службу с
-автозапуском и печатает адрес с токеном для приложения.
+автозапуском и печатает адрес с токеном для приложения. На тестах он
+останавливается: если они не прошли, служба не поднимается.
+
+Дальше сервер живёт двумя командами:
+
+| Команда | Что делает |
+|---|---|
+| `sudo bash /opt/voice-shell/scripts/update-server.sh` | забирает свежий код, доставляет зависимости, перезапускает службу |
+| `sudo bash /opt/voice-shell/scripts/doctor.sh --fast` | отчёт о состоянии со списком найденных проблем |
 
 ## Демон на своём компьютере
 
@@ -127,12 +204,14 @@ curl -fsSL https://raw.githubusercontent.com/aisarus/Ccvoice-/claude/voice-shell
 нужен только `gh` и токен:
 
 ```bash
-sudo bash scripts/setup-github.sh ghp_ТВОЙ_ТОКЕН "Имя" почта@example.com
+sudo bash /opt/voice-shell/scripts/setup-github.sh ghp_ТВОЙ_ТОКЕН "Имя" почта@example.com
 ```
 
 Скрипт ставит `gh`, кладёт токен в окружение службы, настраивает git и
-проверяет доступ. Токен: [github.com/settings/tokens](https://github.com/settings/tokens)
-→ classic → права `repo` и `workflow`.
+проверяет доступ — негодный токен он отвергает сразу, а не оставляет сюрприз
+на потом. Токен: [github.com/settings/tokens](https://github.com/settings/tokens)
+→ classic → права `repo` и `workflow`. Нужен root и уже поднятая служба:
+скрипт пишет в `/etc/voice-shell.env`.
 
 После этого голосом работает «покажи мои репозитории», «создай репозиторий
 voice-notes», «посмотри пул-реквесты», «сделай коммит и запушь».
@@ -149,6 +228,9 @@ voice-notes», «посмотри пул-реквесты», «сделай ко
 Bluetooth-гарнитура слушается своим микрофоном: служба сама поднимает канал
 связи, иначе телефон продолжал бы слушать встроенным микрофоном из кармана
 ([подробнее](android/README.md#микрофон-bluetooth-гарнитуры)).
+
+Говорить лучше в два такта: «Клод» · сигнал · фраза. Почему именно так и что
+ещё понимает приложение — [`docs/ГОЛОС.md`](docs/ГОЛОС.md).
 
 ## Ключевые решения
 
@@ -210,10 +292,18 @@ voiceprint и априорам устройства/непрерывности �
 | `chat` | Messages API, отдельный тред | нет | 1200 мс |
 | `note` | локальный inbox-файл | нет | 200 мс |
 
-Порядок решения: явный префикс → sticky-цель внутри окна диалога → классификатор
-→ дефолт. **Дефолт всегда `chat`**: неоднозначная реплика не должна исполняться.
-Есть handoff в обе стороны («перекинь это в код», «объясни попроще») и откат
-(«не туда»).
+Порядок решения: явный префикс → чип в интерфейсе → прошлая поправка → sticky-цель
+внутри окна диалога → классификатор → быстрая модель на незнакомых словах →
+дефолт. **Дефолт всегда `chat`**: неоднозначная реплика не должна исполняться.
+
+Поправка «не туда» пересылает прошлую реплику в другую цель и запоминает
+пример: в следующий раз похожая фраза уйдёт правильно сразу.
+
+Handoff между целями («перекинь это в код», «объясни попроще») описан в спеке
+и написан в роутере, но демон его не вызывает — на живом цикле эти фразы
+работают как обычная реплика. Прошлый ответ вместе с ними не передаётся.
+
+Какие фразы понимает система — [`docs/ГОЛОС.md`](docs/ГОЛОС.md).
 
 ## Второе ухо (ambient)
 
@@ -238,15 +328,15 @@ wake word в ambient выключен, потому что произносит�
 
 ## Порядок сборки
 
-| Этап | Что | Оценка |
+| Этап | Что | Состояние |
 |---|---|---|
-| S0 | вертикальный срез: daemon + WS + push-to-talk + STT + TTS | 1 вечер |
-| S1 | wake word, VAD-endpointing, окно диалога, earcons, barge-in | 2–3 вечера |
-| S2 | voice formatter + голосовые approvals | 2 вечера |
-| S3 | speaker ID на реальных данных | 3–4 вечера |
-| S4 | роутинг chat↔code | 2 вечера |
-| S5 | ambient passive + whisper | 3–5 вечеров |
-| S6 | multi-project, voiceprint, iOS | позже |
+| S0 | вертикальный срез: daemon + WS + push-to-talk + STT + TTS | сделано |
+| S1 | wake word, VAD-endpointing, окно диалога, earcons, barge-in | wake word, окно, сигналы и barge-in сделаны; VAD-endpointing на устройстве — нет |
+| S2 | voice formatter + голосовые approvals | сделано |
+| S3 | speaker ID на реальных данных | классификатор есть, на реальных данных не откалиброван |
+| S4 | роутинг chat↔code | сделано, кроме handoff |
+| S5 | ambient passive + whisper | буфер и ответы по нему есть, проактивных подсказок по триггерам нет |
+| S6 | multi-project, voiceprint, iOS | нет |
 
 Стек и обоснования — секция `roadmap` в спеке.
 

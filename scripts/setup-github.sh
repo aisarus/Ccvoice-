@@ -22,6 +22,10 @@ case "$TOKEN" in
     ghp_*|github_pat_*) : ;;
     *) die "не похоже на токен GitHub — он начинается с ghp_ или github_pat_" ;;
 esac
+[ "$(id -u)" -eq 0 ] || die "нужен root: скрипт пишет в $ENV_FILE и в общий git-конфиг.
+Запусти через sudo bash scripts/setup-github.sh ..."
+[ -f "$ENV_FILE" ] || die "нет файла окружения $ENV_FILE — сначала install-server.sh.
+Если он в другом месте: VOICE_ENV_FILE=/путь sudo -E bash scripts/setup-github.sh ..."
 
 say "gh"
 if ! command -v gh >/dev/null; then
@@ -42,7 +46,14 @@ gh --version | head -1
 
 say "вход"
 export GH_TOKEN="$TOKEN"
-gh auth status 2>&1 | head -3 || die "токен не принят"
+# Проверяем кодом возврата самого gh, а не хвостом конвейера: `gh ... | head`
+# всегда возвращает успех head'а, и негодный токен проходил насквозь.
+if status_text="$(gh auth status 2>&1)"; then
+    printf '%s\n' "$status_text" | head -3
+else
+    printf '%s\n' "$status_text" | head -5
+    die "токен не принят GitHub — проверь, что он не истёк и у него есть права repo и workflow"
+fi
 
 say "git"
 git config --system user.name "$GIT_NAME"

@@ -48,9 +48,14 @@ claude --version || die "CLI не встал"
 
 say "Репозиторий"
 if [ -d "$ROOT/.git" ]; then
-    git -C "$ROOT" fetch --quiet origin "$BRANCH"
-    git -C "$ROOT" checkout --quiet "$BRANCH"
-    git -C "$ROOT" pull --quiet origin "$BRANCH"
+    # Не pull: на разошедшихся ветках он останавливается на «divergent
+    # branches» и требует выбрать способ слияния — а слиять здесь нечего,
+    # нужна ровно та версия, что в ветке. Прежнее состояние помечаем меткой.
+    git -C "$ROOT" fetch --quiet origin "$BRANCH" \
+        || die "не смог забрать ветку $BRANCH — проверь сеть"
+    git -C "$ROOT" tag -f "before-install-$(date +%Y%m%d-%H%M%S)" HEAD >/dev/null 2>&1 || true
+    git -C "$ROOT" checkout --quiet -B "$BRANCH" "origin/$BRANCH"
+    git -C "$ROOT" reset --hard --quiet "origin/$BRANCH"
 else
     git clone --quiet https://github.com/aisarus/Ccvoice-.git "$ROOT"
     git -C "$ROOT" checkout --quiet "$BRANCH"
