@@ -18,6 +18,12 @@ from pathlib import Path
 
 JOURNAL = "checkpoints.json"
 STATE_DIR = ".voice-shell"
+# Мусор сборки: он никогда не коммитится нарочно, а голосом — тем более.
+# Прячем локально, в .git/info/exclude: это личный список копии, он не
+# уезжает к другим людям и не трогает .gitignore проекта. На уже
+# отслеживаемые файлы он не влияет вовсе.
+JUNK = ("__pycache__/", "*.pyc", ".pytest_cache/", "node_modules/",
+        ".venv/", ".gradle/", ".DS_Store")
 # Свой журнал в чужой коммит попадать не должен: он бы приезжал в каждый
 # коммит проекта и в каждый пул-реквест.
 OURS = (f":(exclude){STATE_DIR}", f":(exclude){STATE_DIR}/**")
@@ -83,10 +89,11 @@ def ensure_ignored(workspace: str | Path) -> None:
         exclude = git_dir / "info" / "exclude"
         exclude.parent.mkdir(parents=True, exist_ok=True)
         current = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
-        if f"{STATE_DIR}/" in current:
+        нужно = [line for line in (f"{STATE_DIR}/", *JUNK) if line not in current]
+        if not нужно:
             return
         prefix = "" if current.endswith("\n") or not current else "\n"
-        exclude.write_text(f"{current}{prefix}{STATE_DIR}/\n", encoding="utf-8")
+        exclude.write_text(current + prefix + "\n".join(нужно) + "\n", encoding="utf-8")
     except (RuntimeError, OSError):
         pass
 

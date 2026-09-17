@@ -820,8 +820,10 @@ class Daemon:
         if self.machine.state not in (state.IDLE, state.LISTENING):
             return
         for task in ready:
-            куда = "Готово" if task.state == tasks.DONE else "Встала"
-            await self._announce(f"{куда}: {task.title}. {task.summary}")
+            # Пересказ обычно уже начинается с «готово» — своё слово добавляем
+            # только к сорвавшейся задаче, иначе в ухе звучит заедание.
+            начало = "" if task.state == tasks.DONE else "Встала задача. "
+            await self._announce(f"{начало}{task.title}: {task.summary}")
         self.queue.mark_delivered(ready)
 
     async def _undo(self) -> None:

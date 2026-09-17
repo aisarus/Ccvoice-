@@ -166,3 +166,17 @@ def test_a_question_about_undo_is_not_an_undo():
                     "ну верни как было"):
         assert checkpoints.matches(command, checkpoints.UNDO_PHRASES), command
     assert checkpoints.matches("а что изменилось", checkpoints.HISTORY_PHRASES)
+
+
+def test_build_junk_never_lands_in_a_voice_commit(repo):
+    """Живой прогон: задача закоммитила __pycache__ вместе с работой."""
+    checkpoints.is_repo(repo)
+    (repo / "__pycache__").mkdir()
+    (repo / "__pycache__" / "calc.cpython-311.pyc").write_bytes(b"\x00\x01")
+    (repo / "calc.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+
+    before = checkpoints.head(repo)
+    after = checkpoints.commit_all(repo, "голосом: посчитай")
+    files = subprocess.run(["git", "-C", str(repo), "show", "--name-only", "--format=", after],
+                           capture_output=True, text=True).stdout.split()
+    assert files == ["calc.py"], files
