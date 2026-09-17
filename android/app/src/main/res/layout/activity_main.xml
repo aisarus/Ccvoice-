@@ -75,6 +75,13 @@
             android:text="остановить" />
 
         <Button
+            android:id="@+id/battery"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="разрешить работу в фоне" />
+
+        <Button
             android:id="@+id/copyError"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -88,6 +95,16 @@
             android:layout_marginTop="20dp"
             android:textSize="14sp"
             android:text="не запущено" />
+
+        <TextView
+            android:id="@+id/log"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:textSize="12sp"
+            android:fontFamily="monospace"
+            android:textIsSelectable="true"
+            android:text="" />
 
         <TextView
             android:layout_width="match_parent"

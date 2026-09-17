@@ -6,7 +6,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import android.os.Bundle
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -23,9 +26,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var prefs: Prefs
     private lateinit var status: TextView
 
+    private val lines = ArrayDeque<String>()
+
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            status.text = intent?.getStringExtra(VoiceService.EXTRA_TEXT) ?: ""
+            val text = intent?.getStringExtra(VoiceService.EXTRA_TEXT).orEmpty()
+            if (text.isBlank()) return
+            status.text = text
+            lines.addFirst(text)
+            while (lines.size > 20) lines.removeLast()
+            findViewById<TextView>(R.id.log).text = lines.joinToString("\n")
         }
     }
 
@@ -58,6 +68,8 @@ class MainActivity : AppCompatActivity() {
             if (missingPermissions().isEmpty()) launchService() else requestPermissions()
         }
 
+        findViewById<Button>(R.id.battery).setOnClickListener { askForBackgroundFreedom() }
+
         findViewById<Button>(R.id.copyError).setOnClickListener {
             val clipboard = getSystemService(android.content.ClipboardManager::class.java)
             clipboard.setPrimaryClip(
@@ -80,6 +92,23 @@ class MainActivity : AppCompatActivity() {
         val micGranted = micIndex < 0 ||
             grantResults.getOrNull(micIndex) == PackageManager.PERMISSION_GRANTED
         if (micGranted) launchService() else status.text = "без микрофона работать не смогу"
+    }
+
+    /** Без этого Samsung усыпляет службу через несколько минут после выключения экрана. */
+    private fun askForBackgroundFreedom() {
+        val power = getSystemService(PowerManager::class.java)
+        if (power.isIgnoringBatteryOptimizations(packageName)) {
+            status.text = "фоновая работа уже разрешена"
+            return
+        }
+        runCatching {
+            startActivity(
+                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                    .setData(Uri.parse("package:$packageName"))
+            )
+        }.onFailure {
+            runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+        }
     }
 
     private fun launchService() {
