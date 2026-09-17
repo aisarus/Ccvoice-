@@ -7,7 +7,9 @@ package com.voiceshell
  * потому что остановка не должна зависеть от круга по сети.
  */
 object Intents {
-    val WAKE = listOf("клод", "клода", "клоуд", "клауд", "claude", "клот", "клод")
+    val WAKE = listOf("клод", "клода", "клоуд", "клауд", "claude", "клот", "клоуде")
+    /** Слова, которыми начинают команду: их нельзя принимать за обращение. */
+    private val NOT_WAKE = setOf("код", "чат", "кот", "что", "как", "код?")
     private val STOP_WORK = listOf(
         "стоп работу", "стоп работа", "останови работу", "останови", "прекрати", "отмени", "отмена",
         "stop working", "stop the work", "abort", "cancel"
@@ -20,15 +22,44 @@ object Intents {
     fun normalise(text: String): String =
         text.lowercase().replace(Regex("[^\\p{L}\\p{N}\\s]"), " ").replace(Regex("\\s+"), " ").trim()
 
-    fun hasWake(text: String): Boolean {
-        val first = normalise(text).substringBefore(' ')
-        return WAKE.any { it == first }
+    fun hasWake(text: String): Boolean = isWake(normalise(text).substringBefore(' '))
+
+    /**
+     * Обращение с допуском в одну букву.
+     *
+     * Маленькая модель слышит «клот», «клад», «плод» вместо «Клод» — и это
+     * ровно то, из-за чего он «отзывается через раз». Допуск берём только для
+     * слов такой же длины: «код» и «чат» — начала команд, а не обращение.
+     */
+    fun isWake(word: String): Boolean {
+        if (word.isBlank() || word in NOT_WAKE) return false
+        if (WAKE.any { it == word }) return true
+        if (word.length < 4) return false
+        return WAKE.any { it.length >= 4 && withinOneEdit(it, word) }
+    }
+
+    private fun withinOneEdit(a: String, b: String): Boolean {
+        if (kotlin.math.abs(a.length - b.length) > 1) return false
+        var i = 0
+        var j = 0
+        var slack = 1
+        while (i < a.length && j < b.length) {
+            if (a[i] == b[j]) { i++; j++; continue }
+            if (slack == 0) return false
+            slack = 0
+            when {
+                a.length > b.length -> i++
+                a.length < b.length -> j++
+                else -> { i++; j++ }
+            }
+        }
+        return slack - (a.length - i) - (b.length - j) >= 0
     }
 
     fun stripWake(text: String): String {
         val normalised = normalise(text)
         val first = normalised.substringBefore(' ')
-        if (!WAKE.any { it == first }) return text.trim()
+        if (!isWake(first)) return text.trim()
         return normalised.substringAfter(' ', "").trim().ifBlank { text.trim() }
     }
 

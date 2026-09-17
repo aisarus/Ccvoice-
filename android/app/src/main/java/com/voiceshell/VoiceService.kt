@@ -93,10 +93,14 @@ class VoiceService : Service() {
     private var cloud: SpeechRecognizer? = null
     private var wake: WakeWordEngine? = null
     private var route: AudioRoute? = null
+    private var signals: Signals? = null
+    /** Что происходит прямо сейчас — первая строка уведомления. */
+    private var phase = "жду обращения"
 
     private var speaking = false
     private var awaitingCommand = false
     private var lastSpoken = ""
+    private var lastLine = "запуск"
     private var spokeAt = 0L
     private var windowUntil = 0L
     private var wakeReady = false
@@ -138,6 +142,7 @@ class VoiceService : Service() {
 
         // Маршрут поднимаем до wake word: поток записи не переезжает на другое
         // устройство сам, и открывать его надо уже на нужном микрофоне.
+        signals = Signals(this)
         route = AudioRoute(
             this,
             onChanged = { why -> main.post { onRouteChanged(why) } },
@@ -230,6 +235,7 @@ class VoiceService : Service() {
 
     override fun onDestroy() {
         main.removeCallbacksAndMessages(null)
+        runCatching { signals?.release() }
         runCatching { route?.release() }
         runCatching { wake?.release() }
         runCatching { cloud?.destroy() }
@@ -288,7 +294,12 @@ class VoiceService : Service() {
                         "he-IL" to "עובר לעברית.")[code].orEmpty())
             return
         }
-        if (speaking) return
+        if (speaking) {
+            // Обращение посреди ответа — это перебивание. Раньше оно молча
+            // отбрасывалось, и выглядело это как «отзывается через раз».
+            if (!Intents.hasWake(text)) return
+            silence()
+        }
         val windowOpen = System.currentTimeMillis() < windowUntil
         if (!windowOpen && !Intents.hasWake(text)) return
         windowUntil = 0
@@ -335,6 +346,8 @@ class VoiceService : Service() {
 
     private fun deliver(payload: String, alternatives: List<String> = emptyList()) {
         if (payload.isBlank()) return
+        signals?.accepted(route?.onBluetoothMic == true)
+        phase("отправил")
         report("→ $payload")
         send(
             JSONObject()
@@ -451,6 +464,10 @@ class VoiceService : Service() {
             val text = heard.firstOrNull().orEmpty()
             finishCommand()
             if (text.isEmpty()) {
+                if (fallbackText.isBlank()) {
+                    signals?.missed(route?.onBluetoothMic == true)
+                    phase("жду обращения")
+                }
                 deliverFallback()
                 return
             }
@@ -475,10 +492,18 @@ class VoiceService : Service() {
             ) {
                 report("распознавание реплики: ошибка $error")
             }
+            if (fallbackText.isBlank()) {
+                signals?.missed(route?.onBluetoothMic == true)
+                phase("жду обращения")
+            }
             deliverFallback()
         }
 
-        override fun onReadyForSpeech(params: Bundle?) { report("слушаю реплику…") }
+        override fun onReadyForSpeech(params: Bundle?) {
+            signals?.listening(route?.onBluetoothMic == true)
+            phase("слушаю")
+            report("слушаю реплику…")
+        }
 
         /** Человек всё-таки говорит — запасной вариант больше не нужен. */
         override fun onBeginningOfSpeech() {
@@ -575,10 +600,14 @@ class VoiceService : Service() {
                 applyVoice(prefs.language)
                 runCatching { tts?.setSpeechRate(1.02f) }
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) { speaking = true }
+                    override fun onStart(utteranceId: String?) {
+                        speaking = true
+                        phase("говорю")
+                    }
                     override fun onDone(utteranceId: String?) {
                         main.removeCallbacks(speechWatchdog)
                         speaking = false
+                        phase("жду обращения")
                         spokeAt = System.currentTimeMillis()
                         windowUntil = System.currentTimeMillis() + WINDOW_MS
                         // Хвост фразы ещё звучит в комнате — ждём, потом слушаем.
@@ -776,7 +805,7 @@ class VoiceService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("Voice Shell")
+            .setContentTitle("Voice Shell · $phase")
             .setContentText(text)
             .setContentIntent(open)
             .addAction(0, "Говорить", listen)
@@ -786,8 +815,16 @@ class VoiceService : Service() {
             .build()
     }
 
+    /** Одно слово о том, что сейчас происходит: его видно с экрана блокировки. */
+    private fun phase(next: String) {
+        if (phase == next) return
+        phase = next
+        report(lastLine)
+    }
+
     private fun report(text: String) {
         Log.i(TAG, text)
+        lastLine = text
         main.post {
             runCatching {
                 getSystemService(NotificationManager::class.java)
