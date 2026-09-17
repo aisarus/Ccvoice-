@@ -66,36 +66,9 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          script: |
-            set -e
-            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
-            adb logcat -c
-            adb shell am start -n com.voiceshell/.MainActivity
-            sleep 8
-            adb logcat -d -b crash > crash.log || true
-            if [ -s crash.log ]; then
-              echo "::error::приложение упало при старте"
-              cat crash.log
-              exit 1
-            fi
-            if [ -z "$(adb shell pidof com.voiceshell | tr -d '\r')" ]; then
-              echo "::error::процесс не живёт после запуска"
-              adb logcat -d | tail -100
-              exit 1
-            fi
-            echo "приложение запустилось и живёт"
-            # Разрешения выдаём принудительно и проверяем, что служба поднимается.
-            adb shell pm grant com.voiceshell android.permission.RECORD_AUDIO
-            adb shell pm grant com.voiceshell android.permission.POST_NOTIFICATIONS
-            adb shell am start-foreground-service -n com.voiceshell/.VoiceService || true
-            sleep 6
-            adb logcat -d -b crash > crash2.log || true
-            if [ -s crash2.log ]; then
-              echo "::error::служба упала"
-              cat crash2.log
-              exit 1
-            fi
-            echo "служба не падает"
+          # Каждая строка здесь выполняется отдельной командой, поэтому
+          # сама проверка живёт в файле.
+          script: bash android/smoke-test.sh
 
       # Ссылка, которую можно открыть с телефона без входа в GitHub.
       - name: Выложить в релиз
