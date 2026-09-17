@@ -81,6 +81,42 @@
             android:layout_marginTop="8dp"
             android:text="разрешить работу в фоне" />
 
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:textSize="12sp"
+            android:text="подписка Claude на сервере" />
+
+        <Button
+            android:id="@+id/authStart"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="подключить подписку" />
+
+        <Button
+            android:id="@+id/authOpen"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:enabled="false"
+            android:text="открыть авторизацию" />
+
+        <EditText
+            android:id="@+id/authCode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            android:hint="вставь код со страницы"
+            android:inputType="textNoSuggestions"
+            android:importantForAutofill="no" />
+
+        <Button
+            android:id="@+id/authSend"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            android:text="готово" />
+
         <Button
             android:id="@+id/copyError"
             android:layout_width="match_parent"

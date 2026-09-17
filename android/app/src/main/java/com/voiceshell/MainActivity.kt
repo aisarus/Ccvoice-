@@ -27,9 +27,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
 
     private val lines = ArrayDeque<String>()
+    private var authUrl: String? = null
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            intent?.getStringExtra(VoiceService.EXTRA_AUTH_URL)?.let { url ->
+                authUrl = url
+                findViewById<Button>(R.id.authOpen).isEnabled = true
+                findViewById<EditText>(R.id.authCode).visibility = android.view.View.VISIBLE
+                findViewById<Button>(R.id.authSend).visibility = android.view.View.VISIBLE
+            }
+            intent?.getStringExtra(VoiceService.EXTRA_AUTH_TOKEN)?.let { token ->
+                findViewById<EditText>(R.id.authCode).setText(token)
+            }
             val text = intent?.getStringExtra(VoiceService.EXTRA_TEXT).orEmpty()
             if (text.isBlank()) return
             status.text = text
@@ -69,6 +79,23 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.battery).setOnClickListener { askForBackgroundFreedom() }
+
+        // Подключение подписки Claude — тот же флоу, что в веб-клиенте.
+        findViewById<Button>(R.id.authStart).setOnClickListener {
+            startService(Intent(this, VoiceService::class.java).setAction(VoiceService.ACTION_AUTH_START))
+            status.text = "запрашиваю ссылку…"
+        }
+        findViewById<Button>(R.id.authOpen).setOnClickListener {
+            authUrl?.let { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it))) }
+        }
+        findViewById<Button>(R.id.authSend).setOnClickListener {
+            val code = findViewById<EditText>(R.id.authCode).text.toString()
+            startService(
+                Intent(this, VoiceService::class.java)
+                    .setAction(VoiceService.ACTION_AUTH_CODE)
+                    .putExtra(VoiceService.EXTRA_CODE, code)
+            )
+        }
 
         findViewById<Button>(R.id.copyError).setOnClickListener {
             val clipboard = getSystemService(android.content.ClipboardManager::class.java)

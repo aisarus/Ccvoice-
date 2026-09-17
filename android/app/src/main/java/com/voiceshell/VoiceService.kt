@@ -48,7 +48,12 @@ class VoiceService : Service() {
         const val ACTION_STATUS = "com.voiceshell.STATUS"
         const val ACTION_STOP = "com.voiceshell.STOP"
         const val ACTION_LISTEN = "com.voiceshell.LISTEN"
+        const val ACTION_AUTH_START = "com.voiceshell.AUTH_START"
+        const val ACTION_AUTH_CODE = "com.voiceshell.AUTH_CODE"
         const val EXTRA_TEXT = "text"
+        const val EXTRA_CODE = "code"
+        const val EXTRA_AUTH_URL = "auth_url"
+        const val EXTRA_AUTH_TOKEN = "auth_token"
         private const val CHANNEL = "voice-shell"
         private const val NOTIFICATION_ID = 42
         private const val WINDOW_MS = 15_000L
@@ -111,6 +116,17 @@ class VoiceService : Service() {
         when (intent?.action) {
             ACTION_STOP -> { stopSelf(); return START_NOT_STICKY }
             ACTION_LISTEN -> armWindow()
+            ACTION_AUTH_START -> {
+                report("запрашиваю ссылку авторизации…")
+                send(JSONObject().put("id", "auth_start"))
+            }
+            ACTION_AUTH_CODE -> {
+                val code = intent.getStringExtra(EXTRA_CODE).orEmpty().trim()
+                if (code.isNotEmpty()) {
+                    report("проверяю код…")
+                    send(JSONObject().put("id", "auth_code").put("code", code))
+                }
+            }
         }
         return START_STICKY
     }
@@ -386,6 +402,28 @@ class VoiceService : Service() {
                 report(spoken)
                 speak(spoken)
             }
+            "auth_url" -> {
+                val url = message.optString("url")
+                report("открой ссылку, войди в Claude и вставь код")
+                sendBroadcast(
+                    Intent(ACTION_STATUS).setPackage(packageName)
+                        .putExtra(EXTRA_TEXT, "ссылка авторизации получена")
+                        .putExtra(EXTRA_AUTH_URL, url)
+                )
+            }
+            "auth_token" -> {
+                val persisted = message.optBoolean("persisted")
+                report(
+                    if (persisted) "подписка подключена и сохранена на сервере"
+                    else "подписка подключена, но не сохранилась — впиши токен в файл службы"
+                )
+                sendBroadcast(
+                    Intent(ACTION_STATUS).setPackage(packageName)
+                        .putExtra(EXTRA_TEXT, if (persisted) "подписка подключена" else "подписка подключена (не сохранена)")
+                        .putExtra(EXTRA_AUTH_TOKEN, message.optString("token"))
+                )
+            }
+            "auth_error" -> report("авторизация не вышла: ${message.optString("message")}")
             "whisper" -> speak(message.optString("text"))
             "error" -> {
                 val code = message.optString("code")

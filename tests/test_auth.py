@@ -88,3 +88,23 @@ def test_token_problems_are_named():
     assert "короткий" in token_problem("sk-ant-1")
     assert "sk-ant-" in token_problem("x" * 40)
     assert token_problem("sk-ant-oat01-" + "T" * 40) is None
+
+
+def test_token_is_persisted_into_the_environment_file(tmp_path):
+    """Иначе подписку придётся подключать заново после каждого перезапуска."""
+    from voice_claude.auth import persist_token
+
+    env = tmp_path / "voice-shell.env"
+    env.write_text("VOICE_TOKEN=abc\nCLAUDE_CODE_OAUTH_TOKEN=старое\nPORT=8790\n", encoding="utf-8")
+    assert persist_token("sk-ant-oat01-" + "T" * 40, str(env))
+
+    written = env.read_text(encoding="utf-8")
+    assert written.count("CLAUDE_CODE_OAUTH_TOKEN=") == 1
+    assert "sk-ant-oat01-" in written
+    assert "VOICE_TOKEN=abc" in written and "PORT=8790" in written
+
+
+def test_missing_environment_file_is_reported_not_created(tmp_path):
+    from voice_claude.auth import persist_token
+
+    assert not persist_token("sk-ant-oat01-" + "T" * 40, str(tmp_path / "нет-такого.env"))

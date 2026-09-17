@@ -24,7 +24,7 @@ from websockets.http11 import Response
 from . import formatter, state
 from .ambient import AmbientBuffer, RateLimiter, WhisperGate
 from .auth import (SetupError, SetupTokenFlow, apply_token, credential_kind,
-                   credential_problem)
+                   credential_problem, persist_token)
 from .router import Router
 from .speaker import Decision, Features, SegmentContext, SpeakerClassifier, debug_record
 from .spec import defaults, load_spec
@@ -274,12 +274,14 @@ class Daemon:
             token = await self._setup.submit(msg.get("code", ""))
             self._setup = None
             apply_token(token)
+            persisted = persist_token(token)
             await self.targets.reset_sessions()
-            await self._send(ws, {"id": "auth_token", "token": token,
-                                  "credential": credential_kind(),
-                                  "code_available": self.targets.code.available,
-                                  "chat_available": self.targets.chat.available,
-                                  "persist_hint": "CLAUDE_CODE_OAUTH_TOKEN"})
+            await self._broadcast({"id": "auth_token", "token": token,
+                                   "credential": credential_kind(),
+                                   "code_available": self.targets.code.available,
+                                   "chat_available": self.targets.chat.available,
+                                   "persisted": persisted,
+                                   "persist_hint": "CLAUDE_CODE_OAUTH_TOKEN"})
         except (SetupError, FileNotFoundError, KeyError) as exc:
             if self._setup is not None:
                 self._setup.close()

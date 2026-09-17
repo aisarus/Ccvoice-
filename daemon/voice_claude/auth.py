@@ -13,6 +13,7 @@ import pty
 import re
 import subprocess
 import time
+from pathlib import Path
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -213,3 +214,23 @@ def apply_token(token: str) -> None:
     """Токен начинает действовать сразу, до перезапуска сервиса."""
     os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = token
     os.environ.pop("ANTHROPIC_API_KEY", None)
+
+
+def persist_token(token: str, path: str | None = None) -> bool:
+    """Записывает токен в файл окружения службы, чтобы пережить перезапуск.
+
+    Возвращает False, если файла нет или он недоступен на запись — тогда
+    человеку придётся вписать строку руками, и об этом надо сказать честно.
+    """
+    target = Path(path or os.environ.get("VOICE_ENV_FILE", "/etc/voice-shell.env"))
+    try:
+        if not target.exists():
+            return False
+        lines = [line for line in target.read_text(encoding="utf-8").splitlines()
+                 if not line.startswith("CLAUDE_CODE_OAUTH_TOKEN=")]
+        lines.append(f"CLAUDE_CODE_OAUTH_TOKEN={token}")
+        target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        os.chmod(target, 0o600)
+        return True
+    except OSError:
+        return False
