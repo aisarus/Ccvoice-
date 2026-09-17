@@ -13,12 +13,33 @@ from typing import Any
 from .spec import defaults, section
 
 FILE_RE = re.compile(r"\b[\w./-]+\.(ts|tsx|js|jsx|py|json|md|yml|yaml|toml|rs|go|sh)\b", re.I)
-CODE_LEXICON = (
-    "git", "коммит", "закоммить", "коммить", "ветк", "мердж", "пул реквест", "pr",
+# Основы слов: ищем их с начала слова, чтобы «проект» ловил «проекте»,
+# но «порт» не срабатывал внутри «спорт».
+CODE_STEMS = (
+    "git", "коммит", "закоммить", "коммить", "ветк", "мердж", "пул реквест",
     "тест", "npm", "pytest", "билд", "сборк", "деплой", "deployment", "линт",
     "рефактор", "запусти", "исправ", "почини", "откати", "репозитор", "функци",
     "баг", "ошибк", "стек", "компилир", "docker", "миграц",
+    # Живая речь про работу: «покажи файлы в проекте», «что в конфиге».
+    "файл", "папк", "каталог", "проект", "модул", "конфиг",
+    "зависимост", "скрипт", "сервер", "служб", "верси",
 )
+# Короткие слова: как основа они тащат чужое — «логично», «классно»,
+# «кодекс», «спорт». Поэтому только целиком, перечисляя падежи.
+CODE_WORD_GROUPS = (
+    ("pr",),
+    ("лог", "лога", "логи", "логов", "логах", "логами"),
+    ("код", "кода", "коде", "кодом", "коды", "кодов"),
+    ("класс", "класса", "классе", "классы", "классов"),
+    ("порт", "порта", "порту", "порты", "портов"),
+)
+CODE_STEM_RES = tuple(re.compile(r"(?<!\w)" + re.escape(stem), re.I) for stem in CODE_STEMS)
+CODE_WORD_RES = tuple(
+    re.compile(r"\b(?:" + "|".join(re.escape(w) for w in group) + r")\b", re.I)
+    for group in CODE_WORD_GROUPS
+)
+# Совместимость: прежний плоский словарь, по которому кто-то может пройтись.
+CODE_LEXICON = CODE_STEMS + tuple(group[0] for group in CODE_WORD_GROUPS)
 CHAT_LEXICON = (
     "что такое", "кто такой", "объясни", "посчитай", "сформулируй", "напиши письмо",
     "как думаешь", "переведи", "что он сказал", "что она сказала", "напомни",
@@ -96,7 +117,8 @@ class Router:
         return best
 
     def _classify(self, lowered: str) -> tuple[str | None, float]:
-        code_hits = sum(1 for token in CODE_LEXICON if token in lowered)
+        code_hits = sum(1 for pattern in CODE_STEM_RES if pattern.search(lowered))
+        code_hits += sum(1 for pattern in CODE_WORD_RES if pattern.search(lowered))
         code_hits += 2 * len(FILE_RE.findall(lowered))
         chat_hits = sum(1 for token in CHAT_LEXICON if token in lowered)
 

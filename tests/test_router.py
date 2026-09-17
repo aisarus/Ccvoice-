@@ -94,3 +94,49 @@ def test_chat_stays_non_mutating_even_with_web_access(router):
     """Поиск — это чтение: цель остаётся безопасным дефолтом."""
     assert not router.is_mutating("chat")
     assert router.is_mutating("code")
+
+
+def test_ordinary_work_phrases_reach_the_code_target(router):
+    """Живая речь редко содержит слово «git» — она говорит «файлы в проекте»."""
+    for phrase in ("покажи какие файлы в проекте",
+                   "что лежит в конфиге",
+                   "посмотри логи сервера",
+                   "расскажи про аутентификацию в проекте"):
+        route = router.route(phrase, ms_since_last=10 ** 6)
+        router.sticky_target = None
+        assert route.target == "code", f"{phrase} уехало в {route.target}"
+
+
+def test_talk_is_still_talk(router):
+    """Расширение словаря не должно утащить в код обычный разговор."""
+    for phrase in ("как думаешь, стоит ли переезжать на Rust",
+                   "что такое вектор эмбеддинга",
+                   "посчитай сколько будет семнадцать процентов от 4200",
+                   "напиши письмо Игорю про перенос встречи"):
+        route = router.route(phrase, ms_since_last=10 ** 6)
+        router.sticky_target = None
+        assert route.target == "chat", f"{phrase} уехало в {route.target}"
+
+
+def test_short_words_do_not_leak_into_code(router):
+    """«лог» внутри «логично» и «порт» внутри «спорт» — не про работу."""
+    for phrase in ("это же логично, правда",
+                   "давай обсудим спорт",
+                   "импорт данных из таблицы",
+                   "классно получилось",
+                   "какой у нас диалог получился",
+                   "расскажи про кодекс чести"):
+        route = router.route(phrase, ms_since_last=10 ** 6)
+        router.sticky_target = None
+        assert route.target == "chat", f"{phrase} уехало в {route.target}"
+
+
+def test_short_words_still_work_as_whole_words(router):
+    """Но «на каком порту» и «покажи класс роутера» — про работу."""
+    for phrase in ("на каком порту крутится демон",
+                   "покажи класс роутера",
+                   "покажи код функции route",
+                   "посмотри логи сервера"):
+        route = router.route(phrase, ms_since_last=10 ** 6)
+        router.sticky_target = None
+        assert route.target == "code", f"{phrase} уехало в {route.target}"
