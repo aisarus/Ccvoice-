@@ -173,6 +173,12 @@ UNIT
 
 systemctl daemon-reload
 systemctl enable --now voice-shell
+
+# Сам подтягивает свежую версию: раз в десять минут, и только если она
+# прошла проверку. Выключить: systemctl disable --now voice-shell-update.timer
+if [ "${AUTOUPDATE:-1}" = "1" ]; then
+    bash "$ROOT/scripts/auto-update.sh" --install-timer >/dev/null || true
+fi
 sleep 2
 systemctl is-active --quiet voice-shell || { journalctl -u voice-shell -n 30 --no-pager; die "служба не поднялась"; }
 curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null || die "демон не отвечает на /healthz"
@@ -207,6 +213,7 @@ cat <<REPORT
   токен     : $TOKEN
   проект    : $WORKSPACE
   служба    : systemctl status voice-shell
+  обновления: сам, каждые 10 минут (systemctl status voice-shell-update.timer)
   логи      : journalctl -u voice-shell -f
 
   В приложении на телефоне введи адрес и токен.
