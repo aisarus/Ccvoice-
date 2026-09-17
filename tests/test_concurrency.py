@@ -277,7 +277,11 @@ def test_an_unexpected_failure_becomes_a_phrase_not_silence(repo, tmp_path):
 
 def test_a_garbled_segment_is_answered_instead_of_swallowed(repo, tmp_path):
     """Телефон прислал мусор в признаках — раньше это было тихой смертью
-    задачи: ни ответа, ни ошибки, ни разрыва связи."""
+    задачи: ни ответа, ни ошибки, ни разрыва связи.
+
+    С тех пор негодное измерение перестало быть поломкой: признак, который
+    не читается как число, считается неизмеренным — как если бы телефон его
+    и не слал. Реплика при этом обязана быть услышана и отвечена."""
     daemon = make(repo, tmp_path, first_ack_s=5.0, progress_gap_s=5.0)
 
     async def garbled(ws):
@@ -285,8 +289,8 @@ def test_a_garbled_segment_is_answered_instead_of_swallowed(repo, tmp_path):
                                          features={"level_rel_db": "громко"})))
 
     heard = asyncio.run(talk(daemon, garbled, collect_s=1.0))
-    assert answers(heard), "о поломке не сказали ни слова"
-    assert kinds(heard, "error")[0]["code"] == "internal"
+    assert answers(heard) or kinds(heard, "route"), "реплика пропала молча"
+    assert not kinds(heard, "error"), "негодное измерение — не поломка демона"
 
 
 def test_a_handoff_carries_the_previous_answer_along(repo, tmp_path):
