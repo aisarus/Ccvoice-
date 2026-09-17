@@ -132,10 +132,12 @@ class CodeTarget(_SdkTarget):
 
 
 class ChatTarget(_SdkTarget):
-    """Разговорная цель: та же авторизация, но без инструментов, поэтому
-    ничего не меняет. Именно поэтому она безопасный дефолт роутера."""
+    """Разговорная цель: умеет искать в интернете и читать страницы, но не
+    трогает файлы и оболочку. Поиск — это чтение, а не изменение мира, поэтому
+    цель остаётся безопасным дефолтом роутера."""
 
     target_id = "chat"
+    READ_ONLY_TOOLS = ("WebSearch", "WebFetch")
 
     def __init__(self, cwd: str | Path | None = None, model: str | None = None,
                  system: str | None = None) -> None:
@@ -144,18 +146,34 @@ class ChatTarget(_SdkTarget):
         self.system = system or (
             "Ты голосовой собеседник в наушнике. Отвечай одним-двумя короткими "
             "предложениями, без списков и разметки. Отвечай на том языке, на котором "
-            "к тебе обратились. У тебя нет инструментов: если для ответа нужно что-то "
-            "сделать в репозитории, скажи об этом."
+            "к тебе обратились.\n"
+            "У тебя есть поиск в интернете и чтение страниц — пользуйся ими, когда "
+            "нужен свежий факт, и называй источник одним словом, без ссылок: их "
+            "неудобно слушать.\n"
+            "Менять файлы и запускать команды ты не можешь. Если для ответа нужно "
+            "действие в проекте, скажи об этом — человек переключит на цель «код»."
         )
 
     def _options(self) -> Any:
         from claude_agent_sdk import ClaudeAgentOptions  # type: ignore
 
+        async def can_use_tool(tool_name: str, input_data: dict[str, Any], _ctx: Any) -> Any:
+            # Разрешение выдаём сами: интерактивного запроса здесь некому показать,
+            # а список держим узким, чтобы цель осталась неспособной что-то менять.
+            from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny  # type: ignore
+            if tool_name in self.READ_ONLY_TOOLS:
+                return PermissionResultAllow()
+            return PermissionResultDeny(
+                message=f"{tool_name} недоступен в разговорной цели — скажи «в код», если нужно действие"
+            )
+
         options: dict[str, Any] = {
             "cwd": str(self.cwd),
             "system_prompt": self.system,
-            "allowed_tools": [],
-            "max_turns": 1,
+            "allowed_tools": list(self.READ_ONLY_TOOLS),
+            "can_use_tool": can_use_tool,
+            # Поиску нужно несколько шагов: запрос, чтение, ответ.
+            "max_turns": 6,
         }
         if self.model:
             options["model"] = self.model

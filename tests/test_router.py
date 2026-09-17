@@ -88,3 +88,9 @@ def test_unknown_forced_target_is_rejected(router):
     import pytest as _pytest
     with _pytest.raises(ValueError):
         router.force("nope")
+
+
+def test_chat_stays_non_mutating_even_with_web_access(router):
+    """Поиск — это чтение: цель остаётся безопасным дефолтом."""
+    assert not router.is_mutating("chat")
+    assert router.is_mutating("code")
