@@ -41,18 +41,18 @@ def test_dangerous_actions_are_never_remembered():
     assert policy.may_remember("Bash", {"command": "git commit -m fix"})
 
 
-def test_auto_mode_runs_everything_but_the_destructive(monkeypatch):
-    monkeypatch.setenv("PERMISSION_MODE", "auto")
+def test_auto_is_the_default_and_asks_nothing(monkeypatch):
+    monkeypatch.delenv("PERMISSION_MODE", raising=False)
+    assert policy.mode() == "auto"
     assert policy.decide_in_mode("Write", {"file_path": "src/auth.ts"}) == "allow"
-    assert policy.decide_in_mode("Bash", {"command": "git commit -m fix"}) == "allow"
-    assert policy.decide_in_mode("Bash", {"command": "npm install left-pad"}) == "ask"
-    assert policy.decide_in_mode("Bash", {"command": "rm -rf build"}) == "ask"
-    assert policy.decide_in_mode("Bash", {"command": "git push --force"}) == "ask"
-
-
-def test_bypass_mode_asks_nothing(monkeypatch):
-    monkeypatch.setenv("PERMISSION_MODE", "bypass")
     assert policy.decide_in_mode("Bash", {"command": "rm -rf build"}) == "allow"
+    assert policy.decide_in_mode("Bash", {"command": "git push --force"}) == "allow"
+
+
+def test_guarded_mode_asks_only_about_the_destructive(monkeypatch):
+    monkeypatch.setenv("PERMISSION_MODE", "guarded")
+    assert policy.decide_in_mode("Bash", {"command": "git commit -m fix"}) == "allow"
+    assert policy.decide_in_mode("Bash", {"command": "rm -rf build"}) == "ask"
 
 
 def test_ask_mode_keeps_the_original_behaviour(monkeypatch):

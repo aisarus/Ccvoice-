@@ -130,13 +130,10 @@ class CodeTarget(_SdkTarget):
                 message="Отклонено голосом")
 
         options: dict[str, Any] = {"cwd": str(self.cwd)}
-        mode = policy.mode()
-        if mode == "bypass":
-            # Ничего не спрашиваем вообще — так просил хозяин машины.
+        if policy.mode() == "auto":
+            # Ничего не спрашиваем: так решил хозяин машины.
             options["permission_mode"] = "bypassPermissions"
         else:
-            # Правки применяются сами; голосом спрашивается только то,
-            # что политика сочла разрушительным.
             options["permission_mode"] = "acceptEdits"
             options["can_use_tool"] = can_use_tool
         return ClaudeAgentOptions(**options)
