@@ -780,10 +780,25 @@ class Daemon:
         while True:
             await asyncio.sleep(interval_s)
             try:
+                await self._settle()
                 await self._start_next_task()
                 await self._deliver_finished()
             except Exception as exc:            # очередь не должна ронять демон
                 log.warning("очередь: %s", exc)
+
+    async def _settle(self) -> None:
+        """Окно диалога закрылось и работы нет — значит снова тишина.
+
+        Телефон не сообщает, что дочитал ответ, поэтому демон оставался в
+        «говорю» навсегда: индикатор врал, а доклад фоновой задачи, который
+        ждёт тишины, не наступал никогда.
+        """
+        if self._busy or self._pending:
+            return
+        if self.machine.state in (state.SPEAKING, state.LISTENING, state.THINKING) \
+                and not self.machine.window_open():
+            self.machine.to(state.IDLE)
+            await self._broadcast_state()
 
     async def _start_next_task(self) -> None:
         task = self.queue.next_to_start()

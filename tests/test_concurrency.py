@@ -391,3 +391,30 @@ def test_the_human_words_are_separated_from_the_service_lines(monkeypatch):
     asyncio.run(target.send(transcript, preamble, role_line))
 
     assert sent == [example["sent_to_claude"]]
+
+
+def test_the_daemon_falls_silent_when_the_window_closes(repo, tmp_path):
+    """Телефон не сообщает, что дочитал ответ. Без этого демон оставался в
+    «говорю» навсегда — и доклад фоновой задачи, который ждёт тишины, не
+    наступал никогда."""
+    daemon = make(repo, tmp_path)
+    daemon.machine.to("SPEAKING")
+    daemon.machine.open_window()
+
+    asyncio.run(daemon._settle())
+    assert daemon.machine.state == "SPEAKING", "окно ещё открыто — рано молчать"
+
+    daemon.machine.close_window()
+    asyncio.run(daemon._settle())
+    assert daemon.machine.state == "IDLE"
+
+
+def test_a_busy_daemon_does_not_pretend_to_be_idle(repo, tmp_path):
+    """Пока реплика в работе, тишины нет, даже если окно закрылось."""
+    daemon = make(repo, tmp_path)
+    daemon.machine.to("WORKING")
+    daemon.machine.close_window()
+    daemon._busy = 1
+
+    asyncio.run(daemon._settle())
+    assert daemon.machine.state == "WORKING"
