@@ -61,3 +61,29 @@ def decide(tool: str, payload: dict[str, Any] | None = None) -> str:
 def may_remember(tool: str, payload: dict[str, Any] | None = None) -> bool:
     """Можно ли запомнить «больше не спрашивай» для этого действия."""
     return not is_dangerous(tool, payload)
+
+
+MODES = ("ask", "auto", "bypass")
+
+
+def mode() -> str:
+    """Насколько молча работать: PERMISSION_MODE=ask|auto|bypass."""
+    import os
+
+    value = os.environ.get("PERMISSION_MODE", "auto").strip().lower()
+    return value if value in MODES else "auto"
+
+
+def decide_in_mode(tool: str, payload: dict[str, Any] | None = None) -> str:
+    """Решение с учётом режима.
+
+    ask    — как в спеке: безопасное молча, остальное голосом.
+    auto   — молча всё, кроме разрушительного; оно спрашивается всегда.
+    bypass — молча всё, без исключений.
+    """
+    current = mode()
+    if current == "bypass":
+        return "allow"
+    if current == "auto":
+        return "ask" if is_dangerous(tool, payload) else "allow"
+    return decide(tool, payload)

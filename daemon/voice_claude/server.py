@@ -127,6 +127,7 @@ class Daemon:
                 "chat_available": self.targets.chat.available,
                 "credential": credential_kind(),
                 "credential_problem": credential_problem(),
+                "permission_mode": policy.mode(),
             })
         elif kind == "speech_segment":
             await self._on_segment(ws, msg)
@@ -339,7 +340,7 @@ class Daemon:
     async def _ask_permission(self, tool_name: str, input_data: dict[str, Any]) -> bool:
         raw = f"{tool_name} {json.dumps(input_data, ensure_ascii=False)[:200]}"
         # Безопасное делаем молча: спрашивать про каждый git status — издевательство.
-        if policy.decide(tool_name, input_data) == "allow":
+        if policy.decide_in_mode(tool_name, input_data) == "allow":
             log.info("разрешено политикой: %s", tool_name)
             return True
         if tool_name in self.preapproved and policy.may_remember(tool_name, input_data):

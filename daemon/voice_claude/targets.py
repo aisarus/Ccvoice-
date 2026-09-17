@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+from . import policy
 from .auth import credential_kind, credential_problem, credentials_present
 
 PermissionHook = Callable[[str, dict[str, Any]], Awaitable[bool]]
@@ -128,7 +129,17 @@ class CodeTarget(_SdkTarget):
             return PermissionResultAllow() if approved else PermissionResultDeny(
                 message="Отклонено голосом")
 
-        return ClaudeAgentOptions(cwd=str(self.cwd), can_use_tool=can_use_tool)
+        options: dict[str, Any] = {"cwd": str(self.cwd)}
+        mode = policy.mode()
+        if mode == "bypass":
+            # Ничего не спрашиваем вообще — так просил хозяин машины.
+            options["permission_mode"] = "bypassPermissions"
+        else:
+            # Правки применяются сами; голосом спрашивается только то,
+            # что политика сочла разрушительным.
+            options["permission_mode"] = "acceptEdits"
+            options["can_use_tool"] = can_use_tool
+        return ClaudeAgentOptions(**options)
 
 
 class ChatTarget(_SdkTarget):
