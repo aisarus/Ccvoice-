@@ -106,3 +106,23 @@ def test_a_copy_can_be_removed_without_losing_the_branch(repo):
     branches = subprocess.run(["git", "-C", str(repo), "branch", "--list", ветка],
                               capture_output=True, text=True).stdout
     assert ветка in branches
+
+
+def test_a_task_becomes_background_because_the_person_said_so(repo):
+    """Фоновой задачу делает не длительность, а решение не ждать ответа."""
+    assert tasks.background_request("в фоне почини падающие тесты") == "почини падающие тесты"
+    assert tasks.background_request("займись обновлением зависимостей") == "обновлением зависимостей"
+    assert tasks.background_request("почини падающие тесты") is None
+
+
+def test_questions_about_the_queue_are_recognised(repo):
+    assert tasks.is_status_question("клод чем занят")
+    assert tasks.is_status_question("что в очереди")
+    assert tasks.is_ready_question("что готово")
+    assert not tasks.is_status_question("что такое вектор эмбеддинга")
+
+
+def test_cancelling_names_the_task_in_words(repo):
+    """Номера задач голосом не называют."""
+    assert tasks.cancel_request("отмени задачу про зависимости") == "зависимости"
+    assert tasks.cancel_request("отмени последнее") is None

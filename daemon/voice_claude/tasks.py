@@ -224,3 +224,60 @@ class TaskQueue:
 
 def state_dir_of(workspace: str | Path) -> Path:
     return Path(workspace).expanduser() / STATE_DIR
+
+# -- как об этом говорят вслух ---------------------------------------------
+#
+# Фразы разбираются здесь, а не в демоне: тогда их видно рядом с самой
+# очередью и можно проверить тестом, не поднимая ни сокета, ни Claude.
+
+_BACKGROUND = (
+    "в фоне", "фоном", "займись", "потом сделай", "сделай потом",
+    "поставь в очередь", "добавь задачу", "на потом",
+)
+_STATUS = (
+    "чем занят", "чем занимаешься", "что в работе", "что делаешь сейчас",
+    "какие задачи", "что в очереди", "статус задач",
+)
+_READY = ("что готово", "покажи готовое", "что доделал", "какие задачи готовы")
+_CANCEL = ("отмени задачу", "брось задачу", "убери задачу", "не делай задачу")
+
+
+def _has(text: str, phrases: Iterable[str]) -> str | None:
+    lowered = " ".join(text.lower().split())
+    for phrase in phrases:
+        if phrase in lowered:
+            return phrase
+    return None
+
+
+def background_request(text: str) -> str | None:
+    """«Клод, в фоне почини тесты» — вернёт саму задачу без служебных слов.
+
+    Фоновой задачу делает не длительность, а решение человека не ждать
+    ответа. Поэтому спрашиваем не эвристику, а его самого.
+    """
+    phrase = _has(text, _BACKGROUND)
+    if phrase is None:
+        return None
+    lowered = " ".join(text.lower().split())
+    rest = lowered.replace(phrase, " ", 1)
+    rest = re.sub(r"^[\s,.:—-]+", "", rest).strip()
+    return rest or None
+
+
+def is_status_question(text: str) -> bool:
+    return _has(text, _STATUS) is not None
+
+
+def is_ready_question(text: str) -> bool:
+    return _has(text, _READY) is not None
+
+
+def cancel_request(text: str) -> str | None:
+    """«Отмени задачу про зависимости» — вернёт слова, по которым искать."""
+    phrase = _has(text, _CANCEL)
+    if phrase is None:
+        return None
+    lowered = " ".join(text.lower().split())
+    rest = lowered.split(phrase, 1)[1]
+    return re.sub(r"^[\s,.:—-]*(про|о|об)\s+", "", rest).strip() or None
