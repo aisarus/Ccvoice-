@@ -52,7 +52,8 @@ class Router:
         return self._router["default_target"]
 
     def route(self, text: str, *, ms_since_last: int = 10 ** 6,
-              sticky_target: str | None = None) -> Route:
+              sticky_target: str | None = None,
+              learned: "tuple[str, float] | None" = None) -> Route:
         cleaned = text.strip()
         lowered = cleaned.lower()
 
@@ -64,6 +65,10 @@ class Router:
 
         if self.forced_target:
             return Route(self.forced_target, "forced", 1.0, cleaned)
+
+        # Прошлая поправка человека весит больше, чем угадывание по словам.
+        if learned and learned[0] in self._targets:
+            return Route(learned[0], "learned", learned[1], cleaned)
 
         sticky = sticky_target if sticky_target is not None else self.sticky_target
         window_ms = self._router["sticky_target"]["window_s"] * 1000
@@ -126,6 +131,10 @@ class Router:
     def is_misroute_recovery(self, text: str) -> bool:
         lowered = text.lower()
         return any(u in lowered for u in self._router["misroute_recovery"]["utterances"])
+
+    def other_target(self, target: str | None) -> str:
+        """Куда переслать после «не туда»: обычно путаются код и чат."""
+        return {"code": "chat", "chat": "code", "note": "chat"}.get(target or "", "code")
 
     def earcon_for(self, target: str) -> str | None:
         return {"code": "to_code", "chat": "to_chat"}.get(target)

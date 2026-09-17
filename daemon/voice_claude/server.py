@@ -22,7 +22,7 @@ from typing import Any
 from websockets.datastructures import Headers
 from websockets.http11 import Response
 
-from . import checkpoints, formatter, glossary, memory, policy, state
+from . import checkpoints, formatter, glossary, learning, memory, policy, state, watcher
 from .ambient import AmbientBuffer, RateLimiter, WhisperGate
 from .auth import (SetupError, SetupTokenFlow, apply_token, credential_kind,
                    credential_problem, github_ready, persist_token, token_problem)
@@ -90,6 +90,10 @@ class Daemon:
         self._glossary: str | None = None
         self.memory = memory.Memory(settings.workspace)
         self.journal = checkpoints.Journal(settings.workspace)
+        self.examples = learning.Examples(settings.workspace)
+        self._last_utterance: tuple[str, str] | None = None   # текст и куда ушло
+        self.watcher = watcher.Watcher(settings.workspace)
+        self._pending_news: list[str] = []
         background = load_spec()["config_defaults"]["background"]
         self._first_ack_s = settings.first_ack_s or background["first_ack_after_ms"] / 1000
         self._progress_gap_s = settings.progress_gap_s or background["min_interval_between_events_s"]
@@ -119,6 +123,12 @@ class Daemon:
                 await ws.close()
                 return
             self.clients.add(ws)
+            # Пока никто не слушал, новости копились — отдаём их первым делом.
+            news, self._pending_news = self._pending_news, []
+            for item in news:
+                await self._send(ws, {"id": "voice_summary", "text": item, "is_question": False,
+                                      "target": "code", "stubbed": False, "full_output": item,
+                                      "proactive": True})
             await self._send(ws, {
                 "id": "welcome", "v": PROTOCOL_VERSION,
                 "targets": [t["id"] for t in load_spec()["targets"]["list"]],
@@ -193,12 +203,11 @@ class Daemon:
             return
 
         if self.router.is_misroute_recovery(text):
-            self.router.force(None)
-            await self._send(ws, {"id": "route", "target": None, "reason": "misroute_recovery",
-                                  "confidence": 1.0})
+            await self._reroute(ws, text, decision, device)
             return
 
-        route = self.router.route(text, ms_since_last=self.machine.ms_since_window())
+        route = self.router.route(text, ms_since_last=self.machine.ms_since_window(),
+                                  learned=self.examples.suggest(text))
         await self._send(ws, {"id": "route", "target": route.target, "reason": route.reason,
                               "confidence": round(route.confidence, 3),
                               "earcon": self.router.earcon_for(route.target),
@@ -207,16 +216,7 @@ class Daemon:
         self.machine.to(state.THINKING)
         await self._broadcast_state()
 
-        preamble = "\n".join(load_spec()["command_passthrough"]["allowed_additions"]
-                             ["system_preamble"].splitlines())
-        # Имена файлов и проектов распознаватель калечит: прикладываем список,
-        # чтобы Claude исправил очевидное по контексту. Сам транскрипт не трогаем.
-        hint = self._glossary_hint()
-        if hint:
-            preamble = f"{preamble}\n{hint}"
-        remembered = self.memory.hint()
-        if remembered:
-            preamble = f"{preamble}\n{remembered}"
+        preamble = self._preamble()
         role_line = self.classifier.role_line(decision, device)
         if route.target == "chat" and AmbientBuffer.is_recall(text) and self.ambient.enabled:
             role_line += "\n[ambient] последние реплики:\n" + self.ambient.transcript()
@@ -225,6 +225,7 @@ class Daemon:
         tracked = route.target == "code" and checkpoints.is_repo(workspace)
         before = checkpoints.head(workspace) if tracked else ""
 
+        self._last_utterance = (route.text, route.target)
         reply = await self._await_with_progress(
             self.targets[route.target].send(route.text, preamble, role_line))
 
@@ -267,10 +268,51 @@ class Daemon:
                 else:
                     await self._say("Ещё работаю.")
 
+    async def watch_loop(self, interval_s: float = 60.0) -> None:
+        """Смотрит наружу и заговаривает первым. Остановить — PROACTIVE=off."""
+        while True:
+            await asyncio.sleep(interval_s)
+            try:
+                events = await asyncio.to_thread(self.watcher.check)
+            except Exception as exc:            # наблюдатель не должен ронять демон
+                log.warning("наблюдатель: %s", exc)
+                continue
+            for event in events:
+                log.info("проактивно: %s", event.text)
+                await self._announce(event.text)
+                if watcher.mode() == "fix" and event.fix_prompt:
+                    await self._fix_it(event)
+
+    async def _announce(self, text: str) -> None:
+        """Сказать сейчас или придержать до того, как кто-то подключится."""
+        if self.clients:
+            await self._broadcast({"id": "voice_summary", "text": text, "is_question": False,
+                                   "target": "code", "stubbed": False, "full_output": text,
+                                   "proactive": True})
+        else:
+            self._pending_news.append(text)
+            del self._pending_news[:-10]
+
+    async def _fix_it(self, event: Any) -> None:
+        """Режим «fix»: не только сказать, но и починить."""
+        reply = await self._await_with_progress(
+            self.targets.code.send(event.fix_prompt, self._preamble(), ""))
+        summary = await self._voice_summary(reply, "code")
+        await self._announce(summary.text)
+
     async def _say(self, text: str, target: str = "code") -> None:
         await self._broadcast({"id": "voice_summary", "text": text, "is_question": False,
                                "target": target, "stubbed": False, "full_output": text,
                                "progress": True})
+
+    def _preamble(self) -> str:
+        """Служебная приписка: голосовой ввод, имена проекта, память о человеке."""
+        parts = ["\n".join(load_spec()["command_passthrough"]["allowed_additions"]
+                            ["system_preamble"].splitlines())]
+        for extra in (self._glossary_hint(), self.memory.hint()):
+            if extra:
+                parts.append(extra)
+        return "\n".join(parts)
 
     def _glossary_hint(self) -> str:
         if self._glossary is None:
@@ -413,6 +455,36 @@ class Daemon:
             await self._say(spoken, "chat")
             return True
         return False
+
+    async def _reroute(self, ws: Any, text: str, decision: Decision, device: str) -> None:
+        """«Не туда»: переслать прошлую реплику в другую цель и запомнить урок."""
+        self.router.force(None)
+        if self._last_utterance is None:
+            await self._say("Нечего перенаправлять.", "chat")
+            return
+        said, was = self._last_utterance
+        # «не туда, в чат» — цель названа прямо; иначе берём противоположную.
+        named = self.router.route(text.lower(), ms_since_last=0)
+        target = named.target if named.reason == "explicit_prefix" else self.router.other_target(was)
+        self.examples.remember(said, target)
+        log.info("поправка: «%s» -> %s (было %s)", said[:40], target, was)
+
+        await self._send(ws, {"id": "route", "target": target, "reason": "corrected",
+                              "confidence": 1.0, "learned_from": was})
+        self.machine.to(state.THINKING)
+        await self._broadcast_state()
+
+        preamble = self._preamble()
+        reply = await self._await_with_progress(
+            self.targets[target].send(said, preamble, self.classifier.role_line(decision, device)))
+        summary = await self._voice_summary(reply, target)
+        self._last_utterance = (said, target)
+        self.machine.to(state.SPEAKING)
+        self.machine.open_window()
+        await self._broadcast({"id": "voice_summary", "text": summary.text,
+                               "is_question": summary.is_question, "target": target,
+                               "stubbed": reply.stubbed, "full_output": reply.full_output})
+        await self._broadcast_state()
 
     async def _undo(self) -> None:
         workspace = self.targets.code.workspace
