@@ -25,6 +25,41 @@ BIND_HOST="${HOST:-$([ -n "$DOMAIN" ] && echo 127.0.0.1 || echo 0.0.0.0)}"
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf '\n\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
 
+# Ставят обычно так: curl … | sudo bash. Тогда stdin — это сам скрипт, и
+# спросить человека через него нельзя. Но живой терминал рядом есть, он
+# доступен как /dev/tty, — оттуда и спрашиваем.
+ask() {
+    local prompt="$1" answer=""
+    if [ -t 0 ]; then
+        read -r -p "$prompt" answer || true
+    elif [ -r /dev/tty ]; then
+        printf '%s' "$prompt" > /dev/tty
+        read -r answer < /dev/tty || true
+    fi
+    printf '%s' "$answer"
+}
+have_human() { [ -t 0 ] || [ -r /dev/tty ]; }
+
+# Проверка без последствий: посмотреть, всё ли на месте, ничего не трогая.
+if [ -n "${CHECK:-}" ]; then
+    printf 'проверка окружения (ничего не меняю)\n'
+    for tool in git curl python3; do
+        command -v "$tool" >/dev/null && printf '  %-8s есть\n' "$tool" \
+                                       || printf '  %-8s НЕТ\n' "$tool"
+    done
+    command -v node >/dev/null && printf '  %-8s %s\n' node "$(node -v)" \
+                               || printf '  %-8s НЕТ (поставлю сам)\n' node
+    command -v claude >/dev/null && printf '  %-8s есть\n' claude \
+                                 || printf '  %-8s НЕТ (поставлю сам)\n' claude
+    command -v systemctl >/dev/null && printf '  %-8s есть\n' systemd \
+                                    || printf '  %-8s НЕТ — служба не поднимется\n' systemd
+    printf '  порт     %s\n' "$PORT"
+    printf '  проект   %s\n' "$WORKSPACE"
+    have_human && printf '  подписку спрошу вживую\n' \
+               || printf '  спросить подписку не у кого: задай CLAUDE_CODE_OAUTH_TOKEN\n'
+    exit 0
+fi
+
 [ "$(id -u)" -eq 0 ] || die "нужен root: запусти через sudo"
 
 say "Пакеты"
@@ -73,11 +108,15 @@ say "Самопроверка"
 
 say "Подписка Claude"
 OAUTH="${CLAUDE_CODE_OAUTH_TOKEN:-}"
-if [ -z "$OAUTH" ] && [ -t 0 ]; then
+if [ -z "$OAUTH" ] && have_human; then
     echo "Сейчас откроется авторизация: скопируй ссылку, открой на телефоне, вставь код обратно."
-    claude setup-token || true
+    if [ -t 0 ]; then
+        claude setup-token || true
+    else
+        claude setup-token < /dev/tty > /dev/tty 2>&1 || true
+    fi
     while :; do
-        read -r -p "Вставь выданный токен (начинается с sk-ant-), или Enter чтобы пропустить: " OAUTH || true
+        OAUTH="$(ask 'Вставь выданный токен (начинается с sk-ant-), или Enter чтобы пропустить: ')"
         OAUTH="$(printf '%s' "${OAUTH:-}" | tr -d '[:space:]')"
         [ -z "$OAUTH" ] && break
         # Проверяем здесь, иначе служба молча рапортует о готовности с мусором.

@@ -29,6 +29,7 @@ Desktop daemon
 **2. Поднять сервер.** По ssh, можно с телефона:
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/aisarus/Ccvoice-/claude/voice-shell-claude-code-77wwh2/scripts/install-server.sh | CHECK=1 bash   # посмотреть, всё ли на месте
 curl -fsSL https://raw.githubusercontent.com/aisarus/Ccvoice-/claude/voice-shell-claude-code-77wwh2/scripts/install-server.sh | sudo bash
 ```
 
