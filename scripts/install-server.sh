@@ -174,9 +174,10 @@ UNIT
 systemctl daemon-reload
 systemctl enable --now voice-shell
 
-# Сам подтягивает свежую версию: раз в десять минут, и только если она
-# прошла проверку. Выключить: systemctl disable --now voice-shell-update.timer
-if [ "${AUTOUPDATE:-1}" = "1" ]; then
+# Автообновление по умолчанию выключено: сервер не должен менять себя сам,
+# пока хозяин этого не попросил. Включить — AUTOUPDATE=1 при установке или
+# bash scripts/auto-update.sh --install-timer.
+if [ "${AUTOUPDATE:-0}" = "1" ]; then
     bash "$ROOT/scripts/auto-update.sh" --install-timer >/dev/null || true
 fi
 sleep 2
@@ -213,7 +214,7 @@ cat <<REPORT
   токен     : $TOKEN
   проект    : $WORKSPACE
   служба    : systemctl status voice-shell
-  обновления: сам, каждые 10 минут (systemctl status voice-shell-update.timer)
+  обновления: вручную — bash $ROOT/scripts/update-server.sh
   логи      : journalctl -u voice-shell -f
 
   В приложении на телефоне введи адрес и токен.

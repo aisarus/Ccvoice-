@@ -59,9 +59,6 @@ curl -fsSL https://raw.githubusercontent.com/aisarus/Ccvoice-/claude/voice-shell
 
 ```bash
 sudo bash /opt/voice-shell/scripts/update-server.sh
-
-# чтобы сервер подтягивал сам, раз в десять минут:
-sudo bash /opt/voice-shell/scripts/auto-update.sh --install-timer
 ```
 
 Не `git pull`: он останавливается на разошедшихся ветках. Здесь fetch + reset,
