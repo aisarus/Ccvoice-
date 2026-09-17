@@ -38,7 +38,7 @@ CRED="${CLAUDE_CONFIG_DIR:-/root/.claude}/.credentials.json"
 if [ -s "$CRED" ]; then
     echo "CLI авторизован сам ($CRED) — переменная с токеном не обязательна"
 else
-    echo "CLI своего входа не имеет: работает только переменная с токеном"
+    echo "файла входа нет ($CRED) — это ещё не отказ: демон спрашивает сам CLI"
 fi
 echo -n "прямая проверка CLI: "
 timeout 90 env -u CLAUDE_CODE_OAUTH_TOKEN claude -p "ответь одним словом: работает" 2>&1 | head -3
@@ -46,8 +46,10 @@ timeout 90 env -u CLAUDE_CODE_OAUTH_TOKEN claude -p "ответь одним с�
 line "порт"
 ss -lntp 2>/dev/null | grep -E ":${PORT_VALUE:-8787}\b" || echo "никто не слушает ${PORT_VALUE:-8787}"
 
-line "здоровье"
-curl -fsS --max-time 5 "http://127.0.0.1:${PORT_VALUE:-8787}/healthz" || echo "healthz не отвечает"
+line "что думает сам демон"
+TOKEN_VALUE="$(grep -oP '(?<=^VOICE_TOKEN=).*' "$ENV_FILE" 2>/dev/null | tail -1)"
+curl -fsS --max-time 5 "http://127.0.0.1:${PORT_VALUE:-8787}/healthz?token=${TOKEN_VALUE}" \
+    || echo "healthz не отвечает"
 
 line "последние логи"
 journalctl -u voice-shell -n 12 --no-pager 2>/dev/null | tail -12 || echo "логов нет"

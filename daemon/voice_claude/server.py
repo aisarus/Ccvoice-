@@ -18,6 +18,7 @@ import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 from websockets.datastructures import Headers
 from websockets.http11 import Response
@@ -695,12 +696,32 @@ def static_response(path: str, directory: Path = CLIENT_DIR) -> Response:
     return http_response(http.HTTPStatus.OK, body, content_type)
 
 
-def make_process_request(directory: Path = CLIENT_DIR) -> Any:
+def make_process_request(directory: Path = CLIENT_DIR,
+                         daemon: "Daemon | None" = None) -> Any:
     """HTTP side of the single port: health check, client, everything else 404."""
 
     async def process_request(connection: Any, request: Any) -> Any:
         path = request.path.split("?")[0]
         if path == "/healthz":
+            # Платформе достаточно «ok». Человеку нужно знать, что демон
+            # думает про доступ к Claude, — но это не для случайного гостя,
+            # поэтому по токену.
+            query = parse_qs(urlsplit(request.path).query)
+            asked = query.get("token", [""])[0]
+            if daemon is not None and asked and asked == daemon.settings.token:
+                body = json.dumps({
+                    "state": daemon.machine.state,
+                    "credential": credential_kind(),
+                    "credential_problem": credential_problem(),
+                    "code": daemon.targets.code.available,
+                    "chat": daemon.targets.chat.available,
+                    "permission_mode": policy.mode(),
+                    "router_model": daemon.settings.router_model,
+                    "workspace": str(Path(daemon.settings.workspace).expanduser()),
+                    "github": github_ready(),
+                }, ensure_ascii=False, indent=2) + "\n"
+                return http_response(http.HTTPStatus.OK, body.encode("utf-8"),
+                                     "application/json; charset=utf-8")
             return http_response(http.HTTPStatus.OK, b"ok\n", "text/plain; charset=utf-8")
         if request.headers.get("Upgrade", "").lower() == "websocket":
             return None
@@ -714,7 +735,7 @@ async def run(settings: Settings) -> None:
 
     await bootstrap_workspace(settings)
     daemon = Daemon(settings)
-    process_request = make_process_request()
+    process_request = make_process_request(daemon=daemon)
 
     # Health check стучится раз в секунду: без этого лог состоит из него одного.
     if not log.isEnabledFor(logging.DEBUG):

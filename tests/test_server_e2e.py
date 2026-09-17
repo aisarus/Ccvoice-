@@ -263,6 +263,35 @@ def test_same_port_serves_the_client_and_health_check(tmp_path):
             assert head.count(header + ":") == 1, f"{name}: дубль заголовка {header}"
 
 
+def test_health_check_tells_the_owner_what_the_daemon_thinks(tmp_path):
+    """«Команда ничего не вернула» — не ответ. Одним запросом видно всё."""
+    async def flow():
+        import json as js
+        import urllib.request
+        from voice_claude.server import make_process_request
+        from websockets.asyncio.server import serve
+        settings = Settings(workspace=str(tmp_path), token="secret",
+                            note_path=str(tmp_path / "i.md"))
+        daemon = Daemon(settings)
+        async with serve(daemon.handler, "127.0.0.1", 0,
+                         process_request=make_process_request(daemon=daemon)) as server:
+            port = server.sockets[0].getsockname()[1]
+            # Запрос — в поток: блокирующий вызов прямо здесь остановил бы
+            # тот самый цикл, который должен на него ответить.
+            def get(url):
+                return urllib.request.urlopen(url, timeout=5).read()
+            plain = await asyncio.to_thread(get, f"http://127.0.0.1:{port}/healthz")
+            detailed = await asyncio.to_thread(
+                get, f"http://127.0.0.1:{port}/healthz?token=secret")
+        return plain, js.loads(detailed)
+
+    plain, detailed = asyncio.run(flow())
+    assert plain.strip() == b"ok"                       # платформе хватает этого
+    assert detailed["state"] == "IDLE"
+    assert "credential" in detailed and "code" in detailed
+    assert detailed["permission_mode"] in ("auto", "guarded", "ask")
+
+
 def test_settings_read_the_deployment_environment(monkeypatch):
     monkeypatch.setenv("PORT", "10000")
     monkeypatch.setenv("VOICE_TOKEN", "from-env")
