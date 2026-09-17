@@ -77,3 +77,34 @@ def test_undo_phrases_are_recognised():
         assert checkpoints.matches(phrase, checkpoints.UNDO_PHRASES)
     assert not checkpoints.matches("почини тесты", checkpoints.UNDO_PHRASES)
     assert checkpoints.matches("что ты сделал", checkpoints.HISTORY_PHRASES)
+
+
+def test_our_own_journal_never_lands_in_the_project_history(repo):
+    """Живая проверка показала: журнал точек уезжал в коммит проекта."""
+    journal = checkpoints.Journal(repo)
+    (repo / "auth.ts").write_text("стало", encoding="utf-8")
+    before = checkpoints.head(repo)
+    after = checkpoints.commit_all(repo, "голосом: правка")
+    journal.add(before, after, "правка")
+
+    files = subprocess.run(["git", "-C", str(repo), "show", "--name-only", "--format=", after],
+                           capture_output=True, text=True).stdout.split()
+    assert files == ["auth.ts"], files
+    assert not any(checkpoints.STATE_DIR in name for name in files)
+
+
+def test_writing_the_journal_is_not_a_change_worth_committing(repo):
+    """Иначе каждая запись журнала выглядела бы как правка в проекте."""
+    checkpoints.is_repo(repo)
+    journal = checkpoints.Journal(repo)
+    journal.add("a" * 40, "b" * 40, "что-то")
+    assert not checkpoints.has_changes(repo)
+    assert checkpoints.commit_all(repo, "пустой") is None
+
+
+def test_the_state_directory_is_hidden_locally_not_in_the_project(repo):
+    """Прячем в .git/info/exclude: это личный список, он никуда не уезжает."""
+    checkpoints.is_repo(repo)
+    exclude = (repo / ".git" / "info" / "exclude").read_text(encoding="utf-8")
+    assert f"{checkpoints.STATE_DIR}/" in exclude
+    assert not (repo / ".gitignore").exists()

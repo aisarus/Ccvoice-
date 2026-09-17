@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+import os
+
 from . import policy
 from .auth import credential_kind, credential_problem, credentials_present
 
@@ -26,6 +28,16 @@ class Reply:
     full_output: str
     target: str
     stubbed: bool = False
+
+
+def running_as_root() -> bool:
+    """Служба под systemd обычно работает от root.
+
+    CLI отказывается запускаться от root с выключенными разрешениями — и это
+    правильная защита. Поведение «ничего не спрашивать» мы в этом случае даём
+    колбэком: результат тот же, а сессия поднимается.
+    """
+    return hasattr(os, "geteuid") and os.geteuid() == 0
 
 
 def sdk_available() -> bool:
@@ -123,6 +135,11 @@ class CodeTarget(_SdkTarget):
 
         async def can_use_tool(tool_name: str, input_data: dict[str, Any], _ctx: Any) -> Any:
             from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny  # type: ignore
+            # Хозяин машины сказал «авто» — не спрашиваем ничего. Под root это
+            # единственный способ: CLI не принимает там режим «ничего не
+            # спрашивать», и без колбэка сессия просто не поднимется.
+            if policy.mode() == "auto":
+                return PermissionResultAllow()
             if self.permission_hook is None:
                 return PermissionResultAllow()
             approved = await self.permission_hook(tool_name, input_data)
@@ -130,7 +147,7 @@ class CodeTarget(_SdkTarget):
                 message="Отклонено голосом")
 
         options: dict[str, Any] = {"cwd": str(self.cwd)}
-        if policy.mode() == "auto":
+        if policy.mode() == "auto" and not running_as_root():
             # Ничего не спрашиваем: так решил хозяин машины.
             options["permission_mode"] = "bypassPermissions"
         else:

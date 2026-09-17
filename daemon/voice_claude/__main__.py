@@ -32,6 +32,7 @@ def main() -> int:
         note_path=args.note_path or env.note_path,
         ambient_submode=args.ambient or env.ambient_submode,
         workspace_repo=args.workspace_repo or env.workspace_repo,
+        router_model=env.router_model,
     )
     try:
         asyncio.run(run(settings))

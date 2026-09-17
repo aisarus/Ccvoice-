@@ -16,6 +16,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 JOURNAL = "checkpoints.json"
+STATE_DIR = ".voice-shell"
+# Свой журнал в чужой коммит попадать не должен: он бы приезжал в каждый
+# коммит проекта и в каждый пул-реквест.
+OURS = (f":(exclude){STATE_DIR}", f":(exclude){STATE_DIR}/**")
 UNDO_PHRASES = (
     "откати последнее", "откати", "отмени последнее", "отмени изменения",
     "верни как было", "верни обратно", "отмена последнего",
@@ -54,9 +58,33 @@ def is_repo(workspace: str | Path) -> bool:
     if not path.is_dir():
         return False
     try:
-        return _git(path, "rev-parse", "--is-inside-work-tree") == "true"
+        inside = _git(path, "rev-parse", "--is-inside-work-tree") == "true"
     except (RuntimeError, OSError):
         return False
+    if inside:
+        ensure_ignored(path)
+    return inside
+
+
+def ensure_ignored(workspace: str | Path) -> None:
+    """Спрятать служебный каталог локально, не трогая .gitignore проекта.
+
+    `.git/info/exclude` — личный список хозяина копии: он не коммитится и не
+    попадает к другим людям, а каталог перестаёт маячить в `git status`.
+    """
+    try:
+        git_dir = Path(_git(Path(workspace), "rev-parse", "--git-dir"))
+        if not git_dir.is_absolute():
+            git_dir = Path(workspace) / git_dir
+        exclude = git_dir / "info" / "exclude"
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        current = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
+        if f"{STATE_DIR}/" in current:
+            return
+        prefix = "" if current.endswith("\n") or not current else "\n"
+        exclude.write_text(f"{current}{prefix}{STATE_DIR}/\n", encoding="utf-8")
+    except (RuntimeError, OSError):
+        pass
 
 
 def head(workspace: str | Path) -> str:
@@ -64,7 +92,7 @@ def head(workspace: str | Path) -> str:
 
 
 def has_changes(workspace: str | Path) -> bool:
-    return bool(_git(Path(workspace), "status", "--porcelain"))
+    return bool(_git(Path(workspace), "status", "--porcelain", "--", ".", *OURS))
 
 
 def commit_all(workspace: str | Path, message: str) -> str | None:
@@ -72,7 +100,7 @@ def commit_all(workspace: str | Path, message: str) -> str | None:
     path = Path(workspace)
     if not has_changes(path):
         return None
-    _git(path, "add", "-A")
+    _git(path, "add", "-A", "--", ".", *OURS)
     _git(path, "-c", "user.name=Voice Shell", "-c", "user.email=voice@shell.local",
          "commit", "-m", message, "--no-verify")
     return head(path)

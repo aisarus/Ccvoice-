@@ -162,3 +162,26 @@ def approval_to_speech(raw: str) -> str:
         if re.search(pattern, tool, re.I):
             return f"Клод хочет {phrase}. Разрешить?"
     return f"Клод хочет выполнить: {tool}. Разрешить?"
+
+
+# Технический текст ошибки в ухо не годится: там стек, коды и пути. Но и
+# «что-то пошло не так» бесполезно — человек должен понять, чинить ли ему
+# что-то самому.
+FAILURE_HINTS = (
+    (r"root/sudo privileges", "служба работает от root, и CLI не принял режим без вопросов"),
+    (r"exit code 1\b|Command failed", "сессия Claude не поднялась"),
+    (r"credit|quota|rate.?limit", "кончился лимит подписки"),
+    (r"ENOTFOUND|ECONNREFUSED|Temporary failure|getaddrinfo", "нет сети"),
+    (r"timed? ?out", "ответ не пришёл вовремя"),
+    (r"not found|No such file", "не нашёлся нужный файл"),
+    (r"permission denied", "не хватило прав"),
+)
+
+
+def reason_for_voice(exc: BaseException) -> str:
+    """Одна короткая фраза о причине — без стека, кодов и путей."""
+    text = f"{type(exc).__name__}: {exc}"
+    for pattern, phrase in FAILURE_HINTS:
+        if re.search(pattern, text, re.I):
+            return phrase.capitalize() + "."
+    return "Причина в логе службы."

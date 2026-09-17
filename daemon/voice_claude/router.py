@@ -93,10 +93,15 @@ class Router:
 
         sticky = sticky_target if sticky_target is not None else self.sticky_target
         window_ms = self._router["sticky_target"]["window_s"] * 1000
-        if sticky and ms_since_last <= window_ms:
-            return Route(sticky, "sticky", 0.9, cleaned)
-
         target, confidence = self._classify(lowered)
+        if sticky and ms_since_last <= window_ms:
+            # Липкость держит короткие продолжения, но целую фразу с явными
+            # признаками другой цели перебивать не должна: «что такое вектор
+            # эмбеддинга» сразу после работы с кодом — это вопрос.
+            yields_at = self._router["sticky_target"].get("yields_to_classifier_at", 1.1)
+            if not (target and target != sticky and confidence >= yields_at):
+                return Route(sticky, "sticky", 0.9, cleaned)
+
         if target is not None:
             self.sticky_target = target
             return Route(target, "classifier", confidence, cleaned)

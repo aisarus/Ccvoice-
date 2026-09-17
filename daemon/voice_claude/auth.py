@@ -11,6 +11,7 @@ import asyncio
 import os
 import pty
 import re
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -192,12 +193,56 @@ def cli_credentials_path() -> Path:
     return Path(base) / ".credentials.json"
 
 
+# Результат опроса CLI: None — ещё не спрашивали.
+_cli_probe: bool | None = None
+PROBE_TIMEOUT = 45.0
+
+
 def cli_authenticated() -> bool:
-    """CLI вошёл сам — тогда переменная с токеном не нужна вовсе."""
+    """Вошёл ли CLI сам — тогда переменная с токеном не нужна вовсе.
+
+    Сначала файл: это мгновенно и покрывает обычный вход через
+    `claude setup-token`. Но вход бывает и без файла — управляемая среда,
+    свой конфиг, apiKeyHelper, — и тогда `claude -p` отвечает, а демон
+    говорит «Claude недоступен». Поэтому если файла нет, верим опросу
+    самого CLI, когда он уже сделан.
+    """
     try:
-        return cli_credentials_path().stat().st_size > 2
+        if cli_credentials_path().stat().st_size > 2:
+            return True
     except OSError:
+        pass
+    return _cli_probe is True
+
+
+def probe_cli(timeout: float = PROBE_TIMEOUT) -> bool:
+    """Спросить CLI, работает ли он. Один раз за жизнь процесса.
+
+    Опрос стоит одного круга к Claude, поэтому делается на старте, а не
+    в обработке реплики: блокировать цикл событий здесь нечем.
+    """
+    global _cli_probe
+    if _cli_probe is not None:
+        return _cli_probe
+    binary = shutil.which("claude")
+    if not binary:
+        _cli_probe = False
         return False
+    try:
+        # Ввод закрываем явно: у службы его нет, и CLI не должен его ждать.
+        done = subprocess.run([binary, "-p", "ok"], capture_output=True,
+                              text=True, timeout=timeout,
+                              stdin=subprocess.DEVNULL)
+        _cli_probe = done.returncode == 0 and bool(done.stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        _cli_probe = False
+    return _cli_probe
+
+
+def forget_cli_probe() -> None:
+    """После подключения подписки прежний ответ ничего не значит."""
+    global _cli_probe
+    _cli_probe = None
 
 
 def credentials_present() -> bool:

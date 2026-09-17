@@ -25,7 +25,8 @@ from websockets.http11 import Response
 from . import checkpoints, formatter, glossary, learning, memory, policy, state, watcher
 from .ambient import AmbientBuffer, RateLimiter, WhisperGate
 from .auth import (SetupError, SetupTokenFlow, apply_token, credential_kind,
-                   credential_problem, github_ready, persist_token, token_problem)
+                   credential_problem, forget_cli_probe, github_ready, persist_token,
+                   probe_cli, token_problem)
 from .router import Router
 from .speaker import Decision, Features, SegmentContext, SpeakerClassifier, debug_record
 from .spec import defaults, load_spec
@@ -238,8 +239,16 @@ class Daemon:
         before = checkpoints.head(workspace) if tracked else ""
 
         self._last_utterance = (route.text, route.target)
-        reply = await self._await_with_progress(
-            self.targets[route.target].send(route.text, preamble, role_line))
+        try:
+            reply = await self._await_with_progress(
+                self.targets[route.target].send(route.text, preamble, role_line))
+        except Exception as exc:                      # noqa: BLE001 - причин много
+            # Сессия Claude могла не подняться или упасть посреди работы.
+            # Молча уронить связь нельзя: в ухе это тишина, а на телефоне —
+            # переподключение без единого слова о том, что случилось.
+            log.exception("цель %s не ответила", route.target)
+            await self._recover_from(ws, route.target, exc)
+            return
 
         # Изменения закрываем коммитом: без этого «откати последнее» не на что опереть.
         if tracked and not reply.stubbed:
@@ -256,6 +265,18 @@ class Daemon:
         await self._broadcast({"id": "voice_summary", "text": summary.text,
                                "is_question": summary.is_question, "target": route.target,
                                "stubbed": reply.stubbed, "full_output": reply.full_output})
+        await self._broadcast_state()
+
+    async def _recover_from(self, ws: Any, target: str, exc: Exception) -> None:
+        """Сказать вслух, что не вышло, и вернуться в исходное состояние."""
+        spoken = f"{target}: не смог выполнить. {formatter.reason_for_voice(exc)}"
+        await self.targets.reset_sessions()
+        self.machine.to(state.SPEAKING)
+        self.machine.open_window()
+        await self._broadcast({"id": "voice_summary", "text": spoken, "is_question": False,
+                               "target": target, "stubbed": True, "full_output": str(exc)})
+        await self._send(ws, {"id": "error", "code": "target_failed",
+                              "message": str(exc)[:400], "recoverable": True})
         await self._broadcast_state()
 
     async def _await_with_progress(self, coro: Any) -> Any:
@@ -276,9 +297,9 @@ class Daemon:
                 if said == 1:
                     self.machine.to(state.WORKING)
                     await self._broadcast_state()
-                    await self._say("Работаю.")
+                    await self._say("Работаю.", progress=True)
                 else:
-                    await self._say("Ещё работаю.")
+                    await self._say("Ещё работаю.", progress=True)
 
     async def watch_loop(self, interval_s: float = 60.0) -> None:
         """Смотрит наружу и заговаривает первым. Остановить — PROACTIVE=off."""
@@ -312,10 +333,16 @@ class Daemon:
         summary = await self._voice_summary(reply, "code")
         await self._announce(summary.text)
 
-    async def _say(self, text: str, target: str = "code") -> None:
+    async def _say(self, text: str, target: str = "code", progress: bool = False) -> None:
+        """Реплика от самой оболочки.
+
+        `progress=True` — только для «работаю»: этим флагом клиент вправе не
+        показывать реплику. «Откатил auth.ts» и «Запомнил» — это ответы, и
+        помечать их так означает терять их на клиенте, который флаг уважает.
+        """
         await self._broadcast({"id": "voice_summary", "text": text, "is_question": False,
                                "target": target, "stubbed": False, "full_output": text,
-                               "progress": True})
+                               "progress": progress})
 
     @staticmethod
     def _alternatives_hint(msg: dict[str, Any]) -> str:
@@ -577,6 +604,7 @@ class Daemon:
     async def _accept_token(self, token: str) -> None:
         """Применить токен немедленно и сохранить, чтобы пережил перезапуск."""
         apply_token(token)
+        forget_cli_probe()
         persisted = persist_token(token)
         await self.targets.reset_sessions()
         await self._broadcast({"id": "auth_token", "token": token,
@@ -695,6 +723,11 @@ async def run(settings: Settings) -> None:
     # вызывается. Так и задумано: список разрешает чтение, колбэк запрещает
     # остальное. В логе это только шум.
     warnings.filterwarnings("ignore", message=".*can_use_tool will not be invoked.*")
+
+    # Ни токена, ни файла входа — это ещё не значит «нет доступа»: CLI бывает
+    # авторизован иначе. Спрашиваем его самого, один раз и до приёма реплик.
+    if credential_kind() == "none":
+        await asyncio.get_running_loop().run_in_executor(None, probe_cli)
 
     print(f"voice-claude-daemon\n"
           f"  workspace : {Path(settings.workspace).expanduser()}\n"

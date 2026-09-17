@@ -194,3 +194,20 @@ def test_a_strange_answer_from_the_model_is_ignored(router):
     decided = router.apply_intent(route, "code")
     assert (decided.target, decided.reason) == ("code", "intent_model")
     assert router.sticky_target == "code"
+
+
+def test_a_plain_question_breaks_out_of_the_previous_target(router):
+    """Живая проверка показала: «что такое …» сразу после работы с кодом
+    уезжало в код по липкости."""
+    work = router.route("покажи какие файлы в проекте", ms_since_last=10 ** 6)
+    assert work.target == "code"
+    question = router.route("что такое вектор эмбеддинга", ms_since_last=2000)
+    assert (question.target, question.reason) == ("chat", "classifier")
+
+
+def test_short_continuations_still_stick(router):
+    """«Дальше» и «добей» — это продолжение работы, а не смена цели."""
+    router.route("почини падающий тест", ms_since_last=10 ** 6)
+    for phrase in ("дальше", "продолжай", "добей"):
+        route = router.route(phrase, ms_since_last=2000)
+        assert route.target == "code", f"{phrase} уехало в {route.target}"

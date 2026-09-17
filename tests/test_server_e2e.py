@@ -190,6 +190,15 @@ def test_a_silent_model_leaves_the_lexicon_in_charge(tmp_path):
     assert (route["target"], route["reason"]) == ("chat", "default")
 
 
+def test_shell_answers_are_answers_not_progress(tmp_path):
+    """«Работаю» клиент вправе не показывать. «Откатывать нечего» — нет:
+    в живой проверке этот ответ пропал именно из-за флага."""
+    _, received = run([segment("откати последнее", MASTER)], tmp_path / "inbox.md")
+    spoken = [m for m in kinds(received, "voice_summary") if not m.get("progress")]
+    assert spoken, "оболочка ответила только прогрессом"
+    assert "Откатывать нечего" in spoken[0]["text"]
+
+
 def test_ambient_control_switches_and_wipes(tmp_path):
     async def flow():
         settings = Settings(workspace=".", token="t", note_path=str(tmp_path / "i.md"))
