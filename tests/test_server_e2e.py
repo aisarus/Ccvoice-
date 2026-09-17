@@ -135,6 +135,22 @@ def test_phone_mic_keeps_the_full_band_profile(tmp_path):
     assert daemon.telemetry[0]["profile"] != "narrowband"
 
 
+def test_alternatives_are_a_hint_and_never_a_rewrite(tmp_path):
+    """Верный вариант часто второй — но реплику за человека не переписываем."""
+    hint = Daemon._alternatives_hint(
+        {"alternatives": ["покажи логи", "покажи логин", "  ", "покажи логику", "лишний"]})
+    assert "покажи логин" in hint and "покажи логику" in hint
+    assert "лишний" not in hint          # больше трёх не подсказываем
+    assert Daemon._alternatives_hint({}) == ""
+    assert Daemon._alternatives_hint({"alternatives": [""]}) == ""
+
+    daemon, received = run(
+        [segment("покажи логи", MASTER, alternatives=["покажи логи", "покажи логин"])],
+        tmp_path / "inbox.md",
+    )
+    assert kinds(received, "route")[0]["target"] == "code"
+
+
 def test_ambient_control_switches_and_wipes(tmp_path):
     async def flow():
         settings = Settings(workspace=".", token="t", note_path=str(tmp_path / "i.md"))

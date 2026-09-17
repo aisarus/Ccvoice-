@@ -71,7 +71,12 @@ jobs:
           script: bash android/smoke-test.sh
 
       # Ссылка, которую можно открыть с телефона без входа в GitHub.
+      # Выкладка сначала удаляет прежние файлы, и сорвавшаяся загрузка
+      # оставляет релиз пустым — то есть ссылку на APK нерабочей. Поэтому
+      # вторая попытка, если первая не дошла.
       - name: Выложить в релиз
+        id: release
+        continue-on-error: true
         if: github.ref_name == 'claude/voice-shell-claude-code-77wwh2'
         uses: softprops/action-gh-release@v2
         with:
@@ -92,3 +97,31 @@ jobs:
             android/app/build/outputs/apk/debug/app-debug.apk
             android/app/build/outputs/apk/debug/voice-shell-apk.zip
             android/app/build/outputs/apk/debug/checksums.txt
+
+      - name: Выложить в релиз (вторая попытка)
+        if: |
+          github.ref_name == 'claude/voice-shell-claude-code-77wwh2' &&
+          steps.release.outcome == 'failure'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-latest
+          name: Voice Shell APK
+          prerelease: true
+          files: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/debug/voice-shell-apk.zip
+            android/app/build/outputs/apk/debug/checksums.txt
+
+      # `continue-on-error` на первой попытке гасит и её провал, поэтому
+      # состояние проверяем сами: релиз без APK — это сломанная ссылка.
+      - name: Проверить, что APK лежит в релизе
+        if: github.ref_name == 'claude/voice-shell-claude-code-77wwh2'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          assets=$(curl -sfL -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/apk-latest" \
+            | grep -o '"name": *"[^"]*"' || true)
+          echo "$assets"
+          echo "$assets" | grep -q 'app-debug.apk' \
+            || { echo "::error::в релизе нет app-debug.apk — ссылка на скачивание сломана"; exit 1; }

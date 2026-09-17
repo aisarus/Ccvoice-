@@ -218,6 +218,9 @@ class Daemon:
 
         preamble = self._preamble()
         role_line = self.classifier.role_line(decision, device)
+        alternatives = self._alternatives_hint(msg)
+        if alternatives:
+            role_line += "\n" + alternatives
         if route.target == "chat" and AmbientBuffer.is_recall(text) and self.ambient.enabled:
             role_line += "\n[ambient] последние реплики:\n" + self.ambient.transcript()
 
@@ -304,6 +307,21 @@ class Daemon:
         await self._broadcast({"id": "voice_summary", "text": text, "is_question": False,
                                "target": target, "stubbed": False, "full_output": text,
                                "progress": True})
+
+    @staticmethod
+    def _alternatives_hint(msg: dict[str, Any]) -> str:
+        """Другие гипотезы распознавателя.
+
+        Переписывать реплику за человека нельзя — это испорченный телефон из
+        спеки. Но верный вариант часто стоит вторым, особенно на именах из
+        проекта, и пусть Claude выберет по контексту, как он это делает
+        с глоссарием.
+        """
+        raw = msg.get("alternatives") or []
+        alts = [a.strip() for a in raw if isinstance(a, str) and a.strip()][:3]
+        if not alts:
+            return ""
+        return "[распознавание] другие варианты того же: " + " · ".join(alts)
 
     def _preamble(self) -> str:
         """Служебная приписка: голосовой ввод, имена проекта, память о человеке."""

@@ -1855,6 +1855,7 @@
           },
           "gates_triggered": "array<string>",
           "transcript": "string?",
+          "alternatives": "array<string>? — прочие гипотезы распознавателя, подсказкой, без переписывания реплики",
           "weight_profile": "acoustic_only|with_voiceprint|narrowband"
         }
       },

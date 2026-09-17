@@ -33,6 +33,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -69,6 +70,8 @@ class VoiceService : Service() {
         private const val CHANNEL = "voice-shell"
         private const val NOTIFICATION_ID = 42
         private const val WINDOW_MS = 15_000L
+        /** Столько ждём, что человек начнёт говорить, прежде чем взять расслышанное. */
+        private const val FALLBACK_MS = 3_500L
         private const val TAG = "VoiceShell"
     }
 
@@ -89,6 +92,7 @@ class VoiceService : Service() {
     private var spokeAt = 0L
     private var windowUntil = 0L
     private var wakeReady = false
+    private var fallbackText = ""
     private var unauthorized = false
 
     override fun onCreate() {
@@ -279,12 +283,13 @@ class VoiceService : Service() {
         if (!windowOpen && !Intents.hasWake(text)) return
         windowUntil = 0
 
+        // Модель обращения — самая маленькая в системе: её дело услышать
+        // «Клод» и «стоп», а не переписывать команду. Поэтому саму реплику
+        // всегда отдаём нормальному распознавателю, а расслышанное держим
+        // запасным вариантом: если человек сказал всё одним куском, повторять
+        // ему уже нечего, и лучше отправить хотя бы это.
         val payload = Intents.stripWake(text)
-        if (payload.isBlank() || prefs.language != "ru-RU") {
-            listenForCommand()
-            return
-        }
-        deliver(payload)
+        listenForCommand(if (prefs.language == "ru-RU") payload else "")
     }
 
     /**
@@ -306,7 +311,19 @@ class VoiceService : Service() {
         return overlap >= 0.6
     }
 
-    private fun deliver(payload: String) {
+    /**
+     * Человек договорил ещё до того, как включился хороший распознаватель.
+     * Тогда уходит то, что расслышала локальная модель, — хуже, но не тишина.
+     */
+    private fun deliverFallback() {
+        val text = fallbackText
+        fallbackText = ""
+        if (text.isBlank()) return
+        report("расслышано локально: $text")
+        deliver(text)
+    }
+
+    private fun deliver(payload: String, alternatives: List<String> = emptyList()) {
         if (payload.isBlank()) return
         report("→ $payload")
         send(
@@ -321,13 +338,28 @@ class VoiceService : Service() {
                 .put("duration_ms", 1200)
                 .put("voiced_frames", 40)
                 .put("role", "master")
+                .apply { if (alternatives.isNotEmpty()) put("alternatives", JSONArray(alternatives)) }
         )
     }
 
     /** Реплика на выбранном языке распознавателем телефона. */
-    private fun listenForCommand() {
+    /**
+     * Реплика уже прозвучала целиком, и хороший распознаватель ждёт речь,
+     * которой не будет. Ждать его собственный таймаут — это секунды тишины
+     * в ухе, поэтому обрываем сами и отправляем то, что расслышали локально.
+     */
+    private val fallbackTimer = Runnable {
+        if (awaitingCommand && fallbackText.isNotBlank()) {
+            runCatching { cloud?.cancel() }
+            finishCommand()
+            deliverFallback()
+        }
+    }
+
+    private fun listenForCommand(fallback: String = "") {
         if (awaitingCommand) return
         awaitingCommand = true
+        fallbackText = fallback
         main.post {
             runCatching { wake?.stop() }
             try {
@@ -336,7 +368,9 @@ class VoiceService : Service() {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE, prefs.language)
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                    // Несколько гипотез: распознаватель почти всегда держит
+                    // верный вариант вторым, когда путает имя из проекта.
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
                     putExtra("android.speech.extra.ENABLE_LANGUAGE_SWITCH", "adaptive")
                     putStringArrayListExtra(
                         "android.speech.extra.LANGUAGE_SWITCH_ALLOWED_LANGUAGES",
@@ -345,9 +379,11 @@ class VoiceService : Service() {
                 }
                 cloud?.setRecognitionListener(commandListener())
                 cloud?.startListening(intent)
+                if (fallback.isNotBlank()) main.postDelayed(fallbackTimer, FALLBACK_MS)
             } catch (t: Throwable) {
                 awaitingCommand = false
                 report("распознавание недоступно: ${t.javaClass.simpleName}")
+                deliverFallback()
                 resumeWake()
             }
         }
@@ -355,10 +391,15 @@ class VoiceService : Service() {
 
     private fun commandListener() = object : CloudListener {
         override fun onResults(results: Bundle?) {
-            val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                ?.firstOrNull()?.trim().orEmpty()
+            val heard = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                .orEmpty().map { it.trim() }.filter { it.isNotEmpty() }
+            val text = heard.firstOrNull().orEmpty()
             finishCommand()
-            if (text.isEmpty()) return
+            if (text.isEmpty()) {
+                deliverFallback()
+                return
+            }
+            fallbackText = ""
             Intents.stopIntent(text)?.let { scope ->
                 silence()
                 send(JSONObject().put("id", "interrupt").put("scope", scope))
@@ -369,7 +410,7 @@ class VoiceService : Service() {
                 report("язык: $code")
                 return
             }
-            deliver(text)
+            deliver(text, heard.drop(1).take(3))
         }
 
         override fun onError(error: Int) {
@@ -379,10 +420,16 @@ class VoiceService : Service() {
             ) {
                 report("распознавание реплики: ошибка $error")
             }
+            deliverFallback()
         }
 
         override fun onReadyForSpeech(params: Bundle?) { report("слушаю реплику…") }
-        override fun onBeginningOfSpeech() = Unit
+
+        /** Человек всё-таки говорит — запасной вариант больше не нужен. */
+        override fun onBeginningOfSpeech() {
+            main.removeCallbacks(fallbackTimer)
+            fallbackText = ""
+        }
         override fun onRmsChanged(rmsdB: Float) = Unit
         override fun onBufferReceived(buffer: ByteArray?) = Unit
         override fun onEndOfSpeech() = Unit
@@ -392,6 +439,7 @@ class VoiceService : Service() {
 
     private fun finishCommand() {
         awaitingCommand = false
+        main.removeCallbacks(fallbackTimer)
         main.postDelayed({ if (!awaitingCommand) resumeWake() }, 300)
     }
 
