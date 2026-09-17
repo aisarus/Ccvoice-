@@ -121,6 +121,22 @@ curl -fsSL https://raw.githubusercontent.com/aisarus/Ccvoice-/claude/voice-shell
 [`docs/desktop-handoff.json`](docs/desktop-handoff.json): там всё то же самое
 машиночитаемо — предусловия, шаги, что проверить и что сказать тебе.
 
+## GitHub
+
+Цель `код` работает через оболочку, поэтому GitHub ей доступен напрямую —
+нужен только `gh` и токен:
+
+```bash
+sudo bash scripts/setup-github.sh ghp_ТВОЙ_ТОКЕН "Имя" почта@example.com
+```
+
+Скрипт ставит `gh`, кладёт токен в окружение службы, настраивает git и
+проверяет доступ. Токен: [github.com/settings/tokens](https://github.com/settings/tokens)
+→ classic → права `repo` и `workflow`.
+
+После этого голосом работает «покажи мои репозитории», «создай репозиторий
+voice-notes», «посмотри пул-реквесты», «сделай коммит и запушь».
+
 ## Приложение для Android
 
 [Скачать APK](https://github.com/aisarus/Ccvoice-/releases/download/apk-latest/app-debug.apk) ·

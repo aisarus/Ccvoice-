@@ -231,6 +231,12 @@ def credential_problem() -> str | None:
     return None
 
 
+def github_ready() -> bool:
+    """Есть ли у Claude доступ к GitHub — видно по токену в окружении."""
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
+    return token.startswith(("ghp_", "github_pat_", "gho_", "ghs_"))
+
+
 def apply_token(token: str) -> None:
     """Токен начинает действовать сразу, до перезапуска сервиса."""
     os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = token

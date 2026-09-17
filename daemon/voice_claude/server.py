@@ -25,7 +25,7 @@ from websockets.http11 import Response
 from . import formatter, glossary, policy, state
 from .ambient import AmbientBuffer, RateLimiter, WhisperGate
 from .auth import (SetupError, SetupTokenFlow, apply_token, credential_kind,
-                   credential_problem, persist_token, token_problem)
+                   credential_problem, github_ready, persist_token, token_problem)
 from .router import Router
 from .speaker import Decision, Features, SegmentContext, SpeakerClassifier, debug_record
 from .spec import defaults, load_spec
@@ -128,6 +128,7 @@ class Daemon:
                 "credential": credential_kind(),
                 "credential_problem": credential_problem(),
                 "permission_mode": policy.mode(),
+                "github": github_ready(),
             })
         elif kind == "speech_segment":
             await self._on_segment(ws, msg)

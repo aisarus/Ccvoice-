@@ -126,3 +126,17 @@ def test_cli_login_counts_as_a_credential(tmp_path, monkeypatch):
     (config / ".credentials.json").write_text('{"oauth": "..."}', encoding="utf-8")
     assert cli_authenticated()
     assert credential_kind() == "cli"
+
+
+def test_github_access_is_detected_by_the_token(monkeypatch):
+    from voice_claude.auth import github_ready
+
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    assert not github_ready()
+
+    monkeypatch.setenv("GH_TOKEN", "не токен")
+    assert not github_ready()
+
+    monkeypatch.setenv("GH_TOKEN", "ghp_" + "x" * 36)
+    assert github_ready()
