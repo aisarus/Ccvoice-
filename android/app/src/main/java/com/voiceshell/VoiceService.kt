@@ -11,6 +11,9 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -62,8 +65,12 @@ class VoiceService : Service() {
         const val ACTION_SET_ENGINE = "com.voiceshell.SET_ENGINE"
         const val EXTRA_ENGINES = "engines"
         const val ACTION_TRY_VOICE = "com.voiceshell.TRY_VOICE"
+        const val ACTION_ACOUSTICS = "com.voiceshell.ACOUSTICS"
+        const val ACTION_RECONNECT = "com.voiceshell.RECONNECT"
         const val EXTRA_VOICES = "voices"
         const val EXTRA_TEXT = "text"
+        /** Состояние связи отдельным полем: экрану не надо гадать по строке. */
+        const val EXTRA_LINK = "link"
         const val EXTRA_CODE = "code"
         const val EXTRA_AUTH_URL = "auth_url"
         const val EXTRA_AUTH_TOKEN = "auth_token"
@@ -94,6 +101,8 @@ class VoiceService : Service() {
     private var wake: WakeWordEngine? = null
     private var route: AudioRoute? = null
     private var signals: Signals? = null
+    /** Громкость реплики: единственное, что телефон может измерить сам. */
+    private val meter = SpeechMeter()
     /** Что происходит прямо сейчас — первая строка уведомления. */
     private var phase = "жду обращения"
 
@@ -106,6 +115,15 @@ class VoiceService : Service() {
     private var wakeReady = false
     private var fallbackText = ""
     private var unauthorized = false
+
+    /** Сколько реплик подряд демон отверг как чужую речь. */
+    private var roleGates = 0
+
+    private var linkState = LinkState.OFF
+    private var attempt = 0
+    private var reconnectScheduled = false
+    /** Служба уже остановлена: отложенные попытки связи должны умереть вместе с ней. */
+    @Volatile private var stopped = false
 
     override fun onCreate() {
         super.onCreate()
@@ -151,8 +169,21 @@ class VoiceService : Service() {
         runCatching { route?.start(prefs.btMic) }
         report(route?.describe().orEmpty().ifBlank { "микрофон: телефон" })
 
+        // Сеть вернулась — незачем досиживать паузу до конца: человек уже
+        // говорит в телефон и ждёт ответа.
+        runCatching {
+            getSystemService(ConnectivityManager::class.java)
+                .registerDefaultNetworkCallback(networkWatch)
+        }
+
         Thread { prepareWakeWord() }.start()
         main.postDelayed(heartbeat, HEARTBEAT_MS)
+    }
+
+    private val networkWatch = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            main.post { if (socket == null && linkState != LinkState.OFF) connectNow() }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -163,6 +194,12 @@ class VoiceService : Service() {
                 route?.enable(prefs.btMic)
                 report(route?.describe().orEmpty().ifBlank { "микрофон: телефон" })
             }
+            ACTION_ACOUSTICS -> report(
+                if (prefs.acoustics) "мерю громкость реплики и шлю признаки"
+                else "признаки выключены — роль уходит подсказкой"
+            )
+            // Человек нажал «повторить» на экране готовности: ждать паузу незачем.
+            ACTION_RECONNECT -> connectNow()
             ACTION_SAY -> {
                 val text = intent.getStringExtra(EXTRA_TEXT).orEmpty().trim()
                 if (text.isNotEmpty()) deliver(text)
@@ -234,7 +271,12 @@ class VoiceService : Service() {
     }
 
     override fun onDestroy() {
+        stopped = true
         main.removeCallbacksAndMessages(null)
+        runCatching {
+            getSystemService(ConnectivityManager::class.java)
+                .unregisterNetworkCallback(networkWatch)
+        }
         runCatching { signals?.release() }
         runCatching { route?.release() }
         runCatching { wake?.release() }
@@ -344,11 +386,16 @@ class VoiceService : Service() {
         deliver(text)
     }
 
-    private fun deliver(payload: String, alternatives: List<String> = emptyList()) {
+    private fun deliver(
+        payload: String,
+        alternatives: List<String> = emptyList(),
+        measured: Segment? = null,
+    ) {
         if (payload.isBlank()) return
         signals?.accepted(route?.onBluetoothMic == true)
         phase("отправил")
         report("→ $payload")
+        val device = if (route?.onBluetoothMic == true) "sony_mic" else "phone_mic"
         send(
             JSONObject()
                 .put("id", "speech_segment")
@@ -356,13 +403,45 @@ class VoiceService : Service() {
                 .put("transcript", payload)
                 // Демон не может услышать, по какому каналу пришёл звук: на
                 // канале гарнитуры полоса узкая и часть признаков не измерить.
-                .put("device", if (route?.onBluetoothMic == true) "sony_mic" else "phone_mic")
+                .put("device", device)
                 .put("narrowband", route?.onBluetoothMic == true)
-                .put("duration_ms", 1200)
-                .put("voiced_frames", 40)
+                // Роль — не измерение, а предположение устройства: телефон в
+                // кармане у хозяина. Демон, у которого есть признаки, её и не
+                // спрашивает, но без признаков он должен знать, чего она стоит.
                 .put("role", "master")
+                .put("role_source", "hint")
                 .apply { if (alternatives.isNotEmpty()) put("alternatives", JSONArray(alternatives)) }
+                .apply { describe(this, device, measured) }
         )
+    }
+
+    /**
+     * Кладёт в сообщение то, что удалось измерить, — и ничего сверх этого.
+     *
+     * Длительность и число речевых кадров демон использует в жёстких гейтах, а
+     * признаки — в классификаторе. Поэтому непомеренное не подставляется
+     * умолчаниями: пусть демон применит свои, чем мы соврём про сегмент,
+     * которого не слышали (реплика по кнопке или текстом).
+     */
+    private fun describe(message: JSONObject, device: String, measured: Segment?) {
+        // Выключатель возвращает поведение целиком: ни признаков, ни
+        // измеренной длительности — демон применит свои умолчания, как раньше.
+        if (measured == null || !prefs.acoustics) return
+        message.put("duration_ms", measured.durationMs)
+        message.put("voiced_frames", Acoustics.voicedFrames(measured))
+        val baseline = prefs.baseline(device)
+        val features = Acoustics.features(measured, baseline)
+        if (features.isEmpty()) {
+            // Первая реплика на этом микрофоне задаёт норму: сравнивать пока
+            // не с чем, и выдумывать «ноль» нельзя — это сказало бы демону,
+            // что говорили ровно как обычно.
+            report("калибрую уровень микрофона по первой реплике")
+        } else {
+            val json = JSONObject()
+            for ((name, value) in features) json.put(name, value)
+            message.put("features", json)
+        }
+        prefs.setBaseline(device, Acoustics.nextBaseline(measured, baseline))
     }
 
     /** Реплика на выбранном языке распознавателем телефона. */
@@ -428,6 +507,9 @@ class VoiceService : Service() {
         awaitingCommand = true
         fallbackText = fallback
         main.post {
+            // Копилка громкости — только про эту реплику: кадры прошлой
+            // сделали бы «фоном» чужой голос из прошлого разговора.
+            meter.reset()
             runCatching { wake?.stop() }
             try {
                 if (cloud == null) cloud = SpeechRecognizer.createSpeechRecognizer(this)
@@ -482,7 +564,7 @@ class VoiceService : Service() {
                 report("язык: $code")
                 return
             }
-            deliver(text, heard.drop(1).take(3))
+            deliver(text, heard.drop(1).take(3), meter.segment())
         }
 
         override fun onError(error: Int) {
@@ -509,10 +591,22 @@ class VoiceService : Service() {
         override fun onBeginningOfSpeech() {
             main.removeCallbacks(fallbackTimer)
             fallbackText = ""
+            meter.speechBegan(System.currentTimeMillis())
         }
-        override fun onRmsChanged(rmsdB: Float) = Unit
+
+        /**
+         * Единственное окно в сам звук: доступа к записи у нас нет, а эта
+         * череда значений и есть то, из чего считаются признаки говорящего.
+         */
+        override fun onRmsChanged(rmsdB: Float) {
+            meter.frame(rmsdB, System.currentTimeMillis())
+        }
+
         override fun onBufferReceived(buffer: ByteArray?) = Unit
-        override fun onEndOfSpeech() = Unit
+
+        override fun onEndOfSpeech() {
+            meter.speechEnded(System.currentTimeMillis())
+        }
         override fun onPartialResults(partialResults: Bundle?) = Unit
         override fun onEvent(eventType: Int, params: Bundle?) = Unit
     }
@@ -686,20 +780,27 @@ class VoiceService : Service() {
 
     // ---------- связь ----------
     private fun connect() {
+        reconnectScheduled = false
+        if (stopped) return
         if (!prefs.isConfigured) {
-            report("не настроено: укажи адрес и токен")
+            link(LinkState.OFF, Link.hint(LinkState.OFF, null, 0))
             return
         }
+        if (socket != null) return
+        link(LinkState.CONNECTING, "подключаюсь к ${prefs.server}")
         val request = Request.Builder().url(prefs.socketUrl()).build()
         socket = http.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                unauthorized = false
                 webSocket.send(
                     JSONObject().put("id", "hello").put("v", 1)
                         .put("token", prefs.token).put("device_id", "android")
                         .put("app_version", "0.4.0").toString()
                 )
-                report("подключено")
+                main.post {
+                    unauthorized = false
+                    attempt = 0
+                    link(LinkState.ONLINE, "подключено")
+                }
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -707,27 +808,71 @@ class VoiceService : Service() {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                val hint = when {
-                    t.message?.contains("CLEARTEXT") == true ->
-                        "нет связи: сервер по http запрещён системой — обнови приложение"
-                    t.message?.contains("Failed to connect") == true ->
-                        "нет связи: сервер недоступен — проверь адрес, порт и фаервол"
-                    else -> "нет связи: ${t.message}"
-                }
-                report(hint)
-                main.postDelayed({ connect() }, 4000)
+                val code = response?.code ?: 0
+                val message = t.message
+                // Колбэки okhttp приходят со своего потока: всё, что трогает
+                // таймеры и уведомление, делаем на главном.
+                main.post { lost(Link.classify(message, code, online()), message, code) }
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                // С неверным токеном долбиться раз в две секунды бессмысленно.
-                main.postDelayed({ connect() }, if (unauthorized) 30_000 else 2000)
+                // Демон закрыл сам. Неверный токен от этого не исправится, и
+                // долбиться в него раз в две секунды бессмысленно.
+                main.post {
+                    lost(if (unauthorized) LinkState.REFUSED else LinkState.NO_SERVER, reason, 0)
+                }
             }
         })
     }
 
+    /** Связь пропала: сказать человеку причину и назначить следующую попытку. */
+    private fun lost(state: LinkState, message: String?, httpCode: Int) {
+        socket = null
+        if (stopped) return
+        val reason = Link.hint(state, message, httpCode)
+        if (reconnectScheduled) {
+            link(state, reason)
+            return
+        }
+        val delay = Link.delayMs(state, attempt)
+        attempt++
+        reconnectScheduled = true
+        main.postDelayed(reconnect, delay)
+        link(state, "$reason · повтор через ${delay / 1000} с")
+    }
+
+    private val reconnect = Runnable { connect() }
+
+    /** Ждать паузу незачем: человек говорит или сам нажал «повторить». */
+    private fun connectNow() {
+        main.removeCallbacks(reconnect)
+        reconnectScheduled = false
+        attempt = 0
+        connect()
+    }
+
+    private fun link(state: LinkState, text: String) {
+        linkState = state
+        report(text)
+    }
+
+    /**
+     * Есть ли вообще сеть.
+     *
+     * Без этого «нет связи» означало и выпавший wi-fi, и неверный токен, и
+     * выключенный демон — а чинить каждый раз надо разное.
+     */
+    private fun online(): Boolean = runCatching {
+        val manager = getSystemService(ConnectivityManager::class.java)
+        val network = manager.activeNetwork ?: return@runCatching false
+        val caps = manager.getNetworkCapabilities(network)
+        caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }.getOrDefault(true)
+
     private fun onServerMessage(message: JSONObject) {
         when (message.optString("id")) {
             "welcome" -> report("готов · ${message.optString("credential")}")
+            "route" -> onRoute(message)
             "voice_summary" -> {
                 val text = message.optString("text")
                 // На экран — чистый текст, в синтез — с ударениями, если они есть.
@@ -767,7 +912,8 @@ class VoiceService : Service() {
                 val code = message.optString("code")
                 if (code == "unauthorized") {
                     unauthorized = true
-                    report("токен не подошёл — вставь только значение, без VOICE_TOKEN=")
+                    link(LinkState.REFUSED,
+                         "токен не подошёл — вставь только значение, без VOICE_TOKEN=")
                 } else {
                     report("ошибка: ${message.optString("message")}")
                 }
@@ -775,9 +921,43 @@ class VoiceService : Service() {
         }
     }
 
+    /**
+     * Демон сказал, куда ушла реплика — или что не ушла никуда.
+     *
+     * Отказ по роли раньше просто игнорировался: человек говорил, телефон
+     * бодро отвечал «отправил», и на этом всё заканчивалось. Молчание в ответ
+     * на команду — худшее, что тут может быть.
+     */
+    private fun onRoute(message: JSONObject) {
+        val reason = message.optString("reason")
+        if (reason != "role_gate" && reason != "approval_role_gate") {
+            roleGates = 0
+            return
+        }
+        roleGates++
+        signals?.missed(route?.onBluetoothMic == true)
+        phase("жду обращения")
+        report("демон не принял реплику: ${message.optString("label")}")
+        // Два отказа подряд — это уже не чужая речь рядом, это врут измерения.
+        // Ронять команды молча хуже, чем работать по-старому: выключаем сами и
+        // говорим вслух, иначе человек так и не узнает, почему всё ожило.
+        if (roleGates >= 2 && prefs.acoustics) {
+            prefs.acoustics = false
+            roleGates = 0
+            report("дважды принял меня за чужого — выключил признаки говорящего")
+            speak("Выключил признаки говорящего: демон принимал меня за чужого.")
+        }
+    }
+
     private fun send(payload: JSONObject) {
         val ws = socket
-        if (ws == null) { report("нет связи"); return }
+        if (ws == null) {
+            // Реплика пропала молча — это и есть «он меня не слышит».
+            report("реплика не ушла — ${linkState.label}")
+            // Раз человек говорит, самое время попробовать связаться снова.
+            main.post { connectNow() }
+            return
+        }
         ws.send(payload.toString())
     }
 
@@ -806,6 +986,9 @@ class VoiceService : Service() {
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle("Voice Shell · $phase")
+            // Фаза говорит, слушает ли телефон; строка связи — дойдёт ли
+            // сказанное до демона. Без второй первая обманчива.
+            .setSubText(linkState.label)
             .setContentText(text)
             .setContentIntent(open)
             .addAction(0, "Говорить", listen)
@@ -830,7 +1013,11 @@ class VoiceService : Service() {
                 getSystemService(NotificationManager::class.java)
                     .notify(NOTIFICATION_ID, notification(text))
             }
-            sendBroadcast(Intent(ACTION_STATUS).setPackage(packageName).putExtra(EXTRA_TEXT, text))
+            sendBroadcast(
+                Intent(ACTION_STATUS).setPackage(packageName)
+                    .putExtra(EXTRA_TEXT, text)
+                    .putExtra(EXTRA_LINK, linkState.name)
+            )
         }
     }
 
