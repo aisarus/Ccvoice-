@@ -353,7 +353,14 @@ class VoiceService : Service() {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                report("нет связи: ${t.message}")
+                val hint = when {
+                    t.message?.contains("CLEARTEXT") == true ->
+                        "нет связи: сервер по http запрещён системой — обнови приложение"
+                    t.message?.contains("Failed to connect") == true ->
+                        "нет связи: сервер недоступен — проверь адрес, порт и фаервол"
+                    else -> "нет связи: ${t.message}"
+                }
+                report(hint)
                 main.postDelayed({ connect() }, 4000)
             }
 

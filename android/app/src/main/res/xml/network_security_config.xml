@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Демон может стоять на сервере без сертификата, в домашней сети или в tailnet,
+  поэтому http разрешён. Как только у сервера появится домен и HTTPS, адрес в
+  настройках меняется на https:// и трафик шифруется без правок здесь.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
