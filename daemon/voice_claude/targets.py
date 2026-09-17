@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from .auth import credential_kind, credentials_present
+from .auth import credential_kind, credential_problem, credentials_present
 
 PermissionHook = Callable[[str, dict[str, Any]], Awaitable[bool]]
 
@@ -40,6 +40,9 @@ def _stub_reason() -> str:
         import claude_agent_sdk  # noqa: F401
     except ImportError:
         return "не установлен claude-agent-sdk"
+    problem = credential_problem()
+    if problem:
+        return f"токен доступа неверный — {problem}"
     return "не подключена подписка Claude"
 
 

@@ -65,3 +65,26 @@ def test_failure_reports_what_the_cli_said():
     detail = SetupTokenFlow._tail(raw)
     assert "authorization code expired" in detail
     assert "Welcome" not in detail
+
+
+def test_a_broken_token_is_not_reported_as_a_working_subscription(monkeypatch):
+    """«subscription» при мусоре в переменной — это ложный зелёный свет."""
+    from voice_claude.auth import credential_kind, credential_problem, token_problem
+
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "Вставь сюда")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert credential_kind() == "none"
+    assert "не-ASCII" in credential_problem()
+
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-" + "T" * 40)
+    assert credential_kind() == "subscription"
+    assert credential_problem() is None
+
+
+def test_token_problems_are_named():
+    from voice_claude.auth import token_problem
+
+    assert token_problem("") == "пусто"
+    assert "короткий" in token_problem("sk-ant-1")
+    assert "sk-ant-" in token_problem("x" * 40)
+    assert token_problem("sk-ant-oat01-" + "T" * 40) is None

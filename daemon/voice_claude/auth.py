@@ -164,17 +164,49 @@ class SetupTokenFlow:
         return self._raw
 
 
+def token_problem(value: str) -> str | None:
+    """Что не так с токеном. None — всё в порядке.
+
+    Пустая проверка «переменная не пуста» врёт: в неё легко попадает обрывок
+    приглашения или русский текст, и демон рапортует о готовности, пока CLI
+    отвечает «Invalid auth token».
+    """
+    token = value.strip()
+    if not token:
+        return "пусто"
+    if not token.isascii():
+        return "содержит не-ASCII символы — похоже, вставился не токен"
+    if len(token) < 20:
+        return f"слишком короткий ({len(token)} символов)"
+    if not token.startswith("sk-ant-"):
+        return "не начинается с sk-ant-"
+    return None
+
+
 def credentials_present() -> bool:
-    """Подписка (OAuth-токен) или API-ключ — годится любое."""
-    return bool(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY"))
+    """Подписка (OAuth-токен) или API-ключ — годится любое, но настоящее."""
+    return credential_kind() != "none"
 
 
 def credential_kind() -> str:
-    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+    oauth = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
+    if oauth and token_problem(oauth) is None:
         return "subscription"
-    if os.environ.get("ANTHROPIC_API_KEY"):
+    key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if key and token_problem(key) is None:
         return "api_key"
     return "none"
+
+
+def credential_problem() -> str | None:
+    """Человеческая причина, почему доступа нет."""
+    for name in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"):
+        value = os.environ.get(name, "")
+        if value:
+            problem = token_problem(value)
+            if problem:
+                return f"{name}: {problem}"
+    return None
 
 
 def apply_token(token: str) -> None:

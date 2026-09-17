@@ -71,7 +71,17 @@ OAUTH="${CLAUDE_CODE_OAUTH_TOKEN:-}"
 if [ -z "$OAUTH" ] && [ -t 0 ]; then
     echo "Сейчас откроется авторизация: скопируй ссылку, открой на телефоне, вставь код обратно."
     claude setup-token || true
-    read -r -p "Вставь сюда выданный токен (или Enter, чтобы пропустить): " OAUTH || true
+    while :; do
+        read -r -p "Вставь выданный токен (начинается с sk-ant-), или Enter чтобы пропустить: " OAUTH || true
+        OAUTH="$(printf '%s' "${OAUTH:-}" | tr -d '[:space:]')"
+        [ -z "$OAUTH" ] && break
+        # Проверяем здесь, иначе служба молча рапортует о готовности с мусором.
+        case "$OAUTH" in
+            sk-ant-*) [ "${#OAUTH}" -ge 20 ] && break
+                      echo "Слишком короткий — это не весь токен." ;;
+            *) echo "Токен должен начинаться с sk-ant-. Вставлено: ${OAUTH:0:12}…" ;;
+        esac
+    done
 fi
 
 TOKEN="${VOICE_TOKEN:-$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')}"
