@@ -71,57 +71,71 @@ jobs:
           script: bash android/smoke-test.sh
 
       # Ссылка, которую можно открыть с телефона без входа в GitHub.
-      # Выкладка сначала удаляет прежние файлы, и сорвавшаяся загрузка
-      # оставляет релиз пустым — то есть ссылку на APK нерабочей. Поэтому
-      # вторая попытка, если первая не дошла.
+      # Выкладывали действием softprops/action-gh-release: оно висело по
+      # шестнадцать минут и оставляло релиз без APK, то есть ссылку на
+      # скачивание — нерабочей. Здесь загрузка прямая: по одному файлу,
+      # с потолком по времени, с повтором и с видимой ошибкой.
       - name: Выложить в релиз
-        id: release
-        continue-on-error: true
         if: github.ref_name == 'claude/voice-shell-claude-code-77wwh2'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: apk-latest
-          name: Voice Shell APK
-          body: |
-            Свежая сборка приложения.
+        working-directory: android/app/build/outputs/apk/debug
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          api() { curl -sS -H "Authorization: Bearer $GH_TOKEN" \
+                       -H "Accept: application/vnd.github+json" "$@"; }
 
-            - `app-debug.apk` — обычный файл, ставится сразу.
-            - `voice-shell-apk.zip` — то же самое в архиве, если браузер не даёт докачать apk:
-              скачай, распакуй файловым менеджером и поставь `voice-shell.apk`.
-            - `checksums.txt` — контрольные суммы.
+          id=$(api "https://api.github.com/repos/$REPO/releases/tags/apk-latest" \
+               | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" || true)
+          if [ -z "$id" ]; then
+            id=$(api -X POST "https://api.github.com/repos/$REPO/releases" \
+                 -d '{"tag_name":"apk-latest","name":"Voice Shell APK","prerelease":true}' \
+                 | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+          fi
+          echo "релиз: $id"
 
-            Все сборки подписаны одним ключом, поэтому обновление ставится поверх
-            предыдущего без удаления.
-          prerelease: true
-          files: |
-            android/app/build/outputs/apk/debug/app-debug.apk
-            android/app/build/outputs/apk/debug/voice-shell-apk.zip
-            android/app/build/outputs/apk/debug/checksums.txt
+          drop() {
+            api "https://api.github.com/repos/$REPO/releases/$id/assets" \
+              | python3 -c "import sys,json;[print(a['id']) for a in json.load(sys.stdin) if a['name']=='$1']" \
+              | while read -r old; do
+                  api -X DELETE "https://api.github.com/repos/$REPO/releases/assets/$old" >/dev/null || true
+                done
+          }
 
-      - name: Выложить в релиз (вторая попытка)
-        if: |
-          github.ref_name == 'claude/voice-shell-claude-code-77wwh2' &&
-          steps.release.outcome == 'failure'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: apk-latest
-          name: Voice Shell APK
-          prerelease: true
-          files: |
-            android/app/build/outputs/apk/debug/app-debug.apk
-            android/app/build/outputs/apk/debug/voice-shell-apk.zip
-            android/app/build/outputs/apk/debug/checksums.txt
+          put() {
+            name="$1"
+            echo "— $name ($(du -h "$name" | cut -f1))"
+            for attempt in 1 2 3; do
+              drop "$name"
+              code=$(curl -sS -o /tmp/upload.out -w '%{http_code}' --max-time 300 \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H "Content-Type: application/octet-stream" \
+                --data-binary @"$name" \
+                "https://uploads.github.com/repos/$REPO/releases/$id/assets?name=$name") || code=000
+              if [ "$code" = "201" ]; then echo "  выложен"; return 0; fi
+              echo "  попытка $attempt: HTTP $code $(head -c 200 /tmp/upload.out || true)"
+              sleep 5
+            done
+            return 1
+          }
 
-      # `continue-on-error` на первой попытке гасит и её провал, поэтому
-      # состояние проверяем сами: релиз без APK — это сломанная ссылка.
+          put app-debug.apk || { echo "::error::APK не выложен"; exit 1; }
+          put voice-shell-apk.zip || echo "::warning::запасной архив не выложен"
+          put checksums.txt || echo "::warning::контрольные суммы не выложены"
+
+      # Проверяем состояние, а не код возврата: ссылка на скачивание либо
+      # работает, либо нет.
       - name: Проверить, что APK лежит в релизе
         if: github.ref_name == 'claude/voice-shell-claude-code-77wwh2'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          assets=$(curl -sfL -H "Authorization: Bearer $GH_TOKEN" \
+          names=$(curl -sfL -H "Authorization: Bearer $GH_TOKEN" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/apk-latest" \
-            | grep -o '"name": *"[^"]*"' || true)
-          echo "$assets"
-          echo "$assets" | grep -q 'app-debug.apk' \
-            || { echo "::error::в релизе нет app-debug.apk — ссылка на скачивание сломана"; exit 1; }
+            | python3 -c "import sys,json;print(' '.join(a['name'] for a in json.load(sys.stdin)['assets']))")
+          echo "в релизе: $names"
+          case "$names" in
+            *app-debug.apk*) echo "ссылка на скачивание рабочая" ;;
+            *) echo "::error::в релизе нет app-debug.apk — ссылка на скачивание сломана"; exit 1 ;;
+          esac
