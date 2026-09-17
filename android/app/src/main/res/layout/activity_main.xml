@@ -79,6 +79,30 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
             android:textSize="12sp"
+            android:text="голос синтеза" />
+
+        <Spinner
+            android:id="@+id/voice"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <Button
+            android:id="@+id/voiceList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="показать голоса" />
+
+        <Button
+            android:id="@+id/voiceTry"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="прослушать и выбрать" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:textSize="12sp"
             android:text="сказать текстом — когда говорить нельзя" />
 
         <EditText

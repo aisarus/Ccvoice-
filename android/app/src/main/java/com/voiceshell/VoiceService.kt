@@ -19,6 +19,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
@@ -52,6 +53,9 @@ class VoiceService : Service() {
         const val ACTION_AUTH_CODE = "com.voiceshell.AUTH_CODE"
         const val ACTION_SAY = "com.voiceshell.SAY"
         const val ACTION_AUTH_SET = "com.voiceshell.AUTH_SET"
+        const val ACTION_VOICES = "com.voiceshell.VOICES"
+        const val ACTION_TRY_VOICE = "com.voiceshell.TRY_VOICE"
+        const val EXTRA_VOICES = "voices"
         const val EXTRA_TEXT = "text"
         const val EXTRA_CODE = "code"
         const val EXTRA_AUTH_URL = "auth_url"
@@ -121,6 +125,30 @@ class VoiceService : Service() {
             ACTION_SAY -> {
                 val text = intent.getStringExtra(EXTRA_TEXT).orEmpty().trim()
                 if (text.isNotEmpty()) deliver(text)
+            }
+            ACTION_VOICES -> {
+                val names = runCatching { tts?.voices.orEmpty() }.getOrDefault(emptySet())
+                    .filter { it.locale.language == Locale.forLanguageTag(prefs.language).language }
+                    .sortedByDescending { it.quality }
+                    .map { it.name }
+                sendBroadcast(
+                    Intent(ACTION_STATUS).setPackage(packageName)
+                        .putExtra(EXTRA_TEXT, "голосов доступно: ${names.size}")
+                        .putStringArrayListExtra(EXTRA_VOICES, ArrayList(names))
+                )
+            }
+            ACTION_TRY_VOICE -> {
+                val name = intent.getStringExtra(EXTRA_CODE).orEmpty()
+                if (name.isNotBlank()) {
+                    prefs.voice = name
+                    applyVoice(prefs.language)
+                    val sample = mapOf(
+                        "ru-RU" to "Готово. Все сорок семь тестов проходят.",
+                        "en-US" to "Done. All forty seven tests pass.",
+                        "he-IL" to "מוכן. כל הבדיקות עוברות."
+                    )[prefs.language].orEmpty()
+                    tts?.speak(sample, TextToSpeech.QUEUE_FLUSH, null, "voice-shell-sample")
+                }
             }
             ACTION_AUTH_SET -> {
                 val token = intent.getStringExtra(EXTRA_CODE).orEmpty().trim()
@@ -331,10 +359,38 @@ class VoiceService : Service() {
     }
 
     // ---------- речь ----------
+    /**
+     * Мужской голос выбираем по имени, а если таких нет — берём самый
+     * качественный из доступных для языка. Ниже стандартного робота в любом
+     * случае не будет.
+     */
+    private fun pickVoice(engine: TextToSpeech, languageTag: String): Voice? {
+        val wanted = Locale.forLanguageTag(languageTag).language
+        val voices = runCatching { engine.voices.orEmpty() }.getOrDefault(emptySet())
+            .filter { it.locale.language == wanted && !it.isNetworkConnectionRequired }
+        if (voices.isEmpty()) return null
+        prefs.voice.takeIf { it.isNotBlank() }
+            ?.let { saved -> voices.firstOrNull { it.name == saved } }
+            ?.let { return it }
+        val male = voices.filter {
+            val name = it.name.lowercase()
+            ("male" in name && "female" !in name) || name.endsWith("-rud-local") ||
+                name.endsWith("-ruc-local") || "#male" in name
+        }
+        return (male.ifEmpty { voices }).maxByOrNull { it.quality }
+    }
+
+    private fun applyVoice(languageTag: String) {
+        val engine = tts ?: return
+        runCatching { engine.language = Locale.forLanguageTag(languageTag) }
+        runCatching { pickVoice(engine, languageTag)?.let { engine.voice = it } }
+    }
+
     private fun setUpTts() {
         tts = TextToSpeech(this) { code ->
             if (code == TextToSpeech.SUCCESS) {
-                runCatching { tts?.language = Locale.forLanguageTag(prefs.language) }
+                applyVoice(prefs.language)
+                runCatching { tts?.setSpeechRate(1.02f) }
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) { speaking = true }
                     override fun onDone(utteranceId: String?) {
@@ -351,7 +407,7 @@ class VoiceService : Service() {
     private fun speak(text: String) {
         if (text.isBlank() || prefs.mute) return
         runCatching {
-            tts?.language = Locale.forLanguageTag(Intents.scriptLanguage(text, prefs.language))
+            applyVoice(Intents.scriptLanguage(text, prefs.language))
             tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "voice-shell")
         }
     }

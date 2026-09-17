@@ -29,6 +29,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("mute", false)
         set(value) = sp.edit().putBoolean("mute", value).apply()
 
+    /** Выбранный голос синтеза; пусто — берём лучший по эвристике. */
+    var voice: String
+        get() = sp.getString("voice", "") ?: ""
+        set(value) = sp.edit().putString("voice", value).apply()
+
     val isConfigured: Boolean get() = server.isNotBlank() && token.isNotBlank()
 
     /**

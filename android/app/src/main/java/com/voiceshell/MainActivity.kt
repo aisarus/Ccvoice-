@@ -28,9 +28,20 @@ class MainActivity : AppCompatActivity() {
 
     private val lines = ArrayDeque<String>()
     private var authUrl: String? = null
+    private var voices: List<String> = emptyList()
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            intent?.getStringArrayListExtra(VoiceService.EXTRA_VOICES)?.let { names ->
+                voices = names
+                val spinner = findViewById<Spinner>(R.id.voice)
+                spinner.adapter = ArrayAdapter(
+                    this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
+                    if (names.isEmpty()) listOf("голосов не нашлось") else names
+                )
+                val saved = voices.indexOf(prefs.voice)
+                if (saved >= 0) spinner.setSelection(saved)
+            }
             intent?.getStringExtra(VoiceService.EXTRA_AUTH_URL)?.let { url ->
                 authUrl = url
                 findViewById<Button>(R.id.authOpen).isEnabled = true
@@ -96,6 +107,22 @@ class MainActivity : AppCompatActivity() {
         fun paintMute() { mute.text = if (prefs.mute) "озвучка: выкл" else "озвучка: вкл" }
         paintMute()
         mute.setOnClickListener { prefs.mute = !prefs.mute; paintMute() }
+
+        // Голос синтеза: список того, что есть в системе, с примером на слух.
+        findViewById<Button>(R.id.voiceList).setOnClickListener {
+            startService(Intent(this, VoiceService::class.java).setAction(VoiceService.ACTION_VOICES))
+        }
+        findViewById<Button>(R.id.voiceTry).setOnClickListener {
+            val spinner = findViewById<Spinner>(R.id.voice)
+            val name = voices.getOrNull(spinner.selectedItemPosition) ?: return@setOnClickListener
+            prefs.voice = name
+            startService(
+                Intent(this, VoiceService::class.java)
+                    .setAction(VoiceService.ACTION_TRY_VOICE)
+                    .putExtra(VoiceService.EXTRA_CODE, name)
+            )
+            status.text = "голос: $name"
+        }
 
         findViewById<Button>(R.id.battery).setOnClickListener { askForBackgroundFreedom() }
 
