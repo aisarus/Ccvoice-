@@ -199,6 +199,15 @@ def consistency_check(spec, errors):
     if priorities.count("primary") != 1:
         errors.append("discreet_input needs exactly one primary channel, got %s" % priorities)
 
+    # 16a. Undo must be handled by the shell and lose nothing.
+    undo = spec["checkpoints"]
+    if "оболочку" not in undo["handled_by"]:
+        errors.append("откат должен обрабатываться оболочкой, а не отправляться в Claude")
+    if not undo["undo"].get("nothing_is_lost"):
+        errors.append("откат обязан объяснять, почему ничего не теряется")
+    if not spec["memory"]["storage"].endswith(("md", "руками")):
+        errors.append("память должна храниться в читаемом человеком файле")
+
     # 16. Roadmap stages are ordered and each early stage states what it proves.
     stage_ids = [st["id"] for st in spec["roadmap"]["stages"]]
     if stage_ids != sorted(stage_ids, key=lambda s: int(s[1:])):

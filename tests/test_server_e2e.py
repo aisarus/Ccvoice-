@@ -266,3 +266,51 @@ def test_a_token_can_be_pasted_straight_into_the_app(tmp_path, monkeypatch):
     bad = asyncio.run(flow("не токен"))
     assert bad["id"] == "auth_error" and "не подошёл" in bad["message"]
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+
+
+def test_undo_and_memory_are_answered_by_the_shell_itself(tmp_path, monkeypatch):
+    """«Откати» и «запомни» не должны зависеть от того, занят ли Claude."""
+    import subprocess
+
+    from voice_claude import checkpoints
+
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    for args in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
+        subprocess.run(["git", "-C", str(workspace), *args], check=True, capture_output=True)
+    (workspace / "auth.ts").write_text("было", encoding="utf-8")
+    subprocess.run(["git", "-C", str(workspace), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(workspace), "commit", "-qm", "первый"],
+                   check=True, capture_output=True)
+
+    async def flow():
+        settings = Settings(workspace=str(workspace), port=0, token="t",
+                            note_path=str(tmp_path / "i.md"))
+        daemon = Daemon(settings)
+        async with serve(daemon.handler, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            async with connect(f"ws://127.0.0.1:{port}") as ws:
+                await ws.send(json.dumps({"id": "hello", "v": 1, "token": "t"}))
+                await ws.recv()
+
+                # Сымитируем правку, сделанную Claude.
+                before = checkpoints.head(workspace)
+                (workspace / "auth.ts").write_text("стало", encoding="utf-8")
+                after = checkpoints.commit_all(workspace, "правка")
+                daemon.journal.add(before, after, "почини auth.ts")
+
+                said = []
+                for phrase in ("запомни что я люблю короткие ответы",
+                               "что ты обо мне помнишь",
+                               "откати последнее"):
+                    await ws.send(json.dumps(segment(phrase, MASTER)))
+                    said.append(json.loads(await asyncio.wait_for(ws.recv(), timeout=5)))
+                return daemon, said
+
+    daemon, said = asyncio.run(flow())
+    assert said[0]["text"] == "Запомнил."
+    assert "короткие ответы" in said[1]["text"]
+    assert said[2]["text"].startswith("Откатил auth.ts")
+    assert (workspace / "auth.ts").read_text(encoding="utf-8") == "было"
+    assert daemon.journal.last() is None
+    assert "короткие ответы" in daemon.memory.hint()

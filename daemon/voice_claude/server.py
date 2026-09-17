@@ -22,7 +22,7 @@ from typing import Any
 from websockets.datastructures import Headers
 from websockets.http11 import Response
 
-from . import formatter, glossary, policy, state
+from . import checkpoints, formatter, glossary, memory, policy, state
 from .ambient import AmbientBuffer, RateLimiter, WhisperGate
 from .auth import (SetupError, SetupTokenFlow, apply_token, credential_kind,
                    credential_problem, github_ready, persist_token, token_problem)
@@ -88,6 +88,8 @@ class Daemon:
         self._setup: SetupTokenFlow | None = None
         self._pending_tools: dict[str, str] = {}
         self._glossary: str | None = None
+        self.memory = memory.Memory(settings.workspace)
+        self.journal = checkpoints.Journal(settings.workspace)
         background = load_spec()["config_defaults"]["background"]
         self._first_ack_s = settings.first_ack_s or background["first_ack_after_ms"] / 1000
         self._progress_gap_s = settings.progress_gap_s or background["min_interval_between_events_s"]
@@ -187,6 +189,9 @@ class Daemon:
                                   "label": decision.label_ru})
             return
 
+        if await self._handle_spoken_command(ws, text):
+            return
+
         if self.router.is_misroute_recovery(text):
             self.router.force(None)
             await self._send(ws, {"id": "route", "target": None, "reason": "misroute_recovery",
@@ -209,12 +214,28 @@ class Daemon:
         hint = self._glossary_hint()
         if hint:
             preamble = f"{preamble}\n{hint}"
+        remembered = self.memory.hint()
+        if remembered:
+            preamble = f"{preamble}\n{remembered}"
         role_line = self.classifier.role_line(decision, device)
         if route.target == "chat" and AmbientBuffer.is_recall(text) and self.ambient.enabled:
             role_line += "\n[ambient] последние реплики:\n" + self.ambient.transcript()
 
+        workspace = self.targets.code.workspace
+        tracked = route.target == "code" and checkpoints.is_repo(workspace)
+        before = checkpoints.head(workspace) if tracked else ""
+
         reply = await self._await_with_progress(
             self.targets[route.target].send(route.text, preamble, role_line))
+
+        # Изменения закрываем коммитом: без этого «откати последнее» не на что опереть.
+        if tracked and not reply.stubbed:
+            try:
+                after = checkpoints.commit_all(workspace, f"голосом: {route.text[:60]}")
+                if after:
+                    self.journal.add(before, after, route.text)
+            except (RuntimeError, OSError) as exc:
+                log.warning("не удалось записать точку отката: %s", exc)
         summary = await self._voice_summary(reply, route.target)
 
         self.machine.to(state.SPEAKING)
@@ -360,6 +381,61 @@ class Daemon:
         finally:
             self._pending.pop(request_id, None)
             self._pending_tools.pop(request_id, None)
+
+    async def _handle_spoken_command(self, ws: Any, text: str) -> bool:
+        """Команды самой оболочки: откат, история, память.
+
+        Они выполняются здесь, а не уходят в Claude: «откати последнее» должно
+        работать мгновенно и одинаково, даже когда сессия занята.
+        """
+        if checkpoints.matches(text, checkpoints.UNDO_PHRASES):
+            await self._undo()
+            return True
+        if checkpoints.matches(text, checkpoints.HISTORY_PHRASES):
+            await self._recent_changes()
+            return True
+
+        fact = memory.remember_intent(text)
+        if fact is not None:
+            saved = self.memory.remember(fact)
+            await self._say("Запомнил." if saved else "Нечего запоминать.", "chat")
+            return True
+
+        forgotten = memory.forget_intent(text)
+        if forgotten:
+            count = self.memory.forget(forgotten)
+            await self._say("Забыл." if count else "Такого не помню.", "chat")
+            return True
+
+        if memory.recall_intent(text):
+            facts = self.memory.facts()
+            spoken = ("Помню: " + "; ".join(facts[-5:]) + ".") if facts else "Пока ничего не помню."
+            await self._say(spoken, "chat")
+            return True
+        return False
+
+    async def _undo(self) -> None:
+        workspace = self.targets.code.workspace
+        point = self.journal.last()
+        if point is None or not checkpoints.is_repo(workspace):
+            await self._say("Откатывать нечего.")
+            return
+        try:
+            changed = checkpoints.summary(workspace, point.before, point.after)
+            checkpoints.reset_to(workspace, point.before)
+        except (RuntimeError, OSError) as exc:
+            await self._say(f"Откатить не вышло: {exc}")
+            return
+        self.journal.pop()
+        await self.targets.code.reset()      # сессия должна увидеть новое состояние
+        await self._say(f"Откатил {changed}. Сказано было: {point.title}")
+
+    async def _recent_changes(self) -> None:
+        points = self.journal.recent(3)
+        if not points:
+            await self._say("Я пока ничего не менял.")
+            return
+        await self._say("Последнее: " + "; ".join(p.title for p in points) + ".")
 
     async def _answer_permission_by_voice(self, ws: Any, text: str, decision: Decision) -> None:
         """Пока висит запрос разрешения, реплика — это ответ на него, а не команда."""
