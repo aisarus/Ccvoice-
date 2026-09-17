@@ -1,15 +1,14 @@
 package com.voiceshell
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.Manifest
 import android.app.Service
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
-import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -32,36 +31,26 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
-import org.vosk.LibVosk
-import org.vosk.LogLevel
-import org.vosk.Model
-import org.vosk.Recognizer
-import org.vosk.android.RecognitionListener
-import org.vosk.android.SpeechService
-import java.io.File
-import java.io.FileOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.Locale
 import java.util.concurrent.TimeUnit
-import java.util.zip.ZipInputStream
 
 /**
- * Фоновая служба: локальное распознавание, wake word, кнопка гарнитуры, связь с демоном.
+ * Фоновая служба: связь с демоном, речь, кнопка гарнитуры и — если получится —
+ * локальный wake word.
  *
- * Модель Vosk работает на устройстве, поэтому постоянный микрофон не означает
- * постоянный поток аудио наружу — наружу уходит только текст принятой реплики.
+ * Wake word держится отдельно и намеренно необязателен: нативная библиотека
+ * может не подняться на конкретном устройстве, и это не повод ронять всё
+ * остальное. Тогда реплика начинается кнопкой.
  */
-class VoiceService : Service(), RecognitionListener {
+class VoiceService : Service() {
 
     companion object {
         const val ACTION_STATUS = "com.voiceshell.STATUS"
         const val ACTION_STOP = "com.voiceshell.STOP"
+        const val ACTION_LISTEN = "com.voiceshell.LISTEN"
         const val EXTRA_TEXT = "text"
         private const val CHANNEL = "voice-shell"
         private const val NOTIFICATION_ID = 42
-        private const val MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"
-        private const val MODEL_DIR = "vosk-model-small-ru-0.22"
         private const val WINDOW_MS = 15_000L
         private const val TAG = "VoiceShell"
     }
@@ -71,16 +60,15 @@ class VoiceService : Service(), RecognitionListener {
     private val http = OkHttpClient.Builder().pingInterval(20, TimeUnit.SECONDS).build()
 
     private var socket: WebSocket? = null
-    private var speech: SpeechService? = null
-    private var model: Model? = null
     private var tts: TextToSpeech? = null
     private var session: MediaSessionCompat? = null
+    private var cloud: SpeechRecognizer? = null
+    private var wake: WakeWordEngine? = null
 
     private var speaking = false
-    private var windowUntil = 0L
-    private var status = "запуск"
-    private var cloud: SpeechRecognizer? = null
     private var awaitingCommand = false
+    private var windowUntil = 0L
+    private var wakeReady = false
 
     override fun onCreate() {
         super.onCreate()
@@ -95,14 +83,13 @@ class VoiceService : Service(), RecognitionListener {
 
         try {
             createChannel()
-            // На Android 14 тип обязателен, иначе служба падает с исключением.
             ServiceCompat.startForeground(
                 this, NOTIFICATION_ID, notification("запуск"),
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0
             )
-        } catch (e: Exception) {
-            fail("служба не смогла стартовать: ${e.javaClass.simpleName}: ${e.message}")
+        } catch (t: Throwable) {
+            fail("служба не смогла стартовать: ${t.javaClass.simpleName}: ${t.message}")
             return
         }
 
@@ -110,106 +97,55 @@ class VoiceService : Service(), RecognitionListener {
             setUpTts()
             setUpMediaSession()
             connect()
-            Thread { prepareModel() }.start()
             prefs.lastError = ""
-        } catch (e: Exception) {
-            fail("ошибка при запуске: ${e.javaClass.simpleName}: ${e.message}")
+        } catch (t: Throwable) {
+            fail("ошибка при запуске: ${t.javaClass.simpleName}: ${t.message}")
+            return
         }
-    }
 
-    /** Сообщить причину и остановиться, а не падать молча. */
-    private fun fail(reason: String) {
-        Log.e(TAG, reason)
-        runCatching { prefs.lastError = reason }
-        sendBroadcast(Intent(ACTION_STATUS).setPackage(packageName).putExtra(EXTRA_TEXT, reason))
-        stopSelf()
+        Thread { prepareWakeWord() }.start()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            stopSelf()
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_STOP -> { stopSelf(); return START_NOT_STICKY }
+            ACTION_LISTEN -> armWindow()
         }
         return START_STICKY
     }
 
     override fun onDestroy() {
-        cloud?.destroy()
-        speech?.stop()
-        speech?.shutdown()
-        model?.close()
-        tts?.shutdown()
-        session?.release()
-        socket?.close(1000, "service stopped")
+        runCatching { wake?.release() }
+        runCatching { cloud?.destroy() }
+        runCatching { tts?.shutdown() }
+        runCatching { session?.release() }
+        runCatching { socket?.close(1000, "service stopped") }
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    // ---------- распознавание ----------
-    private fun prepareModel() {
+    // ---------- wake word (необязательный) ----------
+    private fun prepareWakeWord() {
         try {
-            val dir = File(filesDir, MODEL_DIR)
-            if (!dir.exists()) {
-                report("качаю модель распознавания, ~45 МБ")
-                download(MODEL_URL, filesDir)
-            }
-            LibVosk.setLogLevel(LogLevel.WARNINGS)
-            model = Model(dir.absolutePath)
-            main.post { startListening() }
-        } catch (e: Exception) {
-            Log.e(TAG, "model", e)
-            report("не удалось подготовить модель: ${e.message}")
-        }
-    }
-
-    private fun download(url: String, target: File) {
-        val connection = URL(url).openConnection() as HttpURLConnection
-        connection.connectTimeout = 30_000
-        connection.readTimeout = 60_000
-        ZipInputStream(connection.inputStream.buffered()).use { zip ->
-            var entry = zip.nextEntry
-            while (entry != null) {
-                val file = File(target, entry.name)
-                if (entry.isDirectory) {
-                    file.mkdirs()
-                } else {
-                    file.parentFile?.mkdirs()
-                    FileOutputStream(file).use { out -> zip.copyTo(out) }
-                }
-                entry = zip.nextEntry
-            }
-        }
-        connection.disconnect()
-    }
-
-    private fun startListening() {
-        val ready = model ?: return
-        try {
-            speech?.stop()
-            speech = SpeechService(Recognizer(ready, 16000.0f), 16000.0f)
-            speech?.startListening(this)
+            val engine = WakeWordEngine(this)
+            engine.prepare { report(it) }
+            engine.start(
+                onText = { text -> main.post { handle(text) } },
+                onError = { t -> report("распознавание обращения: ${t.message}") }
+            )
+            wake = engine
+            wakeReady = true
             report("слушаю — скажи «Клод…»")
-        } catch (e: Exception) {
-            Log.e(TAG, "listen", e)
-            report("микрофон недоступен: ${e.message}")
+        } catch (t: Throwable) {
+            // Самый частый случай: не поднялась нативная библиотека.
+            Log.e(TAG, "wake word", t)
+            wakeReady = false
+            report("wake word недоступен (${t.javaClass.simpleName}) — начинай реплику кнопкой")
         }
     }
 
-    override fun onResult(hypothesis: String?) {
-        val text = JSONObject(hypothesis ?: "{}").optString("text").trim()
-        if (text.isEmpty()) return
-        handle(text)
-    }
-
-    override fun onFinalResult(hypothesis: String?) = Unit
-    override fun onPartialResult(hypothesis: String?) = Unit
-    override fun onTimeout() = Unit
-    override fun onError(exception: Exception?) {
-        Log.e(TAG, "vosk", exception)
-        report("ошибка распознавания: ${exception?.message}")
-    }
-
+    // ---------- разбор реплики ----------
     private fun handle(text: String) {
         Intents.stopIntent(text)?.let { scope ->
             silence()
@@ -219,25 +155,18 @@ class VoiceService : Service(), RecognitionListener {
         }
         Intents.languageSwitch(text)?.let { code ->
             prefs.language = code
-            val said = mapOf("ru-RU" to "Говорю по-русски.", "en-US" to "Switching to English.",
-                             "he-IL" to "עובר לעברית.")[code].orEmpty()
             report("язык: $code")
-            speak(said)
+            speak(mapOf("ru-RU" to "Говорю по-русски.", "en-US" to "Switching to English.",
+                        "he-IL" to "עובר לעברית.")[code].orEmpty())
             return
         }
-        if (speaking) return                       // во время ответа слышно самих себя
+        if (speaking) return
         val windowOpen = System.currentTimeMillis() < windowUntil
         if (!windowOpen && !Intents.hasWake(text)) return
         windowUntil = 0
 
         val payload = Intents.stripWake(text)
-        // Обращение прозвучало, но команда — нет: слушаем её отдельно, на выбранном языке.
-        if (payload.isBlank() || Intents.hasWake(text) && payload == Intents.normalise(text)) {
-            listenForCommand()
-            return
-        }
-        if (prefs.language != "ru-RU") {
-            // Локальная модель русская: саму реплику распознаём на нужном языке.
+        if (payload.isBlank() || prefs.language != "ru-RU") {
             listenForCommand()
             return
         }
@@ -259,72 +188,85 @@ class VoiceService : Service(), RecognitionListener {
         )
     }
 
-    /**
-     * Реплика на выбранном языке.
-     *
-     * Wake word ловится локально, поэтому наружу уходит только то, что сказано
-     * после обращения — зато распознаётся точнее и на любом языке, включая иврит,
-     * для которого локальной модели нет.
-     */
+    /** Реплика на выбранном языке распознавателем телефона. */
     private fun listenForCommand() {
         if (awaitingCommand) return
         awaitingCommand = true
         main.post {
-            speech?.stop()
-            if (cloud == null) cloud = SpeechRecognizer.createSpeechRecognizer(this)
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, prefs.language)
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-                // Android 14 умеет переключать язык сам; на старых — просто игнорируется.
-                putExtra("android.speech.extra.ENABLE_LANGUAGE_SWITCH", "adaptive")
-                putStringArrayListExtra(
-                    "android.speech.extra.LANGUAGE_SWITCH_ALLOWED_LANGUAGES",
-                    arrayListOf("ru-RU", "en-US", "he-IL")
-                )
+            runCatching { wake?.stop() }
+            try {
+                if (cloud == null) cloud = SpeechRecognizer.createSpeechRecognizer(this)
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, prefs.language)
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                    putExtra("android.speech.extra.ENABLE_LANGUAGE_SWITCH", "adaptive")
+                    putStringArrayListExtra(
+                        "android.speech.extra.LANGUAGE_SWITCH_ALLOWED_LANGUAGES",
+                        arrayListOf("ru-RU", "en-US", "he-IL")
+                    )
+                }
+                cloud?.setRecognitionListener(commandListener())
+                cloud?.startListening(intent)
+            } catch (t: Throwable) {
+                awaitingCommand = false
+                report("распознавание недоступно: ${t.javaClass.simpleName}")
+                resumeWake()
             }
-            cloud?.setRecognitionListener(object : CloudListener {
-                override fun onResults(results: Bundle?) {
-                    val text = results
-                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        ?.firstOrNull()
-                        ?.trim()
-                        .orEmpty()
-                    finishCommand()
-                    if (text.isEmpty()) return
-                    Intents.stopIntent(text)?.let { scope ->
-                        silence()
-                        send(JSONObject().put("id", "interrupt").put("scope", scope))
-                        return
-                    }
-                    deliver(text)
-                }
-
-                override fun onError(error: Int) {
-                    finishCommand()
-                    if (error != SpeechRecognizer.ERROR_NO_MATCH &&
-                        error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT
-                    ) {
-                        report("распознавание реплики: ошибка $error")
-                    }
-                }
-
-                override fun onReadyForSpeech(params: Bundle?) { report("слушаю реплику…") }
-                override fun onBeginningOfSpeech() = Unit
-                override fun onRmsChanged(rmsdB: Float) = Unit
-                override fun onBufferReceived(buffer: ByteArray?) = Unit
-                override fun onEndOfSpeech() = Unit
-                override fun onPartialResults(partialResults: Bundle?) = Unit
-                override fun onEvent(eventType: Int, params: Bundle?) = Unit
-            })
-            cloud?.startListening(intent)
         }
+    }
+
+    private fun commandListener() = object : CloudListener {
+        override fun onResults(results: Bundle?) {
+            val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                ?.firstOrNull()?.trim().orEmpty()
+            finishCommand()
+            if (text.isEmpty()) return
+            Intents.stopIntent(text)?.let { scope ->
+                silence()
+                send(JSONObject().put("id", "interrupt").put("scope", scope))
+                return
+            }
+            Intents.languageSwitch(text)?.let { code ->
+                prefs.language = code
+                report("язык: $code")
+                return
+            }
+            deliver(text)
+        }
+
+        override fun onError(error: Int) {
+            finishCommand()
+            if (error != SpeechRecognizer.ERROR_NO_MATCH &&
+                error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+            ) {
+                report("распознавание реплики: ошибка $error")
+            }
+        }
+
+        override fun onReadyForSpeech(params: Bundle?) { report("слушаю реплику…") }
+        override fun onBeginningOfSpeech() = Unit
+        override fun onRmsChanged(rmsdB: Float) = Unit
+        override fun onBufferReceived(buffer: ByteArray?) = Unit
+        override fun onEndOfSpeech() = Unit
+        override fun onPartialResults(partialResults: Bundle?) = Unit
+        override fun onEvent(eventType: Int, params: Bundle?) = Unit
     }
 
     private fun finishCommand() {
         awaitingCommand = false
-        main.postDelayed({ if (!awaitingCommand) startListening() }, 300)
+        main.postDelayed({ if (!awaitingCommand) resumeWake() }, 300)
+    }
+
+    private fun resumeWake() {
+        if (!wakeReady) return
+        runCatching {
+            wake?.start(
+                onText = { text -> main.post { handle(text) } },
+                onError = { t -> report("распознавание обращения: ${t.message}") }
+            )
+        }.onFailure { report("wake word остановился: ${it.javaClass.simpleName}") }
     }
 
     // ---------- кнопка гарнитуры ----------
@@ -350,19 +292,19 @@ class VoiceService : Service(), RecognitionListener {
         }
     }
 
-    /** Кнопка не включает микрофон — он уже слушает, — она разрешает реплику без обращения. */
+    /** Кнопка разрешает реплику без обращения, а без wake word — начинает её. */
     private fun armWindow() {
         if (speaking) silence()
         windowUntil = System.currentTimeMillis() + WINDOW_MS
         report("слушаю — говори")
-        if (prefs.language != "ru-RU") listenForCommand()
+        if (!wakeReady || prefs.language != "ru-RU") listenForCommand()
     }
 
     // ---------- речь ----------
     private fun setUpTts() {
         tts = TextToSpeech(this) { code ->
             if (code == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.forLanguageTag(prefs.language)
+                runCatching { tts?.language = Locale.forLanguageTag(prefs.language) }
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) { speaking = true }
                     override fun onDone(utteranceId: String?) {
@@ -376,15 +318,16 @@ class VoiceService : Service(), RecognitionListener {
         }
     }
 
-    /** Язык ответа берётся из самого ответа: русский текст — русский голос. */
     private fun speak(text: String) {
-        val code = Intents.scriptLanguage(text, prefs.language)
-        tts?.language = Locale.forLanguageTag(code)
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "voice-shell")
+        if (text.isBlank()) return
+        runCatching {
+            tts?.language = Locale.forLanguageTag(Intents.scriptLanguage(text, prefs.language))
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "voice-shell")
+        }
     }
 
     private fun silence() {
-        tts?.stop()
+        runCatching { tts?.stop() }
         speaking = false
     }
 
@@ -406,7 +349,7 @@ class VoiceService : Service(), RecognitionListener {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                main.post { onServerMessage(JSONObject(text)) }
+                main.post { runCatching { onServerMessage(JSONObject(text)) } }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -439,7 +382,9 @@ class VoiceService : Service(), RecognitionListener {
     }
 
     private fun send(payload: JSONObject) {
-        socket?.send(payload.toString()) ?: report("нет связи")
+        val ws = socket
+        if (ws == null) { report("нет связи"); return }
+        ws.send(payload.toString())
     }
 
     // ---------- уведомление и статус ----------
@@ -456,6 +401,10 @@ class VoiceService : Service(), RecognitionListener {
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        val listen = PendingIntent.getService(
+            this, 2, Intent(this, VoiceService::class.java).setAction(ACTION_LISTEN),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
         val stop = PendingIntent.getService(
             this, 1, Intent(this, VoiceService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
@@ -465,6 +414,7 @@ class VoiceService : Service(), RecognitionListener {
             .setContentTitle("Voice Shell")
             .setContentText(text)
             .setContentIntent(open)
+            .addAction(0, "Говорить", listen)
             .addAction(0, "Стоп", stop)
             .setOngoing(true)
             .setSilent(true)
@@ -472,11 +422,19 @@ class VoiceService : Service(), RecognitionListener {
     }
 
     private fun report(text: String) {
-        status = text
-        if (text.startsWith("не ") || text.contains("ошибка")) runCatching { prefs.lastError = text }
         main.post {
-            getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(text))
+            runCatching {
+                getSystemService(NotificationManager::class.java)
+                    .notify(NOTIFICATION_ID, notification(text))
+            }
             sendBroadcast(Intent(ACTION_STATUS).setPackage(packageName).putExtra(EXTRA_TEXT, text))
         }
+    }
+
+    private fun fail(reason: String) {
+        Log.e(TAG, reason)
+        runCatching { prefs.lastError = reason }
+        sendBroadcast(Intent(ACTION_STATUS).setPackage(packageName).putExtra(EXTRA_TEXT, reason))
+        stopSelf()
     }
 }

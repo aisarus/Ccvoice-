@@ -58,6 +58,14 @@ class MainActivity : AppCompatActivity() {
             if (missingPermissions().isEmpty()) launchService() else requestPermissions()
         }
 
+        findViewById<Button>(R.id.copyError).setOnClickListener {
+            val clipboard = getSystemService(android.content.ClipboardManager::class.java)
+            clipboard.setPrimaryClip(
+                android.content.ClipData.newPlainText("voice-shell", prefs.lastError)
+            )
+            status.text = "ошибка скопирована"
+        }
+
         findViewById<Button>(R.id.stop).setOnClickListener {
             stopService(Intent(this, VoiceService::class.java))
             status.text = "служба остановлена"
