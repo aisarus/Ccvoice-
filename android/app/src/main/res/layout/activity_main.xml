@@ -116,6 +116,27 @@
             android:textSize="12sp"
             android:text="подписка Claude на сервере" />
 
+        <EditText
+            android:id="@+id/authToken"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="sk-ant-oat01-… если токен уже есть"
+            android:inputType="textNoSuggestions"
+            android:importantForAutofill="no" />
+
+        <Button
+            android:id="@+id/authSave"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="сохранить токен Claude" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textSize="12sp"
+            android:text="или пройти авторизацию заново:" />
+
         <Button
             android:id="@+id/authStart"
             android:layout_width="match_parent"

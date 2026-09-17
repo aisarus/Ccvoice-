@@ -99,6 +99,21 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.battery).setOnClickListener { askForBackgroundFreedom() }
 
+        // Токен уже есть — вставить и сохранить, без OAuth-хождений.
+        findViewById<Button>(R.id.authSave).setOnClickListener {
+            val token = findViewById<EditText>(R.id.authToken).text.toString().trim()
+            if (token.isEmpty()) {
+                status.text = "вставь токен, который начинается с sk-ant-"
+                return@setOnClickListener
+            }
+            startService(
+                Intent(this, VoiceService::class.java)
+                    .setAction(VoiceService.ACTION_AUTH_SET)
+                    .putExtra(VoiceService.EXTRA_CODE, token)
+            )
+            status.text = "отправил токен на сервер"
+        }
+
         // Подключение подписки Claude — тот же флоу, что в веб-клиенте.
         findViewById<Button>(R.id.authStart).setOnClickListener {
             startService(Intent(this, VoiceService::class.java).setAction(VoiceService.ACTION_AUTH_START))

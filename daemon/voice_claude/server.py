@@ -24,7 +24,7 @@ from websockets.http11 import Response
 from . import formatter, state
 from .ambient import AmbientBuffer, RateLimiter, WhisperGate
 from .auth import (SetupError, SetupTokenFlow, apply_token, credential_kind,
-                   credential_problem, persist_token)
+                   credential_problem, persist_token, token_problem)
 from .router import Router
 from .speaker import Decision, Features, SegmentContext, SpeakerClassifier, debug_record
 from .spec import defaults, load_spec
@@ -149,7 +149,7 @@ class Daemon:
             await self._send(ws, {"id": "route", "target": self.router.forced_target,
                                   "reason": "forced" if self.router.forced_target else "auto",
                                   "confidence": 1.0})
-        elif kind in ("auth_start", "auth_code"):
+        elif kind in ("auth_start", "auth_code", "auth_set"):
             await self._on_auth(ws, msg)
         elif kind == "ping":
             await self._send(ws, {"id": "ping", "ts": int(time.time() * 1000)})
@@ -260,6 +260,15 @@ class Daemon:
                                   "message": "нужен токен доступа", "recoverable": False})
             return
         try:
+            # Токен уже на руках — вставили его прямо в приложении.
+            if msg["id"] == "auth_set":
+                token = str(msg.get("token", "")).strip()
+                problem = token_problem(token)
+                if problem:
+                    raise SetupError(f"токен не подошёл: {problem}")
+                await self._accept_token(token)
+                return
+
             if msg["id"] == "auth_start":
                 if self._setup is not None:
                     self._setup.close()
@@ -273,15 +282,7 @@ class Daemon:
                 raise SetupError("флоу не запущен")
             token = await self._setup.submit(msg.get("code", ""))
             self._setup = None
-            apply_token(token)
-            persisted = persist_token(token)
-            await self.targets.reset_sessions()
-            await self._broadcast({"id": "auth_token", "token": token,
-                                   "credential": credential_kind(),
-                                   "code_available": self.targets.code.available,
-                                   "chat_available": self.targets.chat.available,
-                                   "persisted": persisted,
-                                   "persist_hint": "CLAUDE_CODE_OAUTH_TOKEN"})
+            await self._accept_token(token)
         except (SetupError, FileNotFoundError, KeyError) as exc:
             if self._setup is not None:
                 self._setup.close()
@@ -335,6 +336,18 @@ class Daemon:
         await self._broadcast({"id": "permission_result", "request_id": request_id,
                                "approved": approved, "remembered": action.endswith("rule"),
                                "earcon": "accepted" if approved else "error"})
+
+    async def _accept_token(self, token: str) -> None:
+        """Применить токен немедленно и сохранить, чтобы пережил перезапуск."""
+        apply_token(token)
+        persisted = persist_token(token)
+        await self.targets.reset_sessions()
+        await self._broadcast({"id": "auth_token", "token": token,
+                               "credential": credential_kind(),
+                               "code_available": self.targets.code.available,
+                               "chat_available": self.targets.chat.available,
+                               "persisted": persisted,
+                               "persist_hint": "CLAUDE_CODE_OAUTH_TOKEN"})
 
     def _pending_detail(self) -> str:
         request_id = next(iter(self._pending), "")

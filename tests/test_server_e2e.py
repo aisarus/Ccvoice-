@@ -236,3 +236,33 @@ def test_a_wrong_code_reports_an_error_instead_of_a_token(tmp_path, monkeypatch)
 def test_setup_flow_requires_an_authenticated_client(tmp_path):
     welcome, _, _ = asyncio.run(_auth_flow("good-code", "wrong-token", tmp_path))
     assert welcome["id"] == "error" and welcome["code"] == "unauthorized"
+
+
+def test_a_token_can_be_pasted_straight_into_the_app(tmp_path, monkeypatch):
+    """У человека уже есть токен — заставлять его проходить OAuth незачем."""
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    env_file = tmp_path / "voice-shell.env"
+    env_file.write_text("VOICE_TOKEN=t\n", encoding="utf-8")
+    monkeypatch.setenv("VOICE_ENV_FILE", str(env_file))
+    good = "sk-ant-oat01-" + "T" * 40
+
+    async def flow(token):
+        settings = Settings(workspace=".", port=0, token="t", note_path=str(tmp_path / "i.md"))
+        daemon = Daemon(settings)
+        async with serve(daemon.handler, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            async with connect(f"ws://127.0.0.1:{port}") as ws:
+                await ws.send(json.dumps({"id": "hello", "v": 1, "token": "t"}))
+                await ws.recv()
+                await ws.send(json.dumps({"id": "auth_set", "token": token}))
+                return json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+
+    result = asyncio.run(flow(good))
+    assert result["id"] == "auth_token"
+    assert result["persisted"] is True
+    assert result["credential"] == "subscription"
+    assert good in env_file.read_text(encoding="utf-8")
+
+    bad = asyncio.run(flow("не токен"))
+    assert bad["id"] == "auth_error" and "не подошёл" in bad["message"]
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)

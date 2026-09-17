@@ -51,6 +51,7 @@ class VoiceService : Service() {
         const val ACTION_AUTH_START = "com.voiceshell.AUTH_START"
         const val ACTION_AUTH_CODE = "com.voiceshell.AUTH_CODE"
         const val ACTION_SAY = "com.voiceshell.SAY"
+        const val ACTION_AUTH_SET = "com.voiceshell.AUTH_SET"
         const val EXTRA_TEXT = "text"
         const val EXTRA_CODE = "code"
         const val EXTRA_AUTH_URL = "auth_url"
@@ -120,6 +121,13 @@ class VoiceService : Service() {
             ACTION_SAY -> {
                 val text = intent.getStringExtra(EXTRA_TEXT).orEmpty().trim()
                 if (text.isNotEmpty()) deliver(text)
+            }
+            ACTION_AUTH_SET -> {
+                val token = intent.getStringExtra(EXTRA_CODE).orEmpty().trim()
+                if (token.isNotEmpty()) {
+                    report("проверяю токен Claude…")
+                    send(JSONObject().put("id", "auth_set").put("token", token))
+                }
             }
             ACTION_AUTH_START -> {
                 report("запрашиваю ссылку авторизации…")

@@ -132,8 +132,10 @@ class SetupTokenFlow:
     def _spawn(self) -> None:
         master, slave = pty.openpty()
         env = dict(os.environ, TERM="xterm-256color")
-        # Ключ API заставил бы CLI пойти другим путём — здесь нужна подписка.
+        # Оба существующих креда убираем: CLI должен пройти вход заново, а не
+        # спотыкаться о старый — в том числе о битый, из-за которого сюда и пришли.
         env.pop("ANTHROPIC_API_KEY", None)
+        env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
         self._process = subprocess.Popen(
             list(self.command), stdin=slave, stdout=slave, stderr=slave,
             env=env, start_new_session=True, close_fds=True,
