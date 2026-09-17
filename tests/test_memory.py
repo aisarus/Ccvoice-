@@ -47,3 +47,16 @@ def test_voice_commands_are_parsed():
     assert memory.forget_intent("забудь про Aegis") == "Aegis"
     assert memory.recall_intent("что ты обо мне помнишь")
     assert not memory.recall_intent("что там с тестами")
+
+
+def test_forgetting_works_on_the_word_not_on_the_exact_letters(tmp_path):
+    """«Забудь про ночи» не убирало факт «работаю по ночам»: искалось
+    буквальное совпадение, а человек говорит в другом падеже."""
+    store = memory.Memory(tmp_path)
+    store.remember("работаю по ночам")
+    store.remember("проект называется Эгида")
+
+    assert store.forget("ночи") == 1
+    assert store.facts() == ["проект называется Эгида"]
+    # Чужое слово с общим началом факт не уносит.
+    assert store.forget("проектор") == 0

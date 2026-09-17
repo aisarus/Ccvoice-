@@ -74,12 +74,12 @@ class Memory:
 
     def forget(self, needle: str) -> int:
         """Убирает факты, где встречается сказанное. Возвращает сколько убрал."""
-        needle = needle.strip().lower()
-        if not needle:
+        words = _normalise(needle).split()
+        if not words:
             return 0
         lines = self.text().splitlines()
         kept = [line for line in lines
-                if not (line.startswith("- ") and needle in line.lower())]
+                if not (line.startswith("- ") and _mentions(line, words))]
         removed = len(lines) - len(kept)
         if removed:
             try:
@@ -91,6 +91,43 @@ class Memory:
 
 def _normalise(text: str) -> str:
     return " ".join(re.sub(r"[^\w\s]", " ", text.lower()).split())
+
+
+# Русские окончания: всё, чем слово вправе отличаться от того же слова в
+# другом падеже. Список нужен, чтобы «проектор» не считался формой «проекта»:
+# без него хватило бы общего начала, и «забудь про проектор» унесло бы факт
+# про проект.
+ENDINGS = frozenset((
+    "", "а", "е", "и", "й", "о", "у", "ы", "ь", "ю", "я",
+    "ам", "ах", "ев", "ей", "ем", "ии", "им", "ов", "ом", "ою", "ую", "ые",
+    "ый", "ым", "ых", "ье", "ья", "ям", "ях", "ем", "ie",
+    "ами", "ями", "его", "ему", "ими", "ого", "ому", "ыми", "ьях", "ьям",
+))
+
+
+def _same_word(needle: str, word: str, least: int = 3) -> bool:
+    """Одно ли это слово в разных падежах.
+
+    «Забудь про ночи» не убирало факт «работаю по ночам»: искалось буквальное
+    совпадение. Полную морфологию сюда тащить незачем — у одного слова общее
+    начало и хвосты, которые выглядят как окончания.
+    """
+    if needle == word:
+        return True
+    common = 0
+    for left, right in zip(needle, word):
+        if left != right:
+            break
+        common += 1
+    if common < least:
+        return False
+    return needle[common:] in ENDINGS and word[common:] in ENDINGS
+
+
+def _mentions(line: str, words: list[str]) -> bool:
+    """Все ли названные слова есть в строке — пусть и в другом падеже."""
+    haystack = _normalise(line).split()
+    return all(any(_same_word(word, other) for other in haystack) for word in words)
 
 
 def _after(text: str, phrases: tuple[str, ...]) -> str | None:
