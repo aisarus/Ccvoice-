@@ -24,7 +24,7 @@ from websockets.datastructures import Headers
 from websockets.http11 import Response
 
 from . import (checkpoints, formatter, glossary, learning, memory, policy, state,
-               stress, watcher)
+               stress, tasks, watcher)
 from .ambient import AmbientBuffer, RateLimiter, WhisperGate
 from .auth import (SetupError, SetupTokenFlow, apply_token, credential_kind,
                    credential_problem, forget_cli_probe, github_ready, persist_token,
@@ -101,6 +101,8 @@ class Daemon:
         self._last_utterance: tuple[str, str] | None = None   # текст и куда ушло
         self._last_output: dict[str, str] = {}                # что ответила каждая цель
         self.watcher = watcher.Watcher(settings.workspace)
+        # Очередь фоновых задач: сказал и забыл.
+        self.queue = tasks.TaskQueue(settings.workspace)
         self._pending_news: list[str] = []
         background = load_spec()["config_defaults"]["background"]
         self._first_ack_s = settings.first_ack_s or background["first_ack_after_ms"] / 1000
@@ -681,6 +683,8 @@ class Daemon:
         Они выполняются здесь, а не уходят в Claude: «откати последнее» должно
         работать мгновенно и одинаково, даже когда сессия занята.
         """
+        if await self._handle_queue_command(ws, text):
+            return True
         if checkpoints.matches(text, checkpoints.UNDO_PHRASES):
             await self._undo()
             return True
@@ -729,6 +733,96 @@ class Daemon:
         # надо прикрыть, и замок на сессию действует тот же.
         await self._speak_turn(ws, Route(target, "corrected", 1.0, said), self._preamble(),
                                self.classifier.role_line(decision, device))
+
+    # -- очередь фоновых задач -------------------------------------------
+    async def _handle_queue_command(self, ws: Any, text: str) -> bool:
+        """«В фоне почини тесты», «чем занят», «что готово», «отмени задачу…».
+
+        Фоновой задачу делает решение человека не ждать ответа, а не её
+        длительность, — поэтому спрашиваем его, а не угадываем сами.
+        """
+        wanted = tasks.background_request(text)
+        if wanted:
+            if not checkpoints.is_repo(self.targets.code.workspace):
+                await self._say("Фоновые задачи работают только в репозитории.")
+                return True
+            task = self.queue.add(wanted)
+            await self._say(f"Взял в работу: {task.title}. Скажу, когда будет.")
+            return True
+
+        if tasks.is_status_question(text):
+            await self._say(self.queue.spoken_status())
+            return True
+
+        if tasks.is_ready_question(text):
+            готовые = self.queue.by_state(tasks.DONE)
+            if not готовые:
+                await self._say("Готовых задач нет.")
+            else:
+                последняя = готовые[-1]
+                await self._say(f"Готово {len(готовые)}. Последняя: {последняя.title}. "
+                                f"{последняя.summary}")
+            return True
+
+        words = tasks.cancel_request(text)
+        if words:
+            task = self.queue.find(words)
+            if task is None:
+                await self._say("Не нашёл такой задачи.")
+            else:
+                self.queue.cancel(task)
+                await self._say(f"Отменил: {task.title}.")
+            return True
+        return False
+
+    async def queue_loop(self, interval_s: float = 3.0) -> None:
+        """Запускает задачи и рассказывает о готовых, когда в ухе тихо."""
+        while True:
+            await asyncio.sleep(interval_s)
+            try:
+                await self._start_next_task()
+                await self._deliver_finished()
+            except Exception as exc:            # очередь не должна ронять демон
+                log.warning("очередь: %s", exc)
+
+    async def _start_next_task(self) -> None:
+        task = self.queue.next_to_start()
+        if task is None or not checkpoints.is_repo(self.targets.code.workspace):
+            return
+        try:
+            self.queue.start(task)
+        except (RuntimeError, OSError) as exc:
+            self.queue.finish(task, f"не завелась: {exc}", stuck=True)
+            return
+        log.info("задача %s: %s", task.id, task.title)
+        asyncio.create_task(self._run_task(task))
+
+    async def _run_task(self, task: tasks.Task) -> None:
+        """Отдельная сессия в отдельной копии: соседям она не мешает."""
+        target = CodeTarget(task.worktree)
+        try:
+            reply = await target.send(task.text, self._preamble(), "")
+            summary = await self._voice_summary(reply, "code")
+            await asyncio.to_thread(checkpoints.commit_all, task.worktree,
+                                    f"фоном: {task.text[:60]}")
+            self.queue.finish(task, summary.text, stuck=reply.stubbed)
+        except Exception as exc:                # noqa: BLE001 - причин много
+            log.exception("задача %s сорвалась", task.id)
+            self.queue.finish(task, formatter.reason_for_voice(exc), stuck=True)
+        finally:
+            await target.reset()
+
+    async def _deliver_finished(self) -> None:
+        """Готовое не выкрикивается поверх разговора: ждём тишины."""
+        ready = self.queue.undeliverable()
+        if not ready or self._pending:
+            return
+        if self.machine.state not in (state.IDLE, state.LISTENING):
+            return
+        for task in ready:
+            куда = "Готово" if task.state == tasks.DONE else "Встала"
+            await self._announce(f"{куда}: {task.title}. {task.summary}")
+        self.queue.mark_delivered(ready)
 
     async def _undo(self) -> None:
         workspace = self.targets.code.workspace
@@ -951,8 +1045,17 @@ async def run(settings: Settings) -> None:
           f"  code      : {'ready' if daemon.targets.code.available else 'stub (нет SDK/ключа)'}\n"
           f"  chat      : {'ready' if daemon.targets.chat.available else 'stub (нет SDK/ключа)'}",
           flush=True)
-    async with serve(daemon.handler, settings.host, settings.port, process_request=process_request):
-        await asyncio.Future()
+    # Циклы надо запустить: наблюдатель был написан и покрыт тестами, но его
+    # никто никогда не вызывал — проактивность молчала с самого начала.
+    background = [asyncio.create_task(daemon.watch_loop()),
+                  asyncio.create_task(daemon.queue_loop())]
+    try:
+        async with serve(daemon.handler, settings.host, settings.port,
+                         process_request=process_request):
+            await asyncio.Future()
+    finally:
+        for task in background:
+            task.cancel()
 
 
 def is_own_checkout(workspace: Path) -> bool:

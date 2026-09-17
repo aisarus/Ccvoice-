@@ -126,3 +126,51 @@ def test_cancelling_names_the_task_in_words(repo):
     """Номера задач голосом не называют."""
     assert tasks.cancel_request("отмени задачу про зависимости") == "зависимости"
     assert tasks.cancel_request("отмени последнее") is None
+
+
+# -- как это выглядит через настоящий протокол --------------------------------
+
+def test_a_background_task_is_taken_and_told_about(tmp_path, monkeypatch):
+    """«В фоне почини тесты» — реплика уходит в очередь, а не в сессию."""
+    import asyncio
+    import json as js
+    from websockets.asyncio.client import connect
+    from websockets.asyncio.server import serve
+    from voice_claude.server import Daemon, Settings
+
+    repo = tmp_path / "ws"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    git(repo, "config", "user.email", "t@t")
+    git(repo, "config", "user.name", "t")
+    (repo / "auth.ts").write_text("было", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "первый")
+
+    async def flow():
+        daemon = Daemon(Settings(workspace=str(repo), token="t",
+                                 note_path=str(tmp_path / "i.md")))
+        heard = []
+        async with serve(daemon.handler, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            async with connect(f"ws://127.0.0.1:{port}") as ws:
+                await ws.send(js.dumps({"id": "hello", "v": 1, "token": "t"}))
+                await ws.recv()
+                await ws.send(js.dumps({
+                    "id": "speech_segment", "segment_id": "s1",
+                    "transcript": "в фоне почини падающие тесты",
+                    "device": "phone_mic", "duration_ms": 1400,
+                    "voiced_frames": 45, "role": "master"}))
+                try:
+                    while True:
+                        heard.append(js.loads(await asyncio.wait_for(ws.recv(), timeout=1.5)))
+                except asyncio.TimeoutError:
+                    pass
+        return daemon, heard
+
+    daemon, heard = asyncio.run(flow())
+    сказано = [m.get("text", "") for m in heard if m.get("id") == "voice_summary"]
+    assert any("Взял в работу" in t for t in сказано), сказано
+    assert [t.text for t in daemon.queue.tasks] == ["почини падающие тесты"]
+    # Реплика не ушла в обычную маршрутизацию: это задача, а не разговор.
+    assert not [m for m in heard if m.get("id") == "route"]
