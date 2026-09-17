@@ -28,8 +28,11 @@ class IntentsTest {
 
     @Test
     fun twoWrongLettersAreTooMany() {
+        // «Крот» — одна буква от «клот», но две от «Клод». Допуск считается
+        // от настоящих форм обращения, иначе ловушка расходится вдвое.
         assertFalse(Intents.hasWake("крот покажи логи"))
         assertFalse(Intents.hasWake("привет покажи логи"))
+        assertFalse(Intents.hasWake("стоп покажи логи"))
     }
 
     @Test

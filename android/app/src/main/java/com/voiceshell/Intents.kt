@@ -8,6 +8,14 @@ package com.voiceshell
  */
 object Intents {
     val WAKE = listOf("клод", "клода", "клоуд", "клауд", "claude", "клот", "клоуде")
+    /**
+     * От чего считаем допуск в одну букву.
+     *
+     * Только настоящие формы обращения. Мерить от «клот» — самого по себе
+     * искажения — значит принимать за обращение всё в двух буквах от «Клод»:
+     * так «крот» становится вызовом.
+     */
+    private val WAKE_ROOTS = listOf("клод", "клоуд", "клауд", "claude")
     /** Слова, которыми начинают команду: их нельзя принимать за обращение. */
     private val NOT_WAKE = setOf("код", "чат", "кот", "что", "как", "код?")
     private val STOP_WORK = listOf(
@@ -35,7 +43,7 @@ object Intents {
         if (word.isBlank() || word in NOT_WAKE) return false
         if (WAKE.any { it == word }) return true
         if (word.length < 4) return false
-        return WAKE.any { it.length >= 4 && withinOneEdit(it, word) }
+        return WAKE_ROOTS.any { withinOneEdit(it, word) }
     }
 
     private fun withinOneEdit(a: String, b: String): Boolean {
