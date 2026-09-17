@@ -9,6 +9,8 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -81,6 +83,8 @@ class VoiceService : Service() {
 
     private var speaking = false
     private var awaitingCommand = false
+    private var lastSpoken = ""
+    private var spokeAt = 0L
     private var windowUntil = 0L
     private var wakeReady = false
     private var unauthorized = false
@@ -228,6 +232,7 @@ class VoiceService : Service() {
 
     // ---------- разбор реплики ----------
     private fun handle(text: String) {
+        if (isOwnEcho(text)) return
         Intents.stopIntent(text)?.let { scope ->
             silence()
             send(JSONObject().put("id", "interrupt").put("scope", scope))
@@ -252,6 +257,25 @@ class VoiceService : Service() {
             return
         }
         deliver(payload)
+    }
+
+    /**
+     * Распознали собственный ответ.
+     *
+     * Через динамик это случается всегда, через наушники — когда звук утекает.
+     * Сравниваем со сказанным: совпадающие куски — эхо, а не реплика.
+     */
+    private fun isOwnEcho(text: String): Boolean {
+        if (lastSpoken.isBlank()) return false
+        if (System.currentTimeMillis() - spokeAt > 12_000) return false
+        val heard = Intents.normalise(text)
+        if (heard.length < 4) return false
+        if (lastSpoken.contains(heard) || heard.contains(lastSpoken)) return true
+        val heardWords = heard.split(' ').filter { it.length > 3 }.toSet()
+        if (heardWords.isEmpty()) return false
+        val spokenWords = lastSpoken.split(' ').toSet()
+        val overlap = heardWords.count { it in spokenWords }.toDouble() / heardWords.size
+        return overlap >= 0.6
     }
 
     private fun deliver(payload: String) {
@@ -419,7 +443,10 @@ class VoiceService : Service() {
                     override fun onStart(utteranceId: String?) { speaking = true }
                     override fun onDone(utteranceId: String?) {
                         speaking = false
+                        spokeAt = System.currentTimeMillis()
                         windowUntil = System.currentTimeMillis() + WINDOW_MS
+                        // Хвост фразы ещё звучит в комнате — ждём, потом слушаем.
+                        main.postDelayed({ if (!speaking && !awaitingCommand) resumeWake() }, 600)
                     }
                     @Deprecated("deprecated in API 21")
                     override fun onError(utteranceId: String?) { speaking = false }
@@ -432,8 +459,26 @@ class VoiceService : Service() {
               else TextToSpeech(this, listener)
     }
 
+    /** Играет ли звук в наушники — тогда микрофон его не услышит. */
+    private fun onHeadphones(): Boolean = runCatching {
+        getSystemService(AudioManager::class.java)
+            .getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            .any {
+                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                    it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                    it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                    it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                    it.type == AudioDeviceInfo.TYPE_USB_HEADSET
+            }
+    }.getOrDefault(false)
+
     private fun speak(text: String) {
         if (text.isBlank() || prefs.mute) return
+        lastSpoken = Intents.normalise(text)
+        spokeAt = System.currentTimeMillis()
+        // Через динамик микрофон слышит нас самих: на это время он засыпает.
+        // В наушниках эхо-пути нет, и «стоп» продолжает работать.
+        if (!onHeadphones()) runCatching { wake?.stop() }
         runCatching {
             applyVoice(Intents.scriptLanguage(text, prefs.language))
             tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "voice-shell")

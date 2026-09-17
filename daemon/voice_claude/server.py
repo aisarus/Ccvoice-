@@ -22,7 +22,7 @@ from typing import Any
 from websockets.datastructures import Headers
 from websockets.http11 import Response
 
-from . import formatter, state
+from . import formatter, glossary, state
 from .ambient import AmbientBuffer, RateLimiter, WhisperGate
 from .auth import (SetupError, SetupTokenFlow, apply_token, credential_kind,
                    credential_problem, persist_token, token_problem)
@@ -84,6 +84,7 @@ class Daemon:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._setup: SetupTokenFlow | None = None
         self._pending_tools: dict[str, str] = {}
+        self._glossary: str | None = None
         self.preapproved: set[str] = set()
 
     # -- transport -------------------------------------------------------
@@ -195,6 +196,11 @@ class Daemon:
 
         preamble = "\n".join(load_spec()["command_passthrough"]["allowed_additions"]
                              ["system_preamble"].splitlines())
+        # Имена файлов и проектов распознаватель калечит: прикладываем список,
+        # чтобы Claude исправил очевидное по контексту. Сам транскрипт не трогаем.
+        hint = self._glossary_hint()
+        if hint:
+            preamble = f"{preamble}\n{hint}"
         role_line = self.classifier.role_line(decision, device)
         if route.target == "chat" and AmbientBuffer.is_recall(text) and self.ambient.enabled:
             role_line += "\n[ambient] последние реплики:\n" + self.ambient.transcript()
@@ -208,6 +214,11 @@ class Daemon:
                                "is_question": summary.is_question, "target": route.target,
                                "stubbed": reply.stubbed, "full_output": reply.full_output})
         await self._broadcast_state()
+
+    def _glossary_hint(self) -> str:
+        if self._glossary is None:
+            self._glossary = glossary.for_workspace(self.targets.code.workspace)
+        return self._glossary
 
     async def _voice_summary(self, reply: Any, target: str) -> formatter.VoiceSummary:
         """Вслух идёт пересказ, а не вывод. Полный текст остаётся на экране."""
