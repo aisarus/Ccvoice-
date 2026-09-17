@@ -73,6 +73,12 @@ async def main() -> int:
             elif kind == "permission_request":
                 print(f"спрашивает разрешение: {message.get('spoken')}")
             elif kind == "voice_summary":
+                if message.get("progress"):
+                    # «Работаю» — это не ответ, а признак того, что работа
+                    # затянулась. Проверка, которая заканчивается на нём,
+                    # показывает успех там, где ответа ещё не было.
+                    print(f"… {message.get('text')}")
+                    continue
                 print(f"\nответ: {message.get('text')}")
                 if message.get("stubbed"):
                     print("(это заглушка — Claude недоступен)")
