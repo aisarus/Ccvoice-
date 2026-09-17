@@ -79,6 +79,36 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
             android:textSize="12sp"
+            android:text="движок синтеза — RHVoice звучит живее системного" />
+
+        <Spinner
+            android:id="@+id/engine"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <Button
+            android:id="@+id/engineList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="показать движки" />
+
+        <Button
+            android:id="@+id/engineUse"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="использовать выбранный" />
+
+        <Button
+            android:id="@+id/engineInstall"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="установить RHVoice" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:textSize="12sp"
             android:text="голос синтеза" />
 
         <Spinner

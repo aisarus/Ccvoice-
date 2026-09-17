@@ -29,6 +29,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("mute", false)
         set(value) = sp.edit().putBoolean("mute", value).apply()
 
+    /** Движок синтеза (пакет приложения); пусто — системный по умолчанию. */
+    var engine: String
+        get() = sp.getString("engine", "") ?: ""
+        set(value) = sp.edit().putString("engine", value).apply()
+
     /** Выбранный голос синтеза; пусто — берём лучший по эвристике. */
     var voice: String
         get() = sp.getString("voice", "") ?: ""

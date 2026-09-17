@@ -54,6 +54,9 @@ class VoiceService : Service() {
         const val ACTION_SAY = "com.voiceshell.SAY"
         const val ACTION_AUTH_SET = "com.voiceshell.AUTH_SET"
         const val ACTION_VOICES = "com.voiceshell.VOICES"
+        const val ACTION_ENGINES = "com.voiceshell.ENGINES"
+        const val ACTION_SET_ENGINE = "com.voiceshell.SET_ENGINE"
+        const val EXTRA_ENGINES = "engines"
         const val ACTION_TRY_VOICE = "com.voiceshell.TRY_VOICE"
         const val EXTRA_VOICES = "voices"
         const val EXTRA_TEXT = "text"
@@ -125,6 +128,26 @@ class VoiceService : Service() {
             ACTION_SAY -> {
                 val text = intent.getStringExtra(EXTRA_TEXT).orEmpty().trim()
                 if (text.isNotEmpty()) deliver(text)
+            }
+            ACTION_ENGINES -> {
+                val engines = runCatching { tts?.engines.orEmpty() }.getOrDefault(emptyList())
+                sendBroadcast(
+                    Intent(ACTION_STATUS).setPackage(packageName)
+                        .putExtra(EXTRA_TEXT, "движков синтеза: ${engines.size}")
+                        .putStringArrayListExtra(
+                            EXTRA_ENGINES,
+                            ArrayList(engines.map { "${it.label}\u0000${it.name}" })
+                        )
+                )
+            }
+            ACTION_SET_ENGINE -> {
+                val engine = intent.getStringExtra(EXTRA_CODE).orEmpty()
+                prefs.engine = engine
+                prefs.voice = ""            // голоса у другого движка свои
+                runCatching { tts?.shutdown() }
+                tts = null
+                setUpTts()
+                report("движок синтеза: ${engine.ifBlank { "системный" }}")
             }
             ACTION_VOICES -> {
                 val names = runCatching { tts?.voices.orEmpty() }.getOrDefault(emptySet())
@@ -387,7 +410,8 @@ class VoiceService : Service() {
     }
 
     private fun setUpTts() {
-        tts = TextToSpeech(this) { code ->
+        val engine = prefs.engine.takeIf { it.isNotBlank() }
+        val listener = TextToSpeech.OnInitListener { code ->
             if (code == TextToSpeech.SUCCESS) {
                 applyVoice(prefs.language)
                 runCatching { tts?.setSpeechRate(1.02f) }
@@ -400,8 +424,12 @@ class VoiceService : Service() {
                     @Deprecated("deprecated in API 21")
                     override fun onError(utteranceId: String?) { speaking = false }
                 })
+            } else {
+                report("синтез речи не запустился (код $code)")
             }
         }
+        tts = if (engine != null) TextToSpeech(this, listener, engine)
+              else TextToSpeech(this, listener)
     }
 
     private fun speak(text: String) {

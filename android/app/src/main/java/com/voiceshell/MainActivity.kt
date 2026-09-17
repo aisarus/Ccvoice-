@@ -29,9 +29,20 @@ class MainActivity : AppCompatActivity() {
     private val lines = ArrayDeque<String>()
     private var authUrl: String? = null
     private var voices: List<String> = emptyList()
+    private var engines: List<Pair<String, String>> = emptyList()   // подпись -> пакет
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            intent?.getStringArrayListExtra(VoiceService.EXTRA_ENGINES)?.let { raw ->
+                engines = raw.map { it.split('\u0000').let { parts -> parts[0] to parts.getOrElse(1) { "" } } }
+                val spinner = findViewById<Spinner>(R.id.engine)
+                spinner.adapter = ArrayAdapter(
+                    this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
+                    if (engines.isEmpty()) listOf("движков не нашлось") else engines.map { it.first }
+                )
+                val current = engines.indexOfFirst { it.second == prefs.engine }
+                if (current >= 0) spinner.setSelection(current)
+            }
             intent?.getStringArrayListExtra(VoiceService.EXTRA_VOICES)?.let { names ->
                 voices = names
                 val spinner = findViewById<Spinner>(R.id.voice)
@@ -107,6 +118,31 @@ class MainActivity : AppCompatActivity() {
         fun paintMute() { mute.text = if (prefs.mute) "озвучка: выкл" else "озвучка: вкл" }
         paintMute()
         mute.setOnClickListener { prefs.mute = !prefs.mute; paintMute() }
+
+        // Движок синтеза: RHVoice ставится отдельным приложением и появляется здесь.
+        findViewById<Button>(R.id.engineList).setOnClickListener {
+            startService(Intent(this, VoiceService::class.java).setAction(VoiceService.ACTION_ENGINES))
+        }
+        findViewById<Button>(R.id.engineUse).setOnClickListener {
+            val spinner = findViewById<Spinner>(R.id.engine)
+            val engine = engines.getOrNull(spinner.selectedItemPosition) ?: return@setOnClickListener
+            startService(
+                Intent(this, VoiceService::class.java)
+                    .setAction(VoiceService.ACTION_SET_ENGINE)
+                    .putExtra(VoiceService.EXTRA_CODE, engine.second)
+            )
+            status.text = "движок: ${engine.first}"
+        }
+        findViewById<Button>(R.id.engineInstall).setOnClickListener {
+            runCatching {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://search?q=RHVoice")))
+            }.onFailure {
+                startActivity(
+                    Intent(Intent.ACTION_VIEW,
+                        Uri.parse("https://play.google.com/store/search?q=RHVoice"))
+                )
+            }
+        }
 
         // Голос синтеза: список того, что есть в системе, с примером на слух.
         findViewById<Button>(R.id.voiceList).setOnClickListener {
