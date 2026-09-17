@@ -78,3 +78,25 @@ def test_commands_and_code_blocks_are_never_spoken():
 def test_llm_summary_is_still_capped_at_three_sentences():
     verbose = "Раз. Два. Три. Четыре. Пять."
     assert summarize("вывод", llm=lambda _: verbose).sentences == 3
+
+
+def test_stress_marks_travel_separately_from_the_text():
+    """На экран — чистый текст, в синтез — размеченный: одно поле не может
+    быть и тем, и другим."""
+    from voice_claude import stress
+    marked = stress.mark("Откатил конфиг, тесты зелёные.")
+    assert "+" in marked
+    assert stress.clean(marked) == "Откатил конфиг, тесты зелёные."
+    assert stress.to_acute(marked) == "Откати́л конфи́г, те́сты зелёные."
+    assert stress.is_marked(marked) and not stress.is_marked(stress.clean(marked))
+
+
+def test_a_lone_plus_is_not_a_stress_mark():
+    from voice_claude import stress
+    assert stress.to_acute("2 + 2 = 4") == "2 + 2 = 4"
+
+
+def test_words_we_do_not_know_are_left_alone():
+    """Ставить знак наугад хуже, чем не ставить: словарь только про своё."""
+    from voice_claude import stress
+    assert stress.mark("Привет, как дела") == "Привет, как дела"

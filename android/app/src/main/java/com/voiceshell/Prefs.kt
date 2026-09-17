@@ -39,6 +39,16 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("bt_mic", true)
         set(value) = sp.edit().putBoolean("bt_mic", value).apply()
 
+    /**
+     * Что делать со знаками ударения: auto | plus | acute | off.
+     *
+     * Авто: RHVoice получает знак «+» как есть, остальные движки — чистый
+     * текст, иначе плюс прозвучит вслух.
+     */
+    var stressStyle: String
+        get() = sp.getString("stress_style", Stress.AUTO) ?: Stress.AUTO
+        set(value) = sp.edit().putString("stress_style", value).apply()
+
     /** Движок синтеза (пакет приложения); пусто — системный по умолчанию. */
     var engine: String
         get() = sp.getString("engine", "") ?: ""

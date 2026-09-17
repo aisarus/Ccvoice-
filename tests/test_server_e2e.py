@@ -199,6 +199,20 @@ def test_shell_answers_are_answers_not_progress(tmp_path):
     assert "Откатывать нечего" in spoken[0]["text"]
 
 
+def test_the_answer_carries_clean_text_and_a_spoken_one(tmp_path):
+    """Русский синтез без ударений ошибается в технических словах."""
+    _, received = run([segment("откати последнее", MASTER)], tmp_path / "inbox.md")
+    said = [m for m in kinds(received, "voice_summary") if not m.get("progress")][0]
+    assert "+" not in said["text"], "знаки ударения не должны попадать на экран"
+
+    daemon = Daemon(Settings(workspace=".", token="t", note_path=str(tmp_path / "i.md")))
+    payload = daemon._voice("Откатил конфиг, тесты зелёные.")
+    assert payload["text"] == "Откатил конфиг, тесты зелёные."
+    assert payload["spoken"] == "Откат+ил конф+иг, т+есты зелёные."
+    # Реплика без технических слов лишнего поля не тащит.
+    assert "spoken" not in daemon._voice("Привет, рад тебя слышать.")
+
+
 def test_ambient_control_switches_and_wipes(tmp_path):
     async def flow():
         settings = Settings(workspace=".", token="t", note_path=str(tmp_path / "i.md"))

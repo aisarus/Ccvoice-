@@ -23,7 +23,8 @@ from urllib.parse import parse_qs, urlsplit
 from websockets.datastructures import Headers
 from websockets.http11 import Response
 
-from . import checkpoints, formatter, glossary, learning, memory, policy, state, watcher
+from . import (checkpoints, formatter, glossary, learning, memory, policy, state,
+               stress, watcher)
 from .ambient import AmbientBuffer, RateLimiter, WhisperGate
 from .auth import (SetupError, SetupTokenFlow, apply_token, credential_kind,
                    credential_problem, forget_cli_probe, github_ready, persist_token,
@@ -132,9 +133,7 @@ class Daemon:
             # Пока никто не слушал, новости копились — отдаём их первым делом.
             news, self._pending_news = self._pending_news, []
             for item in news:
-                await self._send(ws, {"id": "voice_summary", "text": item, "is_question": False,
-                                      "target": "code", "stubbed": False, "full_output": item,
-                                      "proactive": True})
+                await self._send(ws, self._voice(item, proactive=True))
             await self._send(ws, {
                 "id": "welcome", "v": PROTOCOL_VERSION,
                 "targets": [t["id"] for t in load_spec()["targets"]["list"]],
@@ -263,9 +262,9 @@ class Daemon:
 
         self.machine.to(state.SPEAKING)
         self.machine.open_window()
-        await self._broadcast({"id": "voice_summary", "text": summary.text,
-                               "is_question": summary.is_question, "target": route.target,
-                               "stubbed": reply.stubbed, "full_output": reply.full_output})
+        await self._broadcast(self._voice(summary.text, is_question=summary.is_question,
+                                          target=route.target, stubbed=reply.stubbed,
+                                          full_output=reply.full_output))
         await self._broadcast_state()
 
     async def _recover_from(self, ws: Any, target: str, exc: Exception) -> None:
@@ -274,8 +273,8 @@ class Daemon:
         await self.targets.reset_sessions()
         self.machine.to(state.SPEAKING)
         self.machine.open_window()
-        await self._broadcast({"id": "voice_summary", "text": spoken, "is_question": False,
-                               "target": target, "stubbed": True, "full_output": str(exc)})
+        await self._broadcast(self._voice(spoken, target=target, stubbed=True,
+                                          full_output=str(exc)))
         await self._send(ws, {"id": "error", "code": "target_failed",
                               "message": str(exc)[:400], "recoverable": True})
         await self._broadcast_state()
@@ -320,9 +319,7 @@ class Daemon:
     async def _announce(self, text: str) -> None:
         """Сказать сейчас или придержать до того, как кто-то подключится."""
         if self.clients:
-            await self._broadcast({"id": "voice_summary", "text": text, "is_question": False,
-                                   "target": "code", "stubbed": False, "full_output": text,
-                                   "proactive": True})
+            await self._broadcast(self._voice(text, proactive=True))
         else:
             self._pending_news.append(text)
             del self._pending_news[:-10]
@@ -334,6 +331,22 @@ class Daemon:
         summary = await self._voice_summary(reply, "code")
         await self._announce(summary.text)
 
+    def _voice(self, text: str, **extra: Any) -> dict[str, Any]:
+        """Голосовая реплика: на экран — чистый текст, в синтез — с ударениями.
+
+        Разметку ударений нельзя показывать человеку и нельзя терять: русский
+        синтез без неё ошибается в технических словах, а со знаками на экране
+        читать невозможно. Поэтому два поля.
+        """
+        marked = stress.mark(text)
+        payload: dict[str, Any] = {"id": "voice_summary", "text": stress.clean(text),
+                                   "is_question": False, "stubbed": False,
+                                   "full_output": text, "target": "code"}
+        payload.update(extra)
+        if stress.is_marked(marked):
+            payload["spoken"] = marked
+        return payload
+
     async def _say(self, text: str, target: str = "code", progress: bool = False) -> None:
         """Реплика от самой оболочки.
 
@@ -341,9 +354,7 @@ class Daemon:
         показывать реплику. «Откатил auth.ts» и «Запомнил» — это ответы, и
         помечать их так означает терять их на клиенте, который флаг уважает.
         """
-        await self._broadcast({"id": "voice_summary", "text": text, "is_question": False,
-                               "target": target, "stubbed": False, "full_output": text,
-                               "progress": progress})
+        await self._broadcast(self._voice(text, target=target, progress=progress))
 
     @staticmethod
     def _alternatives_hint(msg: dict[str, Any]) -> str:
@@ -539,9 +550,9 @@ class Daemon:
         self._last_utterance = (said, target)
         self.machine.to(state.SPEAKING)
         self.machine.open_window()
-        await self._broadcast({"id": "voice_summary", "text": summary.text,
-                               "is_question": summary.is_question, "target": target,
-                               "stubbed": reply.stubbed, "full_output": reply.full_output})
+        await self._broadcast(self._voice(summary.text, is_question=summary.is_question,
+                                          target=target, stubbed=reply.stubbed,
+                                          full_output=reply.full_output))
         await self._broadcast_state()
 
     async def _undo(self) -> None:
@@ -575,9 +586,8 @@ class Daemon:
                                   "role": decision.role, "label": decision.label_ru})
             return
         if action == "speak_details":
-            await self._broadcast({"id": "voice_summary", "text": self._pending_detail(),
-                                   "is_question": True, "target": "approval", "stubbed": False,
-                                   "full_output": self._pending_detail()})
+            await self._broadcast(self._voice(self._pending_detail(), is_question=True,
+                                              target="approval"))
             return
         if not self.classifier.may("approve", decision):
             await self._send(ws, {"id": "route", "target": None, "reason": "approval_role_gate",
@@ -594,10 +604,8 @@ class Daemon:
             if policy.may_remember(raw.split(" ", 1)[0], {"command": raw}):
                 self.preapproved.add(raw)
             else:
-                await self._broadcast({"id": "voice_summary",
-                                       "text": "Разрешил один раз. Это я запоминать не буду.",
-                                       "is_question": False, "target": "code",
-                                       "stubbed": False, "full_output": raw})
+                await self._broadcast(self._voice(
+                    "Разрешил один раз. Это я запоминать не буду.", full_output=raw))
         await self._broadcast({"id": "permission_result", "request_id": request_id,
                                "approved": approved, "remembered": action.endswith("rule"),
                                "earcon": "accepted" if approved else "error"})
@@ -640,9 +648,7 @@ class Daemon:
         scope = msg.get("scope", "voice")
         if scope == "work":
             await self.targets.code.interrupt()
-            await self._broadcast({"id": "voice_summary", "text": "Остановил.",
-                                   "is_question": False, "target": "code",
-                                   "stubbed": False, "full_output": "interrupt"})
+            await self._broadcast(self._voice("Остановил.", full_output="interrupt"))
         self.machine.to(state.LISTENING)
         self.machine.open_window()
         await self._broadcast_state()

@@ -566,14 +566,16 @@ class VoiceService : Service() {
 
     private fun speak(text: String) {
         if (text.isBlank() || prefs.mute) return
-        lastSpoken = Intents.normalise(text)
+        // Эхо сравниваем по чистому тексту: распознаватель знаков не вернёт.
+        lastSpoken = Intents.normalise(Stress.strip(text))
         spokeAt = System.currentTimeMillis()
         // Через динамик микрофон слышит нас самих: на это время он засыпает.
         // В наушниках эхо-пути нет, и «стоп» продолжает работать.
         if (!onHeadphones()) runCatching { wake?.stop() }
         runCatching {
             applyVoice(Intents.scriptLanguage(text, prefs.language))
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, speechParams(), "voice-shell")
+            tts?.speak(Stress.render(text, prefs.stressStyle, prefs.engine),
+                       TextToSpeech.QUEUE_FLUSH, speechParams(), "voice-shell")
         }
     }
 
@@ -628,8 +630,10 @@ class VoiceService : Service() {
             "welcome" -> report("готов · ${message.optString("credential")}")
             "voice_summary" -> {
                 val text = message.optString("text")
+                // На экран — чистый текст, в синтез — с ударениями, если они есть.
+                val spoken = message.optString("spoken").ifBlank { text }
                 report(text)
-                speak(text)
+                speak(spoken)
             }
             "permission_request" -> {
                 val spoken = message.optString("spoken")

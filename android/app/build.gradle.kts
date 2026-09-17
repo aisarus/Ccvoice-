@@ -54,6 +54,9 @@ dependencies {
     implementation("com.alphacephei:vosk-android:0.3.47@aar")
     implementation("net.java.dev.jna:jna:5.13.0@aar")
 
+    // Чистая логика проверяется на JVM: это секунды, без эмулятора.
+    testImplementation("junit:junit:4.13.2")
+
     // Звук проверяется только на устройстве: системного AudioManager в JVM нет.
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")

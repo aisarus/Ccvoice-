@@ -119,6 +119,16 @@ class MainActivity : AppCompatActivity() {
         paintMute()
         mute.setOnClickListener { prefs.mute = !prefs.mute; paintMute() }
 
+        // Ударения: если конкретная сборка RHVoice не понимает «+», здесь
+        // переключается запись — проверяется на слух полем «скажи».
+        val stress = findViewById<Button>(R.id.stress)
+        fun paintStress() { stress.text = Stress.label(prefs.stressStyle) }
+        paintStress()
+        stress.setOnClickListener {
+            prefs.stressStyle = Stress.next(prefs.stressStyle)
+            paintStress()
+        }
+
         // Микрофон гарнитуры: служба поднимает канал связи, здесь только выбор.
         val btmic = findViewById<Button>(R.id.btmic)
         fun paintMic() { btmic.text = if (prefs.btMic) "микрофон: гарнитура" else "микрофон: телефон" }

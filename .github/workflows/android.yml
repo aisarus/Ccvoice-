@@ -30,6 +30,10 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      - name: Проверить логику на JVM
+        working-directory: android
+        run: gradle --no-daemon testDebugUnitTest
+
       - name: Собрать APK
         working-directory: android
         run: gradle --no-daemon assembleDebug
