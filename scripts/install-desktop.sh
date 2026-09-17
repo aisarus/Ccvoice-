@@ -12,7 +12,18 @@ say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 
 say "1. Репозиторий"
 if [ -d "$ROOT/.git" ]; then
-  git -C "$ROOT" fetch origin "$BRANCH" && git -C "$ROOT" checkout "$BRANCH" && git -C "$ROOT" pull origin "$BRANCH"
+  # Не pull: на разошедшихся ветках он останавливается на «divergent branches»
+  # и требует выбрать способ слияния. Нужна ровно та версия, что в ветке,
+  # поэтому fetch + reset — но сначала метка, по которой прежнее вернётся.
+  git -C "$ROOT" fetch origin "$BRANCH" || {
+    echo "не смог забрать ветку $BRANCH — проверь сеть"; exit 1; }
+  STAMP="before-install-$(date +%Y%m%d-%H%M%S)"
+  git -C "$ROOT" tag -f "$STAMP" HEAD >/dev/null 2>&1 || true
+  changed="$(git -C "$ROOT" status --porcelain --untracked-files=no)"
+  [ -n "$changed" ] && { echo "правки в $ROOT пропадут:"; echo "$changed"; }
+  git -C "$ROOT" checkout --quiet -B "$BRANCH" "origin/$BRANCH"
+  git -C "$ROOT" reset --hard --quiet "origin/$BRANCH"
+  echo "прежнее состояние: git -C $ROOT reset --hard $STAMP"
 else
   git clone https://github.com/aisarus/Ccvoice-.git "$ROOT"
   git -C "$ROOT" checkout "$BRANCH"
@@ -30,7 +41,9 @@ fi
 claude --version || { echo "CLI не установился — поставь Node 18+ и повтори"; exit 1; }
 
 say "4. Самопроверка"
-(cd "$ROOT" && .venv/bin/python -m pytest tests -q && .venv/bin/python scripts/validate_spec.py)
+(cd "$ROOT" && .venv/bin/python -m pytest tests -q && .venv/bin/python scripts/validate_spec.py) \
+  || { echo "тесты не прошли — дальше идти нельзя, демон не запускаю."
+       echo "Повторить руками: cd $ROOT && .venv/bin/python -m pytest tests"; exit 1; }
 
 say "5. Токен доступа"
 TOKEN="${VOICE_TOKEN:-$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')}"

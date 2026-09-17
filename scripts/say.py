@@ -18,10 +18,10 @@ import sys
 from pathlib import Path
 
 
-def token_from_env_file(path: str = "/etc/voice-shell.env") -> tuple[str, str]:
+def token_from_env_file(path: str | None = None) -> tuple[str, str]:
     """Достаёт токен и порт из файла службы, чтобы не вводить их руками."""
     token, port = "", "8787"
-    file = Path(path)
+    file = Path(path or os.environ.get("VOICE_ENV_FILE") or "/etc/voice-shell.env")
     if file.exists():
         for line in file.read_text(encoding="utf-8").splitlines():
             if line.startswith("VOICE_TOKEN="):
