@@ -31,14 +31,14 @@ TOKEN="$(printf '%s' "$TOKEN" | tr -d '[:space:]' | sed 's/^TELEGRAM_TOKEN=//; s
 printf '%s' "$TOKEN" | grep -qE '^[0-9]{6,}:[A-Za-z0-9_-]{30,}$' \
     || die "это не похоже на токен бота: он вида 1234567890:ABC…"
 
-имя="$(curl -fsS --max-time 20 "$API/bot$TOKEN/getMe" \
+BOT_NAME="$(curl -fsS --max-time 20 "$API/bot$TOKEN/getMe" \
         | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"]["username"])' 2>/dev/null)" \
     || die "телеграм не принял токен"
-say "Бот @$имя на связи"
+say "Бот @$BOT_NAME на связи"
 
 CHAT="${TELEGRAM_CHAT_ID:-}"
 if [ -z "$CHAT" ]; then
-    echo "Теперь напиши боту @$имя любое слово — жду до минуты."
+    echo "Теперь напиши боту @$BOT_NAME любое слово — жду до минуты."
     for _ in $(seq 1 30); do
         CHAT="$(curl -fsS --max-time 10 "$API/bot$TOKEN/getUpdates" \
             | python3 -c '
