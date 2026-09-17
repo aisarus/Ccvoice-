@@ -59,6 +59,41 @@ class Prefs(context: Context) {
         get() = sp.getString("voice", "") ?: ""
         set(value) = sp.edit().putString("voice", value).apply()
 
+    /**
+     * Мерить ли громкость реплики и слать признаки демону.
+     *
+     * Выключатель нужен не для красоты: если на конкретной трубке шкала RMS
+     * ведёт себя странно, демон начнёт принимать хозяина за соседа и молча
+     * ронять команды. Тогда одно нажатие возвращает прежнее поведение —
+     * реплика уходит без признаков, с ролью-подсказкой.
+     */
+    // Пока выключено по умолчанию: демон при частичном наборе признаков
+    // считает хозяина соседом и молча роняет команду. Включим, когда в демоне
+    // появится честный счёт по тому, что реально измерено.
+    var acoustics: Boolean
+        get() = sp.getBoolean("acoustics", false)
+        set(value) = sp.edit().putBoolean("acoustics", value).apply()
+
+    /**
+     * Норма громкости для конкретного микрофона.
+     *
+     * Каждый вход слышит по-своему, и общая норма для телефона и гарнитуры
+     * означала бы, что после надевания гарнитуры хозяин выглядит чужим.
+     */
+    fun baseline(device: String): Baseline? {
+        val speech = sp.getFloat("base_speech_$device", Float.NaN)
+        val snr = sp.getFloat("base_snr_$device", Float.NaN)
+        if (speech.isNaN() || snr.isNaN()) return null
+        return Baseline(speech.toDouble(), snr.toDouble())
+    }
+
+    fun setBaseline(device: String, value: Baseline) {
+        sp.edit()
+            .putFloat("base_speech_$device", value.speech.toFloat())
+            .putFloat("base_snr_$device", value.snr.toFloat())
+            .apply()
+    }
+
     val isConfigured: Boolean get() = server.isNotBlank() && token.isNotBlank()
 
     /**

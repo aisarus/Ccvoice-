@@ -18,6 +18,23 @@
             android:textStyle="bold"
             android:layout_marginBottom="16dp" />
 
+        <!-- Готовность: человек не должен гадать, почему не работает. -->
+        <TextView
+            android:id="@+id/ready"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:text="проверяю готовность…" />
+
+        <LinearLayout
+            android:id="@+id/readiness"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="16dp" />
+
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -169,6 +186,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:text="микрофон: гарнитура" />
+
+        <Button
+            android:id="@+id/acoustics"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="признаки говорящего: вкл" />
 
         <Button
             android:id="@+id/battery"
