@@ -24,7 +24,7 @@ from websockets.datastructures import Headers
 from websockets.http11 import Response
 
 from . import (checkpoints, formatter, glossary, learning, memory, policy, state,
-               stress, tasks, watcher)
+               stress, tasks, telegram, watcher)
 from .ambient import AmbientBuffer, RateLimiter, WhisperGate
 from .auth import (SetupError, SetupTokenFlow, apply_token, credential_kind,
                    credential_problem, forget_cli_probe, github_ready, persist_token,
@@ -685,6 +685,10 @@ class Daemon:
         """
         if await self._handle_queue_command(ws, text):
             return True
+        wanted = telegram.share_request(text)
+        if wanted is not None:
+            await self._share(wanted)
+            return True
         if checkpoints.matches(text, checkpoints.UNDO_PHRASES):
             await self._undo()
             return True
@@ -733,6 +737,85 @@ class Daemon:
         # надо прикрыть, и замок на сессию действует тот же.
         await self._speak_turn(ws, Route(target, "corrected", 1.0, said), self._preamble(),
                                self.classifier.role_line(decision, device))
+
+    # -- мост в telegram --------------------------------------------------
+    async def _share(self, wanted: str) -> None:
+        """«Скинь мне в телегу» — файл уезжает в один заранее заданный чат.
+
+        Ни адресата, ни путь голосом задать нельзя: рядом могут говорить
+        другие, а мост, слушающийся любого, — это способ вынести файлы из
+        машины чужими руками.
+        """
+        bridge = telegram.Bridge()
+        if not bridge.ready:
+            await self._say("Телеграм не настроен. На сервере: "
+                            "bash scripts/setup-telegram.sh")
+            return
+
+        workspace = Path(self.targets.code.workspace)
+        files = self._files_to_share(wanted, workspace)
+
+        if not files:
+            # Файла не нашлось — но сказанному обычно предшествовал ответ,
+            # и человек чаще всего хочет именно его.
+            text = self._last_output.get("code") or self._last_output.get("chat") or ""
+            if not text:
+                await self._say("Не понял, что отправить.")
+                return
+            problem = await asyncio.to_thread(bridge.send_text, text)
+            await self._say("Отправил в телеграм." if problem is None
+                            else f"Не отправил: {problem}")
+            return
+
+        ушли, отказы = [], []
+        for path in files:
+            причина = telegram.refuse_reason(path, workspace)
+            if причина:
+                отказы.append(f"{path.name}: {причина}")
+                continue
+            problem = await asyncio.to_thread(bridge.send_document, path, path.name)
+            (ушли if problem is None else отказы).append(
+                path.name if problem is None else f"{path.name}: {problem}")
+
+        сказать = []
+        if ушли:
+            сказать.append("Отправил: " + ", ".join(ушли[:3])
+                           + (f" и ещё {len(ушли) - 3}" if len(ушли) > 3 else ""))
+        if отказы:
+            сказать.append("Не отправил — " + "; ".join(отказы[:2]))
+        await self._say(". ".join(сказать) or "Нечего отправлять.")
+
+    def _files_to_share(self, wanted: str, workspace: Path) -> list[Path]:
+        """Что именно человек просит: названное или то, что только что менялось."""
+        if wanted:
+            корень = wanted.lower().strip(" .,")
+            кандидаты: list[Path] = []
+            for path in workspace.rglob("*"):
+                if not path.is_file():
+                    continue
+                части = path.relative_to(workspace).parts
+                if any(p.startswith(".") or p in ("node_modules", "__pycache__")
+                       for p in части):
+                    continue
+                кандидаты.append(path)
+                if len(кандидаты) >= 500:       # большой проект целиком не нужен
+                    break
+            точные = [p for p in кандидаты
+                      if корень in p.name.lower() or корень in p.stem.lower()]
+            if точные:
+                return точные[:5]
+            # Он говорит «конфиг», а файл называется config.json.
+            похожее = telegram.best_match(корень, [p.name for p in кандидаты])
+            if похожее:
+                return [p for p in кандидаты if p.name == похожее][:1]
+        point = self.journal.last()
+        if point is None or not checkpoints.is_repo(workspace):
+            return []
+        try:
+            имена = checkpoints.changed_files(workspace, point.before, point.after)
+        except (RuntimeError, OSError):
+            return []
+        return [workspace / name for name in имена][:5]
 
     # -- очередь фоновых задач -------------------------------------------
     async def _handle_queue_command(self, ws: Any, text: str) -> bool:

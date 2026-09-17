@@ -133,10 +133,16 @@ def reset_to(workspace: str | Path, commit: str) -> None:
     _git(Path(workspace), "reset", "--hard", commit)
 
 
+def changed_files(workspace: str | Path, before: str, after: str) -> list[str]:
+    """Что менялось между точками — путями от корня проекта."""
+    return [line for line in
+            _git(Path(workspace), "diff", "--name-only", f"{before}..{after}").splitlines()
+            if line]
+
+
 def summary(workspace: str | Path, before: str, after: str) -> str:
     """Человеческое описание изменения: «auth.ts и ещё два файла»."""
-    files = [line for line in
-             _git(Path(workspace), "diff", "--name-only", f"{before}..{after}").splitlines() if line]
+    files = changed_files(workspace, before, after)
     if not files:
         return "без изменений в файлах"
     names = [Path(f).name for f in files]
