@@ -11,13 +11,18 @@ import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.os.Bundle
+import android.speech.tts.TextToSpeech
+import android.view.Gravity
+import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.Spinner
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 
 /** Ввод один раз: адрес и токен. Дальше всё живёт в фоновой службе. */
@@ -30,9 +35,15 @@ class MainActivity : AppCompatActivity() {
     private var authUrl: String? = null
     private var voices: List<String> = emptyList()
     private var engines: List<Pair<String, String>> = emptyList()   // подпись -> пакет
+    /** Пока служба молчит, состояние связи неизвестно — так и говорим. */
+    private var link = LinkState.UNKNOWN
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            intent?.getStringExtra(VoiceService.EXTRA_LINK)?.let { name ->
+                link = runCatching { LinkState.valueOf(name) }.getOrDefault(LinkState.UNKNOWN)
+                paintReadiness()
+            }
             intent?.getStringArrayListExtra(VoiceService.EXTRA_ENGINES)?.let { raw ->
                 engines = raw.map { it.split('\u0000').let { parts -> parts[0] to parts.getOrElse(1) { "" } } }
                 val spinner = findViewById<Spinner>(R.id.engine)
@@ -153,16 +164,7 @@ class MainActivity : AppCompatActivity() {
             )
             status.text = "движок: ${engine.first}"
         }
-        findViewById<Button>(R.id.engineInstall).setOnClickListener {
-            runCatching {
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://search?q=RHVoice")))
-            }.onFailure {
-                startActivity(
-                    Intent(Intent.ACTION_VIEW,
-                        Uri.parse("https://play.google.com/store/search?q=RHVoice"))
-                )
-            }
-        }
+        findViewById<Button>(R.id.engineInstall).setOnClickListener { installVoiceEngine() }
 
         // Голос синтеза: список того, что есть в системе, с примером на слух.
         findViewById<Button>(R.id.voiceList).setOnClickListener {
@@ -181,6 +183,22 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.battery).setOnClickListener { askForBackgroundFreedom() }
+
+        // Признаки говорящего: если на этой трубке шкала громкости врёт,
+        // выключатель возвращает прежнее поведение одним нажатием.
+        val acoustics = findViewById<Button>(R.id.acoustics)
+        fun paintAcoustics() {
+            acoustics.text =
+                if (prefs.acoustics) "признаки говорящего: вкл" else "признаки говорящего: выкл"
+        }
+        paintAcoustics()
+        acoustics.setOnClickListener {
+            prefs.acoustics = !prefs.acoustics
+            paintAcoustics()
+            startService(
+                Intent(this, VoiceService::class.java).setAction(VoiceService.ACTION_ACOUSTICS)
+            )
+        }
 
         // Токен уже есть — вставить и сохранить, без OAuth-хождений.
         findViewById<Button>(R.id.authSave).setOnClickListener {
@@ -224,18 +242,150 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.stop).setOnClickListener {
             stopService(Intent(this, VoiceService::class.java))
+            link = LinkState.UNKNOWN
             status.text = "служба остановлена"
+            paintReadiness()
         }
+
+        paintReadiness()
     }
 
     override fun onRequestPermissionsResult(
         requestCode: Int, permissions: Array<out String>, grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        paintReadiness()
+        // Запрос из строки готовности — просто перерисовать; службу оттуда
+        // поднимать рано, у неё своя строка и своя кнопка.
+        if (requestCode != 1) return
         val micIndex = permissions.indexOf(Manifest.permission.RECORD_AUDIO)
         val micGranted = micIndex < 0 ||
             grantResults.getOrNull(micIndex) == PackageManager.PERMISSION_GRANTED
         if (micGranted) launchService() else status.text = "без микрофона работать не смогу"
+    }
+
+    /**
+     * Проверка готовности: пять строк вместо гадания.
+     *
+     * Разрешение выдано, но служба спит; уведомления выключены, и система
+     * гасит службу; адрес верный, но демон не запущен — снаружи всё это
+     * выглядит одинаково «не работает». Строки перерисовываются при каждом
+     * возврате на экран и при каждой смене состояния связи.
+     */
+    private fun paintReadiness() {
+        val box = findViewById<LinearLayout>(R.id.readiness) ?: return
+        val checks = Readiness.checks(
+            mic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED,
+            notifications = runCatching {
+                NotificationManagerCompat.from(this).areNotificationsEnabled()
+            }.getOrDefault(true),
+            background = runCatching {
+                getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)
+            }.getOrDefault(true),
+            engine = prefs.engine,
+            engines = ttsEngines(),
+            link = if (prefs.isConfigured) link else LinkState.OFF,
+        )
+        findViewById<TextView>(R.id.ready).text = Readiness.summary(checks)
+        box.removeAllViews()
+        for (check in checks) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            row.addView(TextView(this).apply {
+                text = Readiness.line(check)
+                textSize = 13f
+                layoutParams = LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+                )
+            })
+            val label = check.fix
+            if (label != null) {
+                row.addView(Button(this).apply {
+                    text = label
+                    textSize = 12f
+                    setOnClickListener { fix(check.id) }
+                })
+            }
+            box.addView(row, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+        }
+    }
+
+    /** Что стоит в системе и умеет говорить. */
+    private fun ttsEngines(): List<String> = runCatching {
+        packageManager
+            .queryIntentServices(Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE), 0)
+            .map { it.serviceInfo.packageName }
+    }.getOrDefault(emptyList())
+
+    /** Кнопка напротив строки готовности: одно нажатие — один шаг починки. */
+    private fun fix(id: String) {
+        when (id) {
+            Readiness.MIC -> requestPermissions()
+            Readiness.NOTIFY -> askForNotifications()
+            Readiness.BACKGROUND -> askForBackgroundFreedom()
+            // Ставить нечего — сначала магазин; есть из чего выбрать — список.
+            Readiness.VOICE -> if (ttsEngines().isEmpty()) installVoiceEngine() else {
+                startService(
+                    Intent(this, VoiceService::class.java).setAction(VoiceService.ACTION_ENGINES)
+                )
+                status.text = "движки ниже — выбери и нажми «использовать выбранный»"
+            }
+            Readiness.LINK -> when (link) {
+                // Сеть не чинится из приложения — открываем то место, где чинится.
+                LinkState.NO_NETWORK -> runCatching {
+                    startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS))
+                }
+                LinkState.UNKNOWN -> launchService()
+                else -> {
+                    startService(
+                        Intent(this, VoiceService::class.java)
+                            .setAction(VoiceService.ACTION_RECONNECT)
+                    )
+                    status.text = "пробую связаться заново"
+                }
+            }
+        }
+    }
+
+    /** RHVoice ставится отдельным приложением; без магазина — ссылкой в браузер. */
+    private fun installVoiceEngine() {
+        runCatching {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://search?q=RHVoice")))
+        }.onFailure {
+            runCatching {
+                startActivity(
+                    Intent(Intent.ACTION_VIEW,
+                        Uri.parse("https://play.google.com/store/search?q=RHVoice"))
+                )
+            }
+        }
+    }
+
+    /**
+     * Уведомления выключают не только запретом разрешения: на Android 12 и
+     * старше их гасят в настройках приложения, и спросить оттуда нечего.
+     */
+    private fun askForNotifications() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(
+                this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2
+            )
+            return
+        }
+        runCatching {
+            startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    .setData(Uri.parse("package:$packageName"))
+            )
+        }
     }
 
     /** Без этого Samsung усыпляет службу через несколько минут после выключения экрана. */
@@ -270,6 +420,9 @@ class MainActivity : AppCompatActivity() {
             @Suppress("UnspecifiedRegisterReceiverFlag")
             registerReceiver(statusReceiver, filter)
         }
+        // Вернулись из системных настроек — то, что там разрешили, должно быть
+        // видно сразу, а не после перезапуска приложения.
+        paintReadiness()
     }
 
     override fun onStop() {
