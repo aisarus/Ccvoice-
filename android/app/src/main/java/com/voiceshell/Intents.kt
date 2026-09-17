@@ -21,6 +21,8 @@ object Intents {
     private val NOT_WAKE = setOf("код", "чат", "кот", "что", "как", "код?")
     private val STOP_WORK = listOf(
         "стоп работу", "стоп работа", "останови работу", "останови", "прекрати",
+        // Про работу сказано прямо — это остановка, а не откат.
+        "отмени работу", "отмена работы",
         "stop working", "stop the work", "abort", "cancel"
     )
 

@@ -70,6 +70,9 @@ class IntentsTest {
         assertEquals("work", Intents.stopIntent("останови работу"))
         assertEquals("work", Intents.stopIntent("прекрати"))
         assertEquals("voice", Intents.stopIntent("стоп"))
+        // Про работу сказано прямо — откатывать нечего, надо останавливать.
+        assertEquals("work", Intents.stopIntent("отмени работу"))
+        assertEquals("work", Intents.stopIntent("отмена работы"))
     }
 
     @Test
