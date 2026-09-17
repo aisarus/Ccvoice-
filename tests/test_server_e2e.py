@@ -117,6 +117,24 @@ def test_telemetry_keeps_features_but_no_audio(tmp_path):
     assert not any("audio" in key or "pcm" in key for key in record)
 
 
+def test_headset_channel_switches_to_the_narrowband_profile(tmp_path):
+    """Про узкую полосу знает только телефон — и обязан о ней сказать."""
+    daemon, _ = run(
+        [segment("посмотри логи", MASTER, device="sony_mic", narrowband=True)],
+        tmp_path / "inbox.md",
+    )
+    assert daemon.telemetry[0]["profile"] == "narrowband"
+
+
+def test_phone_mic_keeps_the_full_band_profile(tmp_path):
+    """Без флага полосы профиль остаётся обычным, даже на гарнитуре."""
+    daemon, _ = run(
+        [segment("посмотри логи", MASTER, device="sony_mic")],
+        tmp_path / "inbox.md",
+    )
+    assert daemon.telemetry[0]["profile"] != "narrowband"
+
+
 def test_ambient_control_switches_and_wipes(tmp_path):
     async def flow():
         settings = Settings(workspace=".", token="t", note_path=str(tmp_path / "i.md"))

@@ -149,6 +149,18 @@ def consistency_check(spec, errors):
     if not spec["audio"]["capture"]["aec"]["enabled"]:
         errors.append("audio.capture.aec must be enabled: TTS echo would be read as speech")
 
+    # 12a. Raising the headset channel is a narrowband decision, and a capture
+    # stream that is not reopened keeps listening to the device it started on.
+    hfp = spec["audio"]["routing"]["bluetooth_profiles"].get("hfp_for_input")
+    if hfp and hfp["enabled_by_default"]:
+        profiles = {p["id"] for p in spec["speaker_identification"]["scoring"]["weight_profiles"]}
+        if hfp["weights_profile"] not in profiles:
+            errors.append("hfp_for_input.weights_profile %r is not a declared weight profile"
+                          % hfp["weights_profile"])
+        if not hfp["restart_capture_on_route_change"]:
+            errors.append("hfp_for_input must restart capture on a route change: an open "
+                          "stream stays on the device it was opened with")
+
 
     # 13. Routing targets: ids unique, exactly one default, and it is non-mutating.
     targets = spec["targets"]["list"]

@@ -29,6 +29,16 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("mute", false)
         set(value) = sp.edit().putBoolean("mute", value).apply()
 
+    /**
+     * Слушать микрофоном bluetooth-гарнитуры, а не телефона.
+     *
+     * По умолчанию включено: надел гарнитуру — говоришь в неё. Выключается,
+     * если конкретная гарнитура ведёт себя плохо на своём канале связи.
+     */
+    var btMic: Boolean
+        get() = sp.getBoolean("bt_mic", true)
+        set(value) = sp.edit().putBoolean("bt_mic", value).apply()
+
     /** Движок синтеза (пакет приложения); пусто — системный по умолчанию. */
     var engine: String
         get() = sp.getString("engine", "") ?: ""

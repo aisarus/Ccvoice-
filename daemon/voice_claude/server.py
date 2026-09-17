@@ -351,6 +351,9 @@ class Daemon:
         )
         ctx = SegmentContext(
             device=msg.get("device", "phone_mic"),
+            # Полосу слышит только клиент: канал гарнитуры узкополосный,
+            # и на нём часть признаков просто не измерить.
+            narrowband=bool(msg.get("narrowband", False)),
             duration_ms=int(msg.get("duration_ms", 1200)),
             voiced_frames=int(msg.get("voiced_frames", 40)),
             overlap=bool(msg.get("overlap", False)),

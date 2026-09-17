@@ -31,6 +31,13 @@ crash=$(adb logcat -d -b crash || true)
 [ -z "$crash" ] || fail "служба упала" echo "$crash"
 [ -n "$(adb shell pidof $PKG | tr -d '\r')" ] || fail "процесс умер после запуска службы" adb logcat -d -t 200
 
+echo "== маршрут микрофона =="
+# На эмуляторе гарнитуры нет, но строку о выбранном микрофоне служба обязана
+# сказать: если её нет, разбор устройств упал молча.
+mic=$(adb logcat -d -s VoiceShell:I | grep -o 'микрофон:.*' | tail -1 || true)
+[ -n "$mic" ] || fail "служба не сказала, куда смотрит микрофон" adb logcat -d -s VoiceShell:*
+echo "$mic"
+
 echo "== что сказала служба =="
 adb logcat -d -s VoiceShell:* | tail -20 || true
 

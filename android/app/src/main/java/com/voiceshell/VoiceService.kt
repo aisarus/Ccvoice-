@@ -54,6 +54,7 @@ class VoiceService : Service() {
         const val ACTION_AUTH_START = "com.voiceshell.AUTH_START"
         const val ACTION_AUTH_CODE = "com.voiceshell.AUTH_CODE"
         const val ACTION_SAY = "com.voiceshell.SAY"
+        const val ACTION_MIC = "com.voiceshell.MIC"
         const val ACTION_AUTH_SET = "com.voiceshell.AUTH_SET"
         const val ACTION_VOICES = "com.voiceshell.VOICES"
         const val ACTION_ENGINES = "com.voiceshell.ENGINES"
@@ -80,6 +81,7 @@ class VoiceService : Service() {
     private var session: MediaSessionCompat? = null
     private var cloud: SpeechRecognizer? = null
     private var wake: WakeWordEngine? = null
+    private var route: AudioRoute? = null
 
     private var speaking = false
     private var awaitingCommand = false
@@ -122,6 +124,16 @@ class VoiceService : Service() {
             return
         }
 
+        // Маршрут поднимаем до wake word: поток записи не переезжает на другое
+        // устройство сам, и открывать его надо уже на нужном микрофоне.
+        route = AudioRoute(
+            this,
+            onChanged = { why -> main.post { onRouteChanged(why) } },
+            log = { line -> report(line) }
+        )
+        runCatching { route?.start(prefs.btMic) }
+        report(route?.describe().orEmpty().ifBlank { "микрофон: телефон" })
+
         Thread { prepareWakeWord() }.start()
     }
 
@@ -129,6 +141,10 @@ class VoiceService : Service() {
         when (intent?.action) {
             ACTION_STOP -> { stopSelf(); return START_NOT_STICKY }
             ACTION_LISTEN -> armWindow()
+            ACTION_MIC -> {
+                route?.enable(prefs.btMic)
+                report(route?.describe().orEmpty().ifBlank { "микрофон: телефон" })
+            }
             ACTION_SAY -> {
                 val text = intent.getStringExtra(EXTRA_TEXT).orEmpty().trim()
                 if (text.isNotEmpty()) deliver(text)
@@ -174,7 +190,7 @@ class VoiceService : Service() {
                         "en-US" to "Done. All forty seven tests pass.",
                         "he-IL" to "מוכן. כל הבדיקות עוברות."
                     )[prefs.language].orEmpty()
-                    tts?.speak(sample, TextToSpeech.QUEUE_FLUSH, null, "voice-shell-sample")
+                    tts?.speak(sample, TextToSpeech.QUEUE_FLUSH, speechParams(), "voice-shell-sample")
                 }
             }
             ACTION_AUTH_SET -> {
@@ -200,6 +216,7 @@ class VoiceService : Service() {
     }
 
     override fun onDestroy() {
+        runCatching { route?.release() }
         runCatching { wake?.release() }
         runCatching { cloud?.destroy() }
         runCatching { tts?.shutdown() }
@@ -228,6 +245,17 @@ class VoiceService : Service() {
             wakeReady = false
             report("wake word недоступен (${t.javaClass.simpleName}) — начинай реплику кнопкой")
         }
+    }
+
+    /**
+     * Маршрут микрофона сменился: гарнитуру надели, сняли или канал переоткрыли.
+     * Уже открытый поток записи остался на старом устройстве — перезапускаем.
+     */
+    private fun onRouteChanged(why: String) {
+        Log.i(TAG, "маршрут: $why")
+        if (!wakeReady || speaking || awaitingCommand) return
+        runCatching { wake?.stop() }
+        resumeWake()
     }
 
     // ---------- разбор реплики ----------
@@ -286,7 +314,10 @@ class VoiceService : Service() {
                 .put("id", "speech_segment")
                 .put("segment_id", System.currentTimeMillis().toString())
                 .put("transcript", payload)
-                .put("device", "phone_mic")
+                // Демон не может услышать, по какому каналу пришёл звук: на
+                // канале гарнитуры полоса узкая и часть признаков не измерить.
+                .put("device", if (route?.onBluetoothMic == true) "sony_mic" else "phone_mic")
+                .put("narrowband", route?.onBluetoothMic == true)
                 .put("duration_ms", 1200)
                 .put("voiced_frames", 40)
                 .put("role", "master")
@@ -460,7 +491,7 @@ class VoiceService : Service() {
     }
 
     /** Играет ли звук в наушники — тогда микрофон его не услышит. */
-    private fun onHeadphones(): Boolean = runCatching {
+    private fun onHeadphones(): Boolean = route?.onBluetoothMic == true || runCatching {
         getSystemService(AudioManager::class.java)
             .getDevices(AudioManager.GET_DEVICES_OUTPUTS)
             .any {
@@ -472,6 +503,19 @@ class VoiceService : Service() {
             }
     }.getOrDefault(false)
 
+    /**
+     * Канал гарнитуры — это канал разговора. Если говорить в музыкальный поток,
+     * пока он поднят, голос уедет в динамик телефона: и эхо, и разбуженные
+     * соседи. Поэтому поток выбираем по тому, где сейчас микрофон.
+     */
+    private fun speechParams(): Bundle = Bundle().apply {
+        putInt(
+            TextToSpeech.Engine.KEY_PARAM_STREAM,
+            if (route?.onBluetoothMic == true) AudioManager.STREAM_VOICE_CALL
+            else AudioManager.STREAM_MUSIC
+        )
+    }
+
     private fun speak(text: String) {
         if (text.isBlank() || prefs.mute) return
         lastSpoken = Intents.normalise(text)
@@ -481,7 +525,7 @@ class VoiceService : Service() {
         if (!onHeadphones()) runCatching { wake?.stop() }
         runCatching {
             applyVoice(Intents.scriptLanguage(text, prefs.language))
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "voice-shell")
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, speechParams(), "voice-shell")
         }
     }
 
@@ -503,7 +547,7 @@ class VoiceService : Service() {
                 webSocket.send(
                     JSONObject().put("id", "hello").put("v", 1)
                         .put("token", prefs.token).put("device_id", "android")
-                        .put("app_version", "0.3.0").toString()
+                        .put("app_version", "0.4.0").toString()
                 )
                 report("подключено")
             }
@@ -620,6 +664,7 @@ class VoiceService : Service() {
     }
 
     private fun report(text: String) {
+        Log.i(TAG, text)
         main.post {
             runCatching {
                 getSystemService(NotificationManager::class.java)
