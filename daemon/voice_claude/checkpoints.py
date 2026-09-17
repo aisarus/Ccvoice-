@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import time
 from dataclasses import asdict, dataclass
@@ -44,8 +45,11 @@ class Checkpoint:
 
 
 def _git(workspace: Path, *args: str, check: bool = True) -> str:
+    # `core.quotePath=false` — иначе git отдаёт нелатинские имена файлов
+    # восьмеричными escape-последовательностями, и «Откатил файл.txt»
+    # превращалось в «Откатил слэш триста двадцать...» прямо в ухо.
     result = subprocess.run(
-        ["git", "-C", str(workspace), *args],
+        ["git", "-C", str(workspace), "-c", "core.quotePath=false", *args],
         capture_output=True, text=True, timeout=30,
     )
     if check and result.returncode != 0:
@@ -88,7 +92,13 @@ def ensure_ignored(workspace: str | Path) -> None:
 
 
 def head(workspace: str | Path) -> str:
-    return _git(Path(workspace), "rev-parse", "HEAD")
+    """Текущий коммит; пустая строка — в репозитории ещё нет ни одного.
+
+    Свежий `git init` — обычное начало проекта, и раньше он валил всю реплику:
+    `rev-parse HEAD` там падает, а исключение улетало мимо обработчика ошибок,
+    и в ухо не приходило вообще ничего.
+    """
+    return _git(Path(workspace), "rev-parse", "--verify", "--quiet", "HEAD", check=False)
 
 
 def has_changes(workspace: str | Path) -> bool:
@@ -100,7 +110,13 @@ def commit_all(workspace: str | Path, message: str) -> str | None:
     path = Path(workspace)
     if not has_changes(path):
         return None
-    _git(path, "add", "-A", "--", ".", *OURS)
+    # Без pathspec: `git add` с отрицательным pathspec падает целиком, если
+    # названный в нём каталог вдобавок лежит в списке игнорируемых, — а мы сами
+    # кладём туда `.voice-shell/`. На живом прогоне это значило, что первая
+    # правка коммитилась, а все следующие — уже нет, и «откати последнее»
+    # отвечало «я ничего не менял» после того, как Claude переписал три файла.
+    _git(path, "add", "-A", "--", ".")
+    _git(path, "reset", "--quiet", "--", STATE_DIR, check=False)
     _git(path, "-c", "user.name=Voice Shell", "-c", "user.email=voice@shell.local",
          "commit", "-m", message, "--no-verify")
     return head(path)
@@ -168,7 +184,20 @@ class Journal:
         return list(reversed(self._items[-limit:]))
 
 
+# Обращение и слова-затравки в начале — часть команды, а не её отмена.
+OPENERS = ("клод", "клауд", "слушай", "эй", "окей", "ок", "а", "ну", "и", "так",
+           "давай", "пожалуйста")
+
+
 def matches(text: str, phrases: tuple[str, ...]) -> bool:
-    lowered = " ".join(text.lower().replace(",", " ").split())
-    return any(lowered == phrase or lowered.startswith(phrase + " ") or phrase in lowered
-               for phrase in phrases)
+    """Команда ли это оболочке.
+
+    Раньше искалась подстрока по всей реплике, и вопрос «а это можно
+    откатить?» делал настоящий откат. Команда должна стоять в начале — после
+    обращения, но не после рассуждения о ней.
+    """
+    words = re.sub(r"[^\w\s]", " ", text.lower()).split()
+    while words and words[0] in OPENERS:
+        words.pop(0)
+    lowered = " ".join(words)
+    return any(lowered == phrase or lowered.startswith(phrase + " ") for phrase in phrases)
