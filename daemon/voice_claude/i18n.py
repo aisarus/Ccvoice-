@@ -346,6 +346,42 @@ PHRASES: dict[str, dict[str, str]] = {
         "en": "someone else", "ru": "собеседник",
         "es": "otra persona", "zh": "旁人",
     },
+    # -- второе ухо ---------------------------------------------------------
+    "ambient.on": {
+        "en": "Second ear is open. I'm listening to what's around and will retell it "
+              "when you ask. Recording other people needs their consent.",
+        "ru": "Второе ухо открыто. Слушаю, что вокруг, и перескажу, когда спросишь. "
+              "Запись чужой речи требует согласия собеседников.",
+        "es": "Segundo oído abierto. Escucho lo que hay alrededor y te lo cuento cuando "
+              "preguntes. Grabar a otras personas necesita su consentimiento.",
+        "zh": "第二只耳朵开了。我听着周围，你问我就转述。录别人说的话需要对方同意。",
+    },
+    "ambient.off": {
+        "en": "Second ear is closed, and what it heard is wiped.",
+        "ru": "Второе ухо закрыто, услышанное стёрто.",
+        "es": "Segundo oído cerrado, y lo que oyó está borrado.",
+        "zh": "第二只耳朵关了，听到的内容也清掉了。",
+    },
+    "ambient.already_on": {
+        "en": "Second ear is already open.", "ru": "Второе ухо и так открыто.",
+        "es": "El segundo oído ya está abierto.", "zh": "第二只耳朵已经开着了。",
+    },
+    "ambient.already_off": {
+        "en": "Second ear wasn't open.", "ru": "Второе ухо и не было открыто.",
+        "es": "El segundo oído no estaba abierto.", "zh": "第二只耳朵本来就没开。",
+    },
+    "ambient.nothing_heard": {
+        "en": "I haven't heard anything around yet.",
+        "ru": "Вокруг я пока ничего не слышал.",
+        "es": "Todavía no he oído nada alrededor.",
+        "zh": "我还没听到周围有什么。",
+    },
+    "ambient.closed": {
+        "en": "Second ear is closed — say «second ear» and I'll listen.",
+        "ru": "Второе ухо закрыто — скажи «второе ухо», и я буду слушать.",
+        "es": "El segundo oído está cerrado — di «segundo oído» y escucho.",
+        "zh": "第二只耳朵关着——说「第二只耳朵」，我就开始听。",
+    },
     "glossary.hint": {
         "en": "[glossary] names that occur in this project: {terms}. If something "
               "in the utterance sounds like one of these names, assume it was meant.",

@@ -1342,7 +1342,9 @@
         "о чём мы договорились",
         "как его зовут"
       ],
-      "answer_style": "whisper_output"
+      "answer_style": "whisper_output",
+      "when_closed": "answered by the shell itself, without waking Claude: a question about a buffer that does not exist costs a round trip to be told so",
+      "when_empty": "same — «I haven't heard anything around yet»"
     },
     "proactive": {
       "enabled_in": [
@@ -1417,6 +1419,13 @@
     "battery_budget": {
       "passive_mode_max_drain_pct_per_hour": 8,
       "strategy": "VAD и wake на DSP/NNAPI, STT пакетно на ПК, экран выключен"
+    },
+    "voice_control": {
+      "on": "«второе ухо» · «second ear» · «слушай вокруг» · «listen around»",
+      "off": "«выключи второе ухо» · «turn off the second ear» · «хватит слушать вокруг»",
+      "effect_on": "submode passive + bystander_transcript on, in one command: opening the ear without the bystander opt-in would only accumulate silence",
+      "effect_off": "submode off, which wipes the buffer",
+      "consent": "the spoken confirmation names consent once, when the ear opens"
     }
   },
   "discreet_input": {
@@ -2004,7 +2013,8 @@
           "transcript": "string?",
           "alternatives": "array<string>? — прочие гипотезы распознавателя, подсказкой, без переписывания реплики",
           "weight_profile": "acoustic_only|with_voiceprint|narrowband",
-          "reply_language": "optional — same meaning as in hello, carried per utterance so a reconnect cannot lose the pin"
+          "reply_language": "optional — same meaning as in hello, carried per utterance so a reconnect cannot lose the pin",
+          "ambient": "bool — overheard, not addressed to the shell. Such an utterance goes into the ambient buffer and nowhere else: it is never routed and never executed. Who spoke is a question of acoustics and the classifier can get it wrong; who it was addressed to is a fact, and the phone knows it."
         }
       },
       {

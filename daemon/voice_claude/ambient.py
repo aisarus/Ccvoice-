@@ -13,9 +13,13 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from . import lexicon
 from .i18n import t
 from .spec import defaults, section
 
+#: Вопросы к буферу живут в lexicon рядом с остальными командами: их четыре
+#: языка, и слушаем мы все сразу. Прежние регулярки остаются — они ловят
+#: падежи и порядок слов, которых перечислением не покрыть.
 RECALL_PATTERNS = (
     r"что (он|она|они|ты)?\s*\S*\s*(сказал|говорил|назвал)",
     r"повтори (последнее|что было)",
@@ -110,8 +114,20 @@ class AmbientBuffer:
 
     @staticmethod
     def is_recall(text: str) -> bool:
-        lowered = re.sub(r"[^\w\s]", " ", text.lower())
-        return any(re.search(pattern, lowered) for pattern in RECALL_PATTERNS)
+        lowered = lexicon.normalise(text)
+        if any(re.search(pattern, lowered) for pattern in RECALL_PATTERNS):
+            return True
+        return lexicon.contains(text, lexicon.every("ambient_recall"))
+
+    def overhear(self, text: str, confidence: float = 1.0) -> bool:
+        """Услышанное вокруг: попадает в буфер и больше никуда.
+
+        Отдельно от `add` нарочно. Реплика, которую человек не адресовал
+        оболочке, не должна пройти ни маршрутизацию, ни тем более исполнение:
+        классификатор говорящего ошибается, а цена ошибки здесь — выполненное
+        действие по чужой фразе из соседнего разговора.
+        """
+        return self.add("bystander", text, confidence)
 
 
 class WhisperGate:

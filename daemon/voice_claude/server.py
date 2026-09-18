@@ -23,8 +23,8 @@ from urllib.parse import parse_qs, urlsplit
 from websockets.datastructures import Headers
 from websockets.http11 import Response
 
-from . import (checkpoints, formatter, glossary, i18n, learning, memory, policy,
-               state, stress, tasks, telegram, watcher)
+from . import (checkpoints, formatter, glossary, i18n, learning, lexicon, memory,
+               policy, state, stress, tasks, telegram, watcher)
 from .ambient import AmbientBuffer, RateLimiter, WhisperGate
 from .auth import (SetupError, SetupTokenFlow, apply_token, credential_kind,
                    credential_problem, forget_cli_probe, github_ready, persist_token,
@@ -327,7 +327,22 @@ class Daemon:
 
         if decision.role == "self_echo" or not text:
             return
-        self.ambient.add(decision.role, text, decision.confidence)
+
+        # Услышанное вокруг — только в буфер, и дальше ни шагу.
+        #
+        # Телефон помечает так реплики, которых человек оболочке не
+        # адресовал. Полагаться здесь на классификатор говорящего нельзя: он
+        # ошибается, а цена ошибки — исполненное действие по чужой фразе из
+        # соседнего разговора. Кто сказал — вопрос акустики, а кому сказали —
+        # вопрос факта, и факт нам присылают.
+        if msg.get("ambient"):
+            self.ambient.overhear(text, decision.confidence)
+            return
+
+        # Вопрос к буферу в буфер не кладём: он ничего не говорит об
+        # окружающем мире и только засоряет то, что прочтёт Claude.
+        if not AmbientBuffer.is_recall(text):
+            self.ambient.add(decision.role, text, decision.confidence)
 
         if self._pending:
             await self._answer_permission_by_voice(ws, text, decision)
@@ -373,8 +388,19 @@ class Daemon:
         alternatives = self._alternatives_hint(msg)
         if alternatives:
             role_line += "\n" + alternatives
-        if route.target == "chat" and AmbientBuffer.is_recall(text) and self.ambient.enabled:
-            role_line += "\n" + i18n.t("ambient.transcript_header") + "\n" + self.ambient.transcript()
+        if route.target == "chat" and AmbientBuffer.is_recall(text):
+            # Вопрос к буферу без буфера — это не повод будить Claude: он
+            # честно ответит, что ничего не слышал, потратив круг и секунды.
+            if not self.ambient.enabled:
+                await self._say(i18n.t("ambient.closed"), "chat")
+                await self._finish_turn()
+                return
+            transcript = self.ambient.transcript()
+            if not transcript:
+                await self._say(i18n.t("ambient.nothing_heard"), "chat")
+                await self._finish_turn()
+                return
+            role_line += "\n" + i18n.t("ambient.transcript_header") + "\n" + transcript
 
         await self._speak_turn(ws, route, preamble, role_line)
 
@@ -776,6 +802,12 @@ class Daemon:
         if wanted is not None:
             await self._share(wanted)
             return True
+        if lexicon.starts_with(text, lexicon.every("second_ear_off")):
+            await self._second_ear(False)
+            return True
+        if lexicon.starts_with(text, lexicon.every("second_ear_on")):
+            await self._second_ear(True)
+            return True
         if checkpoints.matches(text, checkpoints.UNDO_PHRASES):
             await self._undo()
             return True
@@ -804,6 +836,25 @@ class Daemon:
             await self._say(spoken, "chat")
             return True
         return False
+
+    async def _second_ear(self, wanted: bool) -> None:
+        """«Клод, второе ухо» — слушать, что вокруг, и пересказывать по просьбе.
+
+        Чужая речь в буфер по умолчанию не попадает: это отдельный опт-ин в
+        спеке, и открыть ухо, не открыв его, значило бы копить пустоту.
+        Поэтому команда включает и то, и другое разом, а вслух напоминает
+        про согласие собеседников — один раз, при открытии.
+        """
+        if wanted == self.ambient.enabled:
+            await self._say(i18n.t("ambient.already_on" if wanted else "ambient.already_off"),
+                            "chat")
+            return
+        self.ambient.set_submode("passive" if wanted else "off")
+        self.ambient.set_bystander_transcript(wanted)
+        await self._broadcast({"id": "ambient_control", "submode": self.ambient.submode,
+                               "bystander_transcript": self.ambient.bystander_transcript,
+                               "lines": len(self.ambient.lines())})
+        await self._say(i18n.t("ambient.on" if wanted else "ambient.off"), "chat")
 
     async def _reroute(self, ws: Any, text: str, decision: Decision, device: str) -> None:
         """«Не туда»: переслать прошлую реплику в другую цель и запомнить урок."""

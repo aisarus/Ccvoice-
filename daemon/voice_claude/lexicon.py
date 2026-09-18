@@ -125,6 +125,43 @@ PHRASES: dict[str, dict[str, tuple[str, ...]]] = {
                "olvida la tarea"),
         "zh": ("取消任务", "别做那个任务", "删掉任务"),
     },
+    # «Второе ухо»: слушать, что говорят вокруг, и пересказывать по просьбе.
+    "second_ear_on": {
+        "en": ("second ear", "turn on the second ear", "listen around",
+               "listen to the room", "open the second ear"),
+        "ru": ("второе ухо", "включи второе ухо", "открой второе ухо",
+               "слушай вокруг", "слушай комнату", "слушай что вокруг"),
+        "es": ("segundo oído", "segundo oido", "escucha alrededor"),
+        "zh": ("第二只耳朵", "听周围"),
+    },
+    "second_ear_off": {
+        "en": ("turn off the second ear", "close the second ear", "stop the second ear",
+               "stop listening around", "no second ear"),
+        "ru": ("выключи второе ухо", "убери второе ухо", "закрой второе ухо",
+               "хватит слушать вокруг", "перестань слушать вокруг", "без второго уха"),
+        "es": ("apaga el segundo oído", "apaga el segundo oido", "deja de escuchar alrededor"),
+        "zh": ("关掉第二只耳朵", "别听周围了"),
+    },
+    # Вопросы к буферу второго уха: «что он сказал», «какую цифру назвал».
+    # Имя нарочно не «recall»: так зовётся память о человеке, и второй ключ
+    # с тем же именем молча затёр бы её — в словаре побеждает последний.
+    "ambient_recall": {
+        "en": ("what did he say", "what did she say", "what did they say",
+               "what was that", "say that again", "repeat the last",
+               "what number", "what date", "what was the figure",
+               "what is his name", "what is her name", "what did we agree",
+               "what was just said", "what did i miss"),
+        "ru": ("что он сказал", "что она сказала", "что они сказали",
+               "что он говорил", "что он назвал", "повтори последнее",
+               "повтори что было", "какую цифру", "какое число", "какую сумму",
+               "какую дату", "как его зовут", "как её зовут", "как ее зовут",
+               "о чём мы договорились", "о чем мы договорились", "о чём шла речь",
+               "о чем шла речь", "что только что было", "что сейчас прозвучало",
+               "что я пропустил"),
+        "es": ("qué dijo", "que dijo", "repite lo último", "qué número",
+               "cómo se llama", "en qué quedamos"),
+        "zh": ("他说了什么", "她说了什么", "再说一遍", "说的是哪个数字", "他叫什么"),
+    },
     "continuation": {
         "en": ("go on", "keep going", "carry on", "continue", "finish it",
                "go ahead", "next"),
@@ -248,6 +285,33 @@ def _word_pattern(word: str) -> str:
     return re.escape(word) if _cjk(word) else r"\b" + re.escape(word) + r"\b"
 
 
+def opener_peelings(text: str) -> list[str]:
+    """The utterance with 0, 1, 2 … leading openers taken off.
+
+    A word can be both an opener and the start of a command: «слушай, откати
+    последнее» opens with throat-clearing, «слушай вокруг» does not, and
+    «listen» does the same job in English. Stripping greedily loses the second
+    kind, so callers test every peeling and take the first that matches.
+    """
+    openers = every("openers")
+    peelings: list[str] = []
+    if _cjk(text):
+        rest = text.strip()
+        while True:
+            peelings.append(rest)
+            hit = next((o for o in openers
+                        if rest.startswith(o) and len(rest) > len(o)), None)
+            if hit is None:
+                return peelings
+            rest = rest[len(hit):].lstrip(" ,.:，。、—-")
+    words = normalise(text).split()
+    while True:
+        peelings.append(" ".join(words))
+        if not words or words[0] not in openers:
+            return peelings
+        words = words[1:]
+
+
 def strip_openers(text: str) -> str:
     """Drop the address and the throat-clearing in front of a command."""
     openers = every("openers")
@@ -274,16 +338,16 @@ def starts_with(text: str, phrases: tuple[str, ...]) -> bool:
     The phrase has to open the utterance — after the address, but not after a
     clause. «А это можно откатить?» is a question, not an undo.
     """
-    lowered = strip_openers(text)
-    if not lowered:
-        return False
-    for phrase in phrases:
-        if _cjk(phrase):
-            if lowered.startswith(phrase):
-                return True
+    for lowered in opener_peelings(text):
+        if not lowered:
             continue
-        if lowered == phrase or lowered.startswith(phrase + " "):
-            return True
+        for phrase in phrases:
+            if _cjk(phrase):
+                if lowered.startswith(phrase):
+                    return True
+                continue
+            if lowered == phrase or lowered.startswith(phrase + " "):
+                return True
     return False
 
 
