@@ -33,8 +33,18 @@ class WakeWordEngine(private val context: Context) {
 
     private var model: Model? = null
     private var speech: SpeechService? = null
+    @Volatile private var failed = false
 
-    val isRunning: Boolean get() = speech != null
+    /**
+     * Работает ли модель на самом деле.
+     *
+     * Раньше здесь стояло `speech != null`, а поток распознавания vosk,
+     * умерев от ошибки чтения микрофона, ссылку за собой не убирал. Флаг
+     * продолжал говорить «работаю», и сторож раз в полминуты — единственная
+     * страховка в этой конструкции — каждый раз проходил мимо. Телефон
+     * переставал слышать обращение навсегда и молча.
+     */
+    val isRunning: Boolean get() = speech != null && !failed
 
     /** Качает модель, если её нет. Бросает — вызывающий решает, что делать. */
     fun prepare(onProgress: (String) -> Unit) {
@@ -50,6 +60,7 @@ class WakeWordEngine(private val context: Context) {
     fun start(onText: (String) -> Unit, onError: (Throwable) -> Unit) {
         val ready = model ?: throw IllegalStateException("model is not prepared")
         stop()
+        failed = false
         speech = SpeechService(Recognizer(ready, 16000.0f), 16000.0f)
         speech?.startListening(object : RecognitionListener {
             override fun onResult(hypothesis: String?) {
@@ -62,6 +73,9 @@ class WakeWordEngine(private val context: Context) {
             override fun onTimeout() = Unit
             override fun onError(exception: Exception?) {
                 Log.e(TAG, "vosk", exception)
+                // Поток распознавания на этом кончается — значит и движок
+                // больше не работает, что бы ни говорила ссылка на него.
+                failed = true
                 exception?.let(onError)
             }
         })

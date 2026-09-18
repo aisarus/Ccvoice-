@@ -91,6 +91,8 @@ class VoiceService : Service() {
         private const val MIC_RETRY_MS = 250L
         // Одно нажатие система умеет доставить дважды, разными путями.
         private const val BUTTON_DEBOUNCE_MS = 600L
+        // Сколько раз пробовать поднять модель обращения, прежде чем жаловаться.
+        private const val WAKE_RETRIES = 3
         // Короче этого одно слово от локальной модели — почти наверняка мусор.
         private const val FALLBACK_MIN_CHARS = 12
         /** Распознаватель обязан ответить хоть чем-то; молчит дольше — он мёртв. */
@@ -164,15 +166,19 @@ class VoiceService : Service() {
     /** Громкость реплики: единственное, что телефон может измерить сам. */
     private val meter = SpeechMeter()
     /** Что происходит прямо сейчас — первая строка уведомления. */
-    private var phase = R.string.state_waiting_for_wake
+    @Volatile private var phase = R.string.state_waiting_for_wake
 
-    private var speaking = false
+    // Синтез зовёт колбэки со своего потока, а читают эти поля с главного.
+    // Без пометки главный поток мог видеть их устаревшими до полусекунды —
+    // ровно столько, сколько нужно, чтобы уронить ответную реплику человека
+    // в буфер чужой речи или пропустить её вовсе.
+    @Volatile private var speaking = false
     private var awaitingCommand = false
     private var lastSpoken = ""
-    private var lastLine = ""
-    private var spokeAt = 0L
-    private var windowUntil = 0L
-    private var wakeReady = false
+    @Volatile private var lastLine = ""
+    @Volatile private var spokeAt = 0L
+    @Volatile private var windowUntil = 0L
+    @Volatile private var wakeReady = false
     private var fallbackText = ""
     private var unauthorized = false
 
@@ -183,6 +189,9 @@ class VoiceService : Service() {
     /** Распознаватель комнаты: у него свой язык и свой круг жизни. */
     private var roomEar: SpeechRecognizer? = null
     private var roomListening = false
+    // Круг уже назначен, но ещё не начался: между отбором микрофона и
+    // стартом есть пауза, и в неё успевает вклиниться что угодно.
+    private var roomStarting = false
     /** Кругов подряд без возврата микрофона модели обращения. */
     private var roomChain = 0
     /** Пустых кругов подряд: столько тишины — и микрофон отдаём обратно. */
@@ -233,7 +242,11 @@ class VoiceService : Service() {
             setUpTts()
             setUpMediaSession()
             connect()
-            prefs.lastError = ""
+            // Прежнюю ошибку не стираем: служба перезапускается сама через
+            // секунды после падения, и стирание здесь означало, что о ночном
+            // падении человек не узнает никогда. Её чистит экран, когда её
+            // прочитали.
+            prefs.keepPreviousError()
         } catch (t: Throwable) {
             fail(getString(R.string.error_startup, "${t.javaClass.simpleName}: ${t.message}"))
             return
@@ -385,6 +398,12 @@ class VoiceService : Service() {
         runCatching { roomEar?.destroy() }
         runCatching { tts?.shutdown() }
         runCatching { spare?.shutdown() }
+        // Уведомление снимаем сами: движки, умирая, ещё раз зовут колбэки,
+        // и их отчёт мог бы поднять его заново — уже без службы за ним.
+        runCatching {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
+        }
         runCatching { session?.release() }
         runCatching { socket?.close(1000, "service stopped") }
         super.onDestroy()
@@ -397,12 +416,27 @@ class VoiceService : Service() {
         try {
             val engine = WakeWordEngine(this)
             engine.prepare { report(it) }
+            // Пока модель качалась и грузилась — десятки секунд на первом
+            // запуске, — службу могли остановить. Ссылки на движок ещё ни у
+            // кого не было, поэтому `onDestroy` его не освободил бы: он
+            // открыл бы микрофон уже мёртвой службы и держал бы его до
+            // смерти процесса. Следующий запуск при этом ничего не слышит.
+            if (stopped) {
+                runCatching { engine.release() }
+                return
+            }
+            // Ссылка — до старта, а не после: между ними телефон уже
+            // записывает, и `wake?.stop()` с главного потока бьёт в null.
+            wake = engine
             engine.start(
                 onText = { text -> main.post { handle(text) } },
-                onError = { t -> report(getString(R.string.wake_error, t.message.orEmpty())) }
+                onError = { t -> main.post { wakeDied(t) } }
             )
-            wake = engine
             wakeReady = true
+            if (stopped) {
+                runCatching { engine.release() }
+                return
+            }
             report(getString(R.string.state_listening_for_wake))
         } catch (t: Throwable) {
             // Самый частый случай: не поднялась нативная библиотека.
@@ -726,6 +760,18 @@ class VoiceService : Service() {
         }, if (attempt == 1) MIC_HANDOVER_MS else MIC_RETRY_MS)
     }
 
+    /**
+     * Ошибка, означающая «микрофон ещё не отдали», а не «не расслышал».
+     *
+     * `cancel()` у распознавателя — асинхронный вызов в чужой процесс, и
+     * пока та сессия не свернулась, канонический ответ системы — BUSY, а не
+     * CLIENT. AUDIO прилетает после смены маршрута — это та же беда.
+     */
+    private fun busyMic(error: Int): Boolean =
+        error == SpeechRecognizer.ERROR_CLIENT ||
+            error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
+            error == SpeechRecognizer.ERROR_AUDIO
+
     private fun commandListener(attempt: Int = 1) = object : CloudListener {
         override fun onResults(results: Bundle?) {
             val heard = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
@@ -765,7 +811,7 @@ class VoiceService : Service() {
             // записи локальной модели закрыт наверняка. Отдавать вместо
             // этого огрызок от неё — значит слать серверу «меня» и получать
             // «повтори, пожалуйста», потратив круг и время человека.
-            if (error == SpeechRecognizer.ERROR_CLIENT && attempt == 1) {
+            if (busyMic(error) && attempt == 1) {
                 Log.i(TAG, "recognizer busy, one more try")
                 main.removeCallbacks(recognizerWatchdog)
                 main.removeCallbacks(fallbackTimer)
@@ -820,10 +866,24 @@ class VoiceService : Service() {
         awaitingCommand = false
         main.removeCallbacks(fallbackTimer)
         main.removeCallbacks(recognizerWatchdog)
-        main.postDelayed({ if (!awaitingCommand) resumeWake() }, 300)
+        main.postDelayed({ if (!awaitingCommand && !speaking) resumeWake() }, 300)
     }
 
-    private fun resumeWake() {
+    /**
+     * Модель обращения умерла — поднять её заново.
+     *
+     * Умирает она от того же, от чего всё в этом слое: у неё отобрали
+     * микрофон. Входящий звонок, ассистент, камера, обрыв канала гарнитуры.
+     * Раньше об этом писалась строчка в уведомление, и на этом всё
+     * заканчивалось — телефон оставался глухим до перезапуска службы.
+     */
+    private fun wakeDied(t: Throwable) {
+        report(getString(R.string.wake_error, t.message.orEmpty()))
+        runCatching { wake?.stop() }
+        main.postDelayed({ resumeWake() }, MIC_RETRY_MS)
+    }
+
+    private fun resumeWake(attempt: Int = 1) {
         if (!wakeReady) return
         // Микрофон занят комнатой: отнимать его посреди чужой фразы нельзя, а
         // отнял бы кто угодно — сторож синтеза, смена маршрута, heartbeat.
@@ -831,9 +891,19 @@ class VoiceService : Service() {
         runCatching {
             wake?.start(
                 onText = { text -> main.post { handle(text) } },
-                onError = { t -> report(getString(R.string.wake_error, t.message.orEmpty())) }
+                onError = { t -> main.post { wakeDied(t) } }
             )
-        }.onFailure { report(getString(R.string.wake_stopped, it.javaClass.simpleName)) }
+        }.onFailure {
+            // Микрофон ещё держит прежний хозяин: `cancel` у распознавателя
+            // асинхронный, и поток записи закрывается позже. Раньше здесь
+            // писалась строчка и всё — до полуминуты глухоты, пока не придёт
+            // сторож. Пробуем сами, пару раз, с той же паузой, что и везде.
+            if (attempt < WAKE_RETRIES) {
+                main.postDelayed({ resumeWake(attempt + 1) }, MIC_RETRY_MS)
+            } else {
+                report(getString(R.string.wake_stopped, it.javaClass.simpleName))
+            }
+        }
     }
 
     // ---------- второе ухо ----------
@@ -928,9 +998,36 @@ class VoiceService : Service() {
             roomChain = 0
             return false
         }
-        roomListening = true
-        main.post {
-            runCatching { wake?.stop() }
+        // Флаг поднимается там же, где круг начинается, а не раньше.
+        //
+        // Раньше между ним и стартом была отложенная задача, и всё, что
+        // успевало вклиниться, — нажатие кнопки, ответ демона — гасило флаг,
+        // а круг всё равно стартовал. Получался распознаватель, о котором
+        // никто не знает: остановить его нечем, сторожа у него нет, а
+        // микрофон он держит вечно. Вместе с микрофоном пропадало и слово
+        // «Клод» — навсегда, до перезапуска службы.
+        roomStarting = true
+        // Микрофон отдаём сейчас, круг начинаем позже: модель обращения
+        // закрывает поток записи не в тот же миг, и старт впритык упирался
+        // в занятый микрофон — та же ошибка 5, что и на командном пути,
+        // только здесь она гасила каждый круг второго уха, а жаловалась
+        // один раз за открытое ухо.
+        runCatching { wake?.stop() }
+        startRoom(attempt = 1)
+        return true
+    }
+
+    /** Сам круг: микрофон уже отобран, осталось дождаться, пока его отпустят. */
+    private fun startRoom(attempt: Int) {
+        main.postDelayed({
+            roomStarting = false
+            if (!prefs.secondEar || roomListening || awaitingCommand || speaking) {
+                // Микрофон мы уже отобрали, а круга не будет: вернуть его
+                // модели обращения обязаны мы, больше некому.
+                if (!awaitingCommand && !speaking) resumeWake()
+                return@postDelayed
+            }
+            roomListening = true
             try {
                 if (roomEar == null) roomEar = SpeechRecognizer.createSpeechRecognizer(this)
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -949,7 +1046,7 @@ class VoiceService : Service() {
                     putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, roomOffline)
                     hearing(this, prefs.ambientLanguage)
                 }
-                roomEar?.setRecognitionListener(roomListener())
+                roomEar?.setRecognitionListener(roomListener(attempt))
                 roomEar?.startListening(intent)
                 roomChain++
                 phase(R.string.state_room)
@@ -961,8 +1058,7 @@ class VoiceService : Service() {
                 report(getString(R.string.recognition_unavailable, t.javaClass.simpleName))
                 giveMicBack()
             }
-        }
-        return true
+        }, if (attempt == 1) MIC_HANDOVER_MS else MIC_RETRY_MS)
     }
 
     /**
@@ -1004,7 +1100,7 @@ class VoiceService : Service() {
         }
     }
 
-    private fun roomListener() = object : CloudListener {
+    private fun roomListener(attempt: Int = 1) = object : CloudListener {
         override fun onResults(results: Bundle?) {
             val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 .orEmpty().map { it.trim() }.firstOrNull { it.isNotEmpty() }.orEmpty()
@@ -1053,8 +1149,16 @@ class VoiceService : Service() {
                 roomFellSilent()
                 return
             }
-            // Занятый распознаватель, оборванная сеть, отозванное разрешение:
-            // чинить это кругами нельзя, и микрофон честнее отдать обратно.
+            // Микрофон ещё не отдали — это не повод бросать круг.
+            if (busyMic(error) && attempt == 1) {
+                Log.i(TAG, "room recognizer busy, one more try")
+                runCatching { roomEar?.cancel() }
+                roomStarting = true
+                startRoom(attempt = 2)
+                return
+            }
+            // Оборванная сеть, отозванное разрешение: чинить это кругами
+            // нельзя, и микрофон честнее отдать обратно.
             // Сказать об этом хватит одного раза: там, где локальной модели
             // нет, круг повторяется сам, и жалоба повторялась бы с ним.
             if (!roomErrorSaid) {
@@ -1106,7 +1210,11 @@ class VoiceService : Service() {
         roomChain = 0
         roomIdle = 0
         phase(R.string.state_waiting_for_wake)
-        if (!speaking && !awaitingCommand) resumeWake()
+        // С паузой: прежний хозяин микрофона — распознаватель, а он
+        // закрывает поток записи не мгновенно. Без неё модель обращения не
+        // поднималась после каждого круга, и до получаса тишины «Клод» не
+        // слышал никто, пока не приходил сторож.
+        main.postDelayed({ if (!speaking && !awaitingCommand) resumeWake() }, MIC_HANDOVER_MS)
         roomLater()
     }
 
@@ -1130,6 +1238,7 @@ class VoiceService : Service() {
 
     private fun stopRoom() {
         main.removeCallbacks(roomAgain)
+        roomStarting = false
         if (roomListening) runCatching { roomEar?.cancel() }
         finishRoom()
         roomChain = 0
@@ -1335,8 +1444,13 @@ class VoiceService : Service() {
         // распознавания на один микрофон, то есть ERROR_CLIENT и потерянная
         // реплика. Второе нажатие за полсекунды — то же самое нажатие.
         val now = System.currentTimeMillis()
-        if (now - buttonActedAt < BUTTON_DEBOUNCE_MS) return
+        // Отметку ставим и на отброшенном нажатии: иначе проверка второго
+        // касания смотрит на время первого, видит «прошло больше полсекунды»
+        // и печатает, что кнопка ни на что не назначена, — про нажатие,
+        // которое только что сработало.
+        val debounced = now - buttonActedAt < BUTTON_DEBOUNCE_MS
         buttonActedAt = now
+        if (debounced) return
         if (speaking) silence()
         // Микрофон мог держать круг второго уха. Не отобрать его — значит
         // открыть окно, в которое никто не слушает: сказанное уехало бы в
@@ -1874,6 +1988,9 @@ class VoiceService : Service() {
 
     private fun report(text: String) {
         Log.i(TAG, text)
+        // Служба уже мертва: её уведомление «слушаю» больше ни за чем не
+        // стоит, снять его нельзя пальцем, и висит оно до перезагрузки.
+        if (stopped) return
         lastLine = text
         main.post {
             runCatching {

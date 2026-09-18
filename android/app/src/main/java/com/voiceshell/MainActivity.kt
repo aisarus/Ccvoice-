@@ -243,6 +243,10 @@ class MainActivity : AppCompatActivity() {
             clipboard.setPrimaryClip(
                 android.content.ClipData.newPlainText("voice-shell", prefs.lastError)
             )
+            // Прочитанную ошибку чистит тот, кто её забрал: служба этого
+            // больше не делает, иначе ночное падение стиралось бы своим же
+            // перезапуском раньше, чем человек проснётся.
+            prefs.lastError = ""
             status.text = getString(R.string.error_copied)
         }
 
