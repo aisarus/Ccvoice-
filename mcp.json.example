@@ -1,0 +1,33 @@
+{
+  "_комментарий": [
+    "Это образец. Скопируй его туда, где его ищет демон, и правь:",
+    "    sudo cp /opt/voice-shell/mcp.json.example /opt/voice-shell/mcp.json",
+    "    sudo systemctl restart voice-shell",
+    "",
+    "Путь задаётся переменной MCP_CONFIG в /etc/voice-shell.env.",
+    "Файла нет — серверов нет, и это не ошибка.",
+    "",
+    "Ключи сюда вписывать не надо: ${ИМЯ} подставляется из окружения",
+    "в момент запуска, а окружение службы живёт в /etc/voice-shell.env,",
+    "который в репозиторий не попадает никогда.",
+    "",
+    "Этот ключ игнорируется — он здесь вместо комментариев, которых",
+    "в JSON не бывает."
+  ],
+
+  "mcpServers": {
+    "пример-локального": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/opt/voice-shell/public"],
+      "env": {}
+    },
+
+    "пример-удалённого": {
+      "type": "http",
+      "url": "https://пример/mcp",
+      "headers": {
+        "Authorization": "Bearer ${ПРИМЕР_ТОКЕН}"
+      }
+    }
+  }
+}
