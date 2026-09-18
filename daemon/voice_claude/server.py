@@ -284,9 +284,12 @@ class Daemon:
                 self.ambient.set_bystander_transcript(bool(msg["bystander_transcript"]))
             if msg.get("wipe"):
                 self.ambient.wipe()
-            await self._send(ws, {"id": "ambient_control", "submode": self.ambient.submode,
-                                  "bystander_transcript": self.ambient.bystander_transcript,
-                                  "lines": len(self.ambient.lines())})
+            # Всем, а не спросившему: второе ухо — состояние одного демона на
+            # все телефоны, и телефон, который о смене не узнал, продолжал бы
+            # слушать комнату в закрытое ухо или не слушать в открытое.
+            await self._broadcast({"id": "ambient_control", "submode": self.ambient.submode,
+                                   "bystander_transcript": self.ambient.bystander_transcript,
+                                   "lines": len(self.ambient.lines())})
         elif kind == "target_switch":
             try:
                 self.router.force(msg.get("target"))
@@ -315,6 +318,24 @@ class Daemon:
     # -- the voice loop --------------------------------------------------
     async def _on_segment(self, ws: Any, msg: dict[str, Any]) -> None:
         text = (msg.get("transcript") or "").strip()
+        if not text:
+            return
+
+        # Услышанное вокруг — только в буфер, и дальше ни шагу.
+        #
+        # Телефон помечает так реплики, которых человек оболочке не
+        # адресовал. Полагаться здесь на классификатор говорящего нельзя: он
+        # ошибается, а цена ошибки — исполненное действие по чужой фразе из
+        # соседнего разговора. Кто сказал — вопрос акустики, а кому сказали —
+        # вопрос факта, и факт нам присылают.
+        #
+        # Классификатор для такой реплики не зовём вовсе: его приговор здесь
+        # ничего не решает, а `confidence` в буфере значит «насколько хорошо
+        # расслышали», а не «насколько уверены, кто говорил».
+        if msg.get("ambient"):
+            self.ambient.overhear(text, float(msg.get("confidence") or 1.0))
+            return
+
         # Отвечаем на языке реплики, а не настройки: человек, перешедший на
         # английский посреди разговора, не должен лезть в настройки телефона.
         # Но если язык ответа закреплён голосом — он и решает: человек просил
@@ -325,18 +346,7 @@ class Daemon:
         decision = self._classify(msg)
         device = msg.get("device", "phone_mic")
 
-        if decision.role == "self_echo" or not text:
-            return
-
-        # Услышанное вокруг — только в буфер, и дальше ни шагу.
-        #
-        # Телефон помечает так реплики, которых человек оболочке не
-        # адресовал. Полагаться здесь на классификатор говорящего нельзя: он
-        # ошибается, а цена ошибки — исполненное действие по чужой фразе из
-        # соседнего разговора. Кто сказал — вопрос акустики, а кому сказали —
-        # вопрос факта, и факт нам присылают.
-        if msg.get("ambient"):
-            self.ambient.overhear(text, decision.confidence)
+        if decision.role == "self_echo":
             return
 
         # Вопрос к буферу в буфер не кладём: он ничего не говорит об

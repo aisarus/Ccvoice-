@@ -1324,11 +1324,11 @@
       }
     ],
     "buffer": {
-      "where": "телефон (память), зеркало на daemon только в assist",
+      "where": "daemon, in memory. The phone stores nothing: it recognises the room and forwards the text, so a lost or seized phone carries no transcript.",
       "duration_min": 10,
       "stores": "текст реплик с ролью, временем и уверенностью",
       "raw_audio_retained": false,
-      "encrypted_at_rest": true,
+      "encrypted_at_rest": "not applicable — the buffer never reaches disk; it lives in the daemon process and dies with it",
       "wipe": "одной кнопкой, при выходе из режима и при остановке приложения",
       "roles_tagged": true
     },

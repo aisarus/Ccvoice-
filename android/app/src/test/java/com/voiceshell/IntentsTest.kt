@@ -213,4 +213,69 @@ class IntentsTest {
         // переключал бы язык ответа вместо распознавания.
         assertEquals(null, Intents.languageSwitch("клод, слушай все языки"))
     }
+
+    @Test
+    fun `второе ухо открывается и закрывается голосом на четырёх языках`() {
+        // Если телефон перестанет узнавать эти фразы, демон всё равно их
+        // услышит и ответит «слушаю» — а телефон продолжит молчать в тряпочку
+        // и не пришлёт ему ни одной чужой реплики. Ухо будет открыто и глухо.
+        for (said in listOf("клод, второе ухо", "второе ухо", "клод, слушай вокруг",
+                            "claude, second ear", "claude, listen around",
+                            "segundo oído", "第二只耳朵")) {
+            assertEquals(said, Intents.SecondEar(true, null), Intents.secondEar(said))
+        }
+        for (said in listOf("клод, выключи второе ухо", "закрой второе ухо",
+                            "claude, turn off the second ear", "no second ear",
+                            "apaga el segundo oido", "关掉第二只耳朵")) {
+            assertEquals(said, Intents.SecondEar(false, null), Intents.secondEar(said))
+        }
+    }
+
+    @Test
+    fun `хватит слушать вокруг закрывает ухо, а не гасит голос`() {
+        // Фраза начинается со слова, которым гасят голос, и «стоп» в этом
+        // файле разбирается раньше всего остального. Если второе ухо не
+        // проверить прежде него, человек, попросивший перестать слушать
+        // чужих, получит тишину — и ухо останется открытым.
+        assertEquals("voice", Intents.stopIntent("хватит слушать вокруг"))
+        assertEquals(Intents.SecondEar(false, null), Intents.secondEar("хватит слушать вокруг"))
+    }
+
+    @Test
+    fun `второе ухо на иврите — это и открыть, и назвать язык комнаты`() {
+        // Он говорит по-русски, вокруг говорят на иврите, а распознаватель
+        // Android слушает один язык за раз. Требовать здесь две команды
+        // значит требовать их посреди чужого разговора.
+        assertEquals(Intents.SecondEar(true, "he-IL"), Intents.secondEar("клод, второе ухо на иврите"))
+        assertEquals(Intents.SecondEar(true, "he-IL"), Intents.secondEar("claude, second ear in hebrew"))
+        assertEquals(Intents.SecondEar(true, "en-US"), Intents.secondEar("второе ухо по-английски"))
+    }
+
+    @Test
+    fun `разговор о втором ухе его не открывает`() {
+        // «А что такое второе ухо?» — вопрос. Открытое по такому вопросу ухо
+        // означало бы, что телефон начал слушать чужих без просьбы.
+        for (said in listOf("а что такое второе ухо", "расскажи про второе ухо",
+                            "what is the second ear")) {
+            assertNull(said, Intents.secondEar(said))
+        }
+    }
+
+    @Test
+    fun `слушай вокруг не путается со сменой языка микрофона`() {
+        // Обе фразы начинаются с «слушай». Если бы первой срабатывала смена
+        // языка, «слушай вокруг» молча ничего не делало бы.
+        assertNull(Intents.listenSwitch("клод, слушай вокруг"))
+        assertNull(Intents.secondEar("клод, слушай иврит"))
+    }
+
+    @Test
+    fun `предлог не съедает название языка`() {
+        // «Слушай на иврите» не понималось вовсе: открывающая фраза забирала
+        // «на», а в списке языков лежит именно «на иврите». Человек говорил
+        // как говорится по-русски — и микрофон оставался на прежнем языке.
+        assertEquals(Intents.Listen("he-IL", null), Intents.listenSwitch("клод, слушай на иврите"))
+        assertEquals(Intents.Listen("ru-RU", null), Intents.listenSwitch("клод, слушай по-русски"))
+        assertEquals(Intents.Listen("en-US", null), Intents.listenSwitch("claude, listen in english"))
+    }
 }

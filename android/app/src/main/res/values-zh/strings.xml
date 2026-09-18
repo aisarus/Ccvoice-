@@ -34,7 +34,7 @@
     <string name="action_auth_done">完成</string>
     <string name="action_copy_error">复制最后一条错误</string>
     <string name="status_idle">未启动</string>
-    <string name="help_text">用语音切换语言：“克劳德，中文”“克劳德，英语”“克劳德，西班牙语”“克劳德，俄语”。口令同时认中文、英语、俄语和西班牙语，不用事先说明你要用哪种。答复会用你刚才说的那种语言回来。唤醒词“Claude”和“克劳德”由手机本地识别，不联网；之后你说的话按所选语言识别。说一声“克劳德……”，离开手机的只有识别出来的文字。耳机上的按键可以不说唤醒词直接讲话。“安静”让它闭嘴，“停止工作”中断正在做的事。</string>
+    <string name="help_text">用语音切换语言：“克劳德，中文”“克劳德，英语”“克劳德，西班牙语”“克劳德，俄语”。口令同时认中文、英语、俄语和西班牙语，不用事先说明你要用哪种。答复会用你刚才说的那种语言回来。唤醒词“Claude”和“克劳德”由手机本地识别，不联网；之后你说的话按所选语言识别。说一声“克劳德……”，离开手机的只有识别出来的文字。耳机上的按键可以不说唤醒词直接讲话。“安静”让它闭嘴，“停止工作”中断正在做的事。 说“克劳德，第二只耳朵”，手机就开始听周围的人说话，你一问就用你的语言转述；说“克劳德，关掉第二只耳朵”就停。周围的话可以按它自己的语言识别：“第二只耳朵听希伯来语”。耳朵开着的时候通知里会写明——录别人说的话需要对方同意——过一小时它会自己关，应用停止时也会关。</string>
 
     <!-- Переключатели: подпись кнопки и есть её состояние. -->
     <string name="speech_on">朗读：开</string>
@@ -193,4 +193,13 @@
     <string name="listening_one_language">我只听一种语言。</string>
     <string name="listening_language">现在按 %1$s 来听。</string>
     <string name="headset_key_ignored">耳机按键 %1$s 到了，但没有给它绑定任何动作</string>
+
+    <!-- Второе ухо: телефон слушает не хозяина, и об этом должно быть видно. -->
+    <string name="state_room">正在听周围</string>
+    <string name="second_ear_badge">%1$s · 第二只耳朵</string>
+    <string name="second_ear_open">第二只耳朵开着——正在听旁边的人说话</string>
+    <string name="second_ear_closed">第二只耳朵关了</string>
+    <string name="second_ear_language">按 %1$s 来听周围</string>
+    <string name="second_ear_expired">第二只耳朵过了一小时自己关了</string>
+    <string name="second_ear_online">设备上没有 %1$s 的离线识别——周围的话要走网络</string>
 </resources>
