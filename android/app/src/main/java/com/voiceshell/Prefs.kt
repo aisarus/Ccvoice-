@@ -26,6 +26,18 @@ class Prefs(context: Context) {
         get() = sp.getString("language", deviceLanguage()) ?: deviceLanguage()
         set(value) = sp.edit().putString("language", value).apply()
 
+    /**
+     * Язык ответа: пустая строка — «как спросили».
+     *
+     * Отдельно от языка распознавания нарочно. Распознаватель Android умеет
+     * слушать ровно один язык за раз, и это его ограничение, а не выбор
+     * человека. А вот на каком языке отвечать — выбор, и голосом меняется
+     * именно он: «Клод, английский» переключает ответ, но не микрофон.
+     */
+    var replyLanguage: String
+        get() = sp.getString("reply_language", "") ?: ""
+        set(value) = sp.edit().putString("reply_language", value.trim()).apply()
+
     private fun deviceLanguage(): String {
         val want = java.util.Locale.getDefault().language.lowercase()
         return SUPPORTED.firstOrNull { it.startsWith(want) } ?: "en-US"

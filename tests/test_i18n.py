@@ -288,3 +288,49 @@ def test_the_code_session_is_not_dropped_when_the_language_changes(fake_sdk, tmp
     i18n.use("zh")
     asyncio.run(target.connect())
     assert len(FakeSdkClient.built) == 1
+
+
+# -- закреплённый язык ответа ----------------------------------------------
+
+def _daemon():
+    from voice_claude.server import Daemon, Settings
+    return Daemon(Settings(workspace="/tmp", token="t"))
+
+
+def test_a_pinned_reply_language_beats_the_language_that_was_spoken():
+    """«Клод, английский» — это просьба, а не описание.
+
+    Человек говорит по-русски и хочет слышать английский: распознаватель
+    Android слушает один язык за раз, и менять его вслед за ответом значило
+    бы оглохнуть на том, на котором только что говорили.
+    """
+    daemon = _daemon()
+    daemon._pin_language("en-US")
+    i18n.use(daemon._reply_language or i18n.detect("почини тесты"))
+    assert i18n.current() == "en"
+
+
+def test_unpinning_goes_back_to_answering_in_the_language_heard():
+    daemon = _daemon()
+    daemon._pin_language("en-US")
+    daemon._pin_language("")
+    assert daemon._reply_language is None
+    i18n.use(daemon._reply_language or i18n.detect("почини тесты"))
+    assert i18n.current() == "ru"
+
+
+def test_auto_unpins_the_same_way_an_empty_value_does():
+    """Снять закрепление голосом должно быть так же просто, как поставить."""
+    daemon = _daemon()
+    daemon._pin_language("ru")
+    daemon._pin_language("auto")
+    assert daemon._reply_language is None
+
+
+def test_an_unknown_language_does_not_silently_unpin():
+    """Иначе «Клод, суахили» тихо снимал бы закрепление, а человек думал бы,
+    что переключился."""
+    daemon = _daemon()
+    daemon._pin_language("en-US")
+    daemon._pin_language("sw-KE")
+    assert daemon._reply_language == "en"

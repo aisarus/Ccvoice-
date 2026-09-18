@@ -213,4 +213,6 @@
     <string name="mic_switch_failed">could not switch to the headset mic — listening with the phone</string>
     <string name="mic_sco_unavailable">the system will not give the headset mic outside a call — listening with the phone</string>
     <string name="mic_channel_failed">the headset channel did not open: %1$s</string>
+    <string name="tts_no_voice">no %1$s voice on this phone — the answer is shown as text only</string>
+    <string name="tts_no_voice_spoken">There is no voice for that language on this phone. The answer is on the screen.</string>
 </resources>

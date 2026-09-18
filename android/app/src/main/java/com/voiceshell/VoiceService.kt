@@ -96,6 +96,14 @@ class VoiceService : Service() {
 
     private var socket: WebSocket? = null
     private var tts: TextToSpeech? = null
+    // Запасной движок — системный. Нужен ровно тогда, когда выбранный не
+    // умеет язык ответа: RHVoice прекрасно говорит по-русски и не знает
+    // иврита вовсе, и реплика просто не звучала.
+    private var spare: TextToSpeech? = null
+    private var spareReady = false
+    private var pending: Pair<String, String>? = null
+    // О каждом недостающем голосе говорим один раз, а не на каждой реплике.
+    private val voicelessSaid = mutableSetOf<String>()
     private var session: MediaSessionCompat? = null
     private var cloud: SpeechRecognizer? = null
     private var wake: WakeWordEngine? = null
@@ -224,6 +232,9 @@ class VoiceService : Service() {
                 prefs.voice = ""            // голоса у другого движка свои
                 runCatching { tts?.shutdown() }
                 tts = null
+                // Запасной движок системный, и от смены выбранного не
+                // меняется, — но о недостающих голосах стоит сказать заново.
+                voicelessSaid.clear()
                 setUpTts()
                 val named = engine.ifBlank { getString(R.string.engine_system) }
                 report(getString(R.string.engine_set, named))
@@ -243,12 +254,17 @@ class VoiceService : Service() {
                 val name = intent.getStringExtra(EXTRA_CODE).orEmpty()
                 if (name.isNotBlank()) {
                     prefs.voice = name
-                    applyVoice(prefs.language)
+                    // Образец звучит на языке ответа: голос выбирают, чтобы
+                    // послушать его, а не чтобы проверить распознавание.
+                    val tag = prefs.replyLanguage.ifBlank { prefs.language }
+                    tts?.let { applyVoice(it, tag) }
                     val sample = mapOf(
                         "ru-RU" to "Готово. Все сорок семь тестов проходят.",
                         "en-US" to "Done. All forty seven tests pass.",
+                        "es-ES" to "Listo. Las cuarenta y siete pruebas pasan.",
+                        "zh-CN" to "好了。四十七个测试全部通过。",
                         "he-IL" to "מוכן. כל הבדיקות עוברות."
-                    )[prefs.language].orEmpty()
+                    )[tag].orEmpty()
                     tts?.speak(sample, TextToSpeech.QUEUE_FLUSH, speechParams(), "voice-shell-sample")
                 }
             }
@@ -286,6 +302,7 @@ class VoiceService : Service() {
         runCatching { wake?.release() }
         runCatching { cloud?.destroy() }
         runCatching { tts?.shutdown() }
+        runCatching { spare?.shutdown() }
         runCatching { session?.release() }
         runCatching { socket?.close(1000, "service stopped") }
         super.onDestroy()
@@ -334,10 +351,7 @@ class VoiceService : Service() {
             return
         }
         Intents.languageSwitch(text)?.let { code ->
-            prefs.language = code
-            report(getString(R.string.language_set, code))
-            speak(mapOf("ru-RU" to "Говорю по-русски.", "en-US" to "Switching to English.",
-                        "he-IL" to "עובר לעברית.")[code].orEmpty())
+            switchReplyLanguage(code, aloud = true)
             return
         }
         if (speaking) {
@@ -564,8 +578,7 @@ class VoiceService : Service() {
                 return
             }
             Intents.languageSwitch(text)?.let { code ->
-                prefs.language = code
-                report(getString(R.string.language_set, code))
+                switchReplyLanguage(code, aloud = false)
                 return
             }
             deliver(text, heard.drop(1).take(3), meter.segment())
@@ -685,40 +698,98 @@ class VoiceService : Service() {
         return (male.ifEmpty { voices }).maxByOrNull { it.quality }
     }
 
-    private fun applyVoice(languageTag: String) {
-        val engine = tts ?: return
-        runCatching { engine.language = Locale.forLanguageTag(languageTag) }
-        runCatching { pickVoice(engine, languageTag)?.let { engine.voice = it } }
+    /**
+     * Возвращает ответ движка, а не выбрасывает его.
+     *
+     * `setLanguage` на незнакомом языке не бросает исключение и ничего не
+     * меняет: он возвращает LANG_NOT_SUPPORTED, а `speak` после этого молчит.
+     * Реплики на иврите приходили и не звучали ровно поэтому — ответ движка
+     * никто не смотрел.
+     */
+    private fun applyVoice(engine: TextToSpeech, languageTag: String): Int {
+        val status = runCatching { engine.setLanguage(Locale.forLanguageTag(languageTag)) }
+            .getOrDefault(TextToSpeech.LANG_NOT_SUPPORTED)
+        if (status >= TextToSpeech.LANG_AVAILABLE) {
+            runCatching { pickVoice(engine, languageTag)?.let { engine.voice = it } }
+        }
+        return status
+    }
+
+    private fun speaks(engine: TextToSpeech?, languageTag: String): Boolean =
+        engine != null && applyVoice(engine, languageTag) >= TextToSpeech.LANG_AVAILABLE
+
+    /** Поднять системный движок про запас. Инициализация асинхронная. */
+    private fun ensureSpare() {
+        if (spare != null) return
+        spare = TextToSpeech(this, TextToSpeech.OnInitListener { code ->
+            spareReady = code == TextToSpeech.SUCCESS
+            if (!spareReady) return@OnInitListener
+            runCatching { spare?.setSpeechRate(1.02f) }
+            spare?.setOnUtteranceProgressListener(progressListener())
+            // Реплика, из-за которой запасной и поднимали, ещё ждёт.
+            val waiting = pending
+            pending = null
+            if (waiting != null) main.post { say(waiting.first, waiting.second) }
+        })
+    }
+
+    /**
+     * Голоса нет ни у выбранного движка, ни у системного.
+     *
+     * Молча проглотить реплику нельзя: человек в наушниках не отличит «нет
+     * голоса» от «оболочка умерла». Говорим об этом один раз на язык и
+     * доводим состояние машины до конца, как если бы речь закончилась.
+     */
+    private fun noVoiceFor(languageTag: String) {
+        val name = Locale.forLanguageTag(languageTag)
+            .getDisplayLanguage(Locale.forLanguageTag(prefs.language))
+        if (voicelessSaid.add(languageTag)) {
+            report(getString(R.string.tts_no_voice, name))
+            runCatching {
+                val engine = tts
+                if (speaks(engine, prefs.language)) {
+                    engine?.speak(getString(R.string.tts_no_voice_spoken),
+                                  TextToSpeech.QUEUE_FLUSH, speechParams(), "voice-shell")
+                }
+            }
+        }
+        speaking = false
+        spokeAt = System.currentTimeMillis()
+        windowUntil = System.currentTimeMillis() + WINDOW_MS
+        if (!awaitingCommand) resumeWake()
+    }
+
+    /** Один и тот же слушатель на оба движка: состояние машины у них общее. */
+    private fun progressListener() = object : UtteranceProgressListener() {
+        override fun onStart(utteranceId: String?) {
+            speaking = true
+            phase(R.string.state_speaking)
+        }
+        override fun onDone(utteranceId: String?) {
+            main.removeCallbacks(speechWatchdog)
+            speaking = false
+            phase(R.string.state_waiting_for_wake)
+            spokeAt = System.currentTimeMillis()
+            windowUntil = System.currentTimeMillis() + WINDOW_MS
+            // Хвост фразы ещё звучит в комнате — ждём, потом слушаем.
+            main.postDelayed({ if (!speaking && !awaitingCommand) resumeWake() }, 600)
+        }
+        @Deprecated("deprecated in API 21")
+        override fun onError(utteranceId: String?) {
+            main.removeCallbacks(speechWatchdog)
+            speaking = false
+            // Молчание после ошибки — это тоже глухота.
+            main.postDelayed({ if (!speaking && !awaitingCommand) resumeWake() }, 300)
+        }
     }
 
     private fun setUpTts() {
         val engine = prefs.engine.takeIf { it.isNotBlank() }
         val listener = TextToSpeech.OnInitListener { code ->
             if (code == TextToSpeech.SUCCESS) {
-                applyVoice(prefs.language)
+                tts?.let { applyVoice(it, prefs.language) }
                 runCatching { tts?.setSpeechRate(1.02f) }
-                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) {
-                        speaking = true
-                        phase(R.string.state_speaking)
-                    }
-                    override fun onDone(utteranceId: String?) {
-                        main.removeCallbacks(speechWatchdog)
-                        speaking = false
-                        phase(R.string.state_waiting_for_wake)
-                        spokeAt = System.currentTimeMillis()
-                        windowUntil = System.currentTimeMillis() + WINDOW_MS
-                        // Хвост фразы ещё звучит в комнате — ждём, потом слушаем.
-                        main.postDelayed({ if (!speaking && !awaitingCommand) resumeWake() }, 600)
-                    }
-                    @Deprecated("deprecated in API 21")
-                    override fun onError(utteranceId: String?) {
-                        main.removeCallbacks(speechWatchdog)
-                        speaking = false
-                        // Молчание после ошибки — это тоже глухота.
-                        main.postDelayed({ if (!speaking && !awaitingCommand) resumeWake() }, 300)
-                    }
-                })
+                tts?.setOnUtteranceProgressListener(progressListener())
             } else {
                 report(getString(R.string.tts_failed, code))
             }
@@ -753,18 +824,75 @@ class VoiceService : Service() {
         )
     }
 
+    /**
+     * «Клод, английский» меняет язык ответа, а не язык распознавания.
+     *
+     * Распознаватель Android слушает ровно один язык за раз — это его
+     * ограничение, а не выбор человека, и таскать микрофон вслед за ответом
+     * значило бы оглохнуть на том языке, на котором только что говорили.
+     * Понимать оболочка продолжает всё, что понимала: команды сопоставляются
+     * на всех языках сразу, а Claude отвечает на чём угодно.
+     */
+    private fun switchReplyLanguage(code: String, aloud: Boolean) {
+        prefs.replyLanguage = if (code == Intents.ANY_LANGUAGE) "" else code
+        voicelessSaid.clear()
+        send(JSONObject().put("id", "set_language").put("reply", prefs.replyLanguage))
+        val spoken = prefs.replyLanguage.ifBlank { prefs.language }
+        report(getString(R.string.language_set, spoken))
+        if (aloud) say(Intents.switchNotice(prefs.replyLanguage, prefs.language), spoken)
+    }
+
     private fun speak(text: String) {
         if (text.isBlank() || prefs.mute) return
+        say(text, replyLanguageFor(text))
+    }
+
+    /**
+     * На каком языке читать этот ответ.
+     *
+     * Закреплённый голосом язык побеждает: человек просил отвечать на нём, и
+     * письменность пришедшего текста этого не отменяет. Без закрепления —
+     * по письменности самого ответа, как и было.
+     */
+    private fun replyLanguageFor(text: String): String =
+        prefs.replyLanguage.ifBlank { Intents.scriptLanguage(text, prefs.language) }
+
+    /**
+     * Сказать вслух — тем движком, который этот язык умеет.
+     *
+     * Выбранный движок может языка не знать: RHVoice говорит по-русски и не
+     * знает иврита вовсе. Выглядело это как «реплика пришла, но не
+     * прозвучала»: `setLanguage` возвращал отказ, `speak` после него молчал,
+     * и ответа движка никто не смотрел. Теперь смотрим: не может выбранный —
+     * пробуем системный, не может и он — говорим об этом.
+     */
+    private fun say(text: String, languageTag: String) {
+        if (text.isBlank()) return
         // Эхо сравниваем по чистому тексту: распознаватель знаков не вернёт.
         lastSpoken = Intents.normalise(Stress.strip(text))
         spokeAt = System.currentTimeMillis()
         // Через динамик микрофон слышит нас самих: на это время он засыпает.
         // В наушниках эхо-пути нет, и «стоп» продолжает работать.
         if (!onHeadphones()) runCatching { wake?.stop() }
+
+        val engine = when {
+            speaks(tts, languageTag) -> tts
+            spareReady -> if (speaks(spare, languageTag)) spare else null
+            else -> {
+                // Системный движок ещё не поднят: поднимаем и договариваем
+                // эту же реплику, когда он будет готов.
+                pending = text to languageTag
+                ensureSpare()
+                return
+            }
+        }
+        if (engine == null) {
+            noVoiceFor(languageTag)
+            return
+        }
         runCatching {
-            applyVoice(Intents.scriptLanguage(text, prefs.language))
-            tts?.speak(Stress.render(text, prefs.stressStyle, prefs.engine),
-                       TextToSpeech.QUEUE_FLUSH, speechParams(), "voice-shell")
+            engine.speak(Stress.render(text, prefs.stressStyle, prefs.engine),
+                         TextToSpeech.QUEUE_FLUSH, speechParams(), "voice-shell")
         }
         // Сторож на случай, если движок не отчитается о конце речи.
         main.removeCallbacks(speechWatchdog)
@@ -777,6 +905,8 @@ class VoiceService : Service() {
     private fun silence() {
         main.removeCallbacks(speechWatchdog)
         runCatching { tts?.stop() }
+        runCatching { spare?.stop() }
+        pending = null
         speaking = false
         // Оборвали речь сами — значит слушаем дальше, не дожидаясь движка.
         main.postDelayed({ if (!speaking && !awaitingCommand) resumeWake() }, 300)

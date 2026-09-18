@@ -116,6 +116,8 @@ class Daemon:
         # Очередь фоновых задач: сказал и забыл.
         self.queue = tasks.TaskQueue(settings.workspace)
         self._pending_news: list[str] = []
+        # Язык ответа, закреплённый голосом. None — отвечать на языке вопроса.
+        self._reply_language: str | None = None
         background = load_spec()["config_defaults"]["background"]
         self._first_ack_s = settings.first_ack_s or background["first_ack_after_ms"] / 1000
         self._progress_gap_s = settings.progress_gap_s or background["min_interval_between_events_s"]
@@ -176,6 +178,17 @@ class Daemon:
             self.clients.discard(websocket)
             self._device_of.pop(websocket, None)
 
+    def _pin_language(self, wanted: Any) -> None:
+        """Закрепить язык ответа или снять закрепление.
+
+        Пустая строка и `auto` — это «как спросили», а не «неизвестный язык»:
+        снять закрепление голосом должно быть так же просто, как поставить.
+        """
+        if wanted in (None, "", "auto"):
+            self._reply_language = None
+            return
+        self._reply_language = i18n.normalize(wanted) or self._reply_language
+
     async def _hello_deadline(self, ws: Any) -> None:
         """Сокет, не назвавший токен, живёт десять секунд.
 
@@ -225,8 +238,9 @@ class Daemon:
             # устройства может ещё не отвалиться по таймауту, и тогда каждый
             # ответ уходит дважды и трижды — человек слышит его хором.
             # Язык телефона — это то, на чём человек собирается говорить.
-            # Услышанное всё равно перебивает: одна оболочка на две головы.
-            i18n.use(msg.get("language"))
+            # Услышанное всё равно перебивает, если язык не закреплён.
+            self._pin_language(msg.get("reply_language"))
+            i18n.use(self._reply_language or msg.get("language"))
             device = str(msg.get("device_id") or "")
             if device:
                 for previous in [c for c in self.clients
@@ -285,6 +299,13 @@ class Daemon:
                                   "confidence": 1.0})
         elif kind in ("auth_start", "auth_code", "auth_set"):
             await self._on_auth(ws, msg)
+        elif kind == "set_language":
+            # «Клод, английский» — закрепить язык ответа. Пустое значение
+            # снимает закрепление и возвращает «отвечать как спросили».
+            self._pin_language(msg.get("reply"))
+            i18n.use(self._reply_language or msg.get("language"))
+            await self._send(ws, {"id": "language", "reply": self._reply_language or "",
+                                  "speaking": i18n.current()})
         elif kind == "ping":
             await self._send(ws, {"id": "ping", "ts": int(time.time() * 1000)})
         else:
@@ -296,7 +317,11 @@ class Daemon:
         text = (msg.get("transcript") or "").strip()
         # Отвечаем на языке реплики, а не настройки: человек, перешедший на
         # английский посреди разговора, не должен лезть в настройки телефона.
-        i18n.use(i18n.detect(text))
+        # Но если язык ответа закреплён голосом — он и решает: человек просил
+        # отвечать на нём, и язык вопроса этой просьбы не отменяет.
+        if "reply_language" in msg:
+            self._pin_language(msg.get("reply_language"))
+        i18n.use(self._reply_language or i18n.detect(text))
         decision = self._classify(msg)
         device = msg.get("device", "phone_mic")
 

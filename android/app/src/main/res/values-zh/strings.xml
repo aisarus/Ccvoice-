@@ -187,4 +187,6 @@
     <string name="mic_switch_failed">切不到耳机麦克风，改用手机听</string>
     <string name="mic_sco_unavailable">通话之外系统不放开耳机麦克风，改用手机听</string>
     <string name="mic_channel_failed">耳机通道没能打开：%1$s</string>
+    <string name="tts_no_voice">这台手机没有 %1$s 的语音——答复只以文字显示</string>
+    <string name="tts_no_voice_spoken">这台手机没有这种语言的语音，答复在屏幕上。</string>
 </resources>

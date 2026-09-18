@@ -120,17 +120,50 @@ object Intents {
         "he-IL" to listOf("иврит", "на иврите", "hebrew", "hebreo", "עברית", "希伯来语")
     )
 
+    /** «Клод, как спросил» — снять закрепление и отвечать на языке вопроса. */
+    const val ANY_LANGUAGE = "auto"
+    private val ANY_WORDS = listOf(
+        "как спросил", "как спрошу", "любой язык", "как я сказал", "автоматически",
+        "auto", "automatic", "same language", "as i asked",
+        "automático", "automatico", "el mismo idioma",
+        "自动", "跟我一样"
+    )
+
     fun languageSwitch(text: String): String? {
         val bare = stripWake(normalise(text))
             .removePrefix("переключись на ").removePrefix("переключись ")
             .removePrefix("говори ").removePrefix("switch to ").removePrefix("speak ")
             .removePrefix("cambia a ").removePrefix("habla ")
             .removePrefix("说").removePrefix("切换到").trim()
+        if (ANY_WORDS.any {
+                bare == it || bare.startsWith("$it ") || (isCjk(it) && bare.startsWith(it))
+            }) return ANY_LANGUAGE
         for ((code, words) in LANGUAGES) {
             if (words.any { bare == it || bare.startsWith("$it ") }) return code
             if (words.any { isCjk(it) && bare.startsWith(it) }) return code
         }
         return null
+    }
+
+    /** Что сказать вслух о новом языке ответа — на нём же. */
+    fun switchNotice(replyLanguage: String, recognitionLanguage: String): String {
+        val spoken = replyLanguage.ifBlank { recognitionLanguage }
+        val pinned = mapOf(
+            "ru-RU" to "Отвечаю по-русски.",
+            "en-US" to "Answering in English.",
+            "es-ES" to "Respondo en español.",
+            "zh-CN" to "我用中文回答。",
+            "he-IL" to "עונה בעברית."
+        )
+        val auto = mapOf(
+            "ru-RU" to "Отвечаю на языке вопроса.",
+            "en-US" to "Answering in whatever language you use.",
+            "es-ES" to "Respondo en el idioma en que preguntes.",
+            "zh-CN" to "你用什么语言问，我就用什么语言回答。",
+            "he-IL" to "עונה בשפה שבה שאלת."
+        )
+        val table = if (replyLanguage.isBlank()) auto else pinned
+        return table[spoken] ?: table["en-US"].orEmpty()
     }
 
     /** Язык ответа определяется по письменности, а не по настройке. */

@@ -148,4 +148,33 @@ class IntentsTest {
         assertEquals(null, Intents.stopIntent("撤销刚才的"))
         assertEquals("work", Intents.stopIntent("отмени"))
     }
+
+    // -- язык ответа отдельно от языка распознавания ------------------------
+
+    @Test
+    fun `как спросил снимает закрепление языка ответа`() {
+        assertEquals(Intents.ANY_LANGUAGE, Intents.languageSwitch("клод, как спросил"))
+        assertEquals(Intents.ANY_LANGUAGE, Intents.languageSwitch("claude, auto"))
+        assertEquals(Intents.ANY_LANGUAGE, Intents.languageSwitch("claude, same language"))
+    }
+
+    @Test
+    fun `о смене языка ответа говорится на нём же`() {
+        assertEquals("Answering in English.", Intents.switchNotice("en-US", "ru-RU"))
+        assertEquals("Отвечаю по-русски.", Intents.switchNotice("ru-RU", "en-US"))
+    }
+
+    @Test
+    fun `без закрепления обещание даётся на языке распознавания`() {
+        // Закрепления нет — значит отвечаем «как спросили», и сказать об этом
+        // надо на том языке, на котором человек сейчас говорит.
+        assertEquals("Отвечаю на языке вопроса.", Intents.switchNotice("", "ru-RU"))
+        assertEquals("Answering in whatever language you use.",
+                     Intents.switchNotice("", "en-US"))
+    }
+
+    @Test
+    fun `незнакомый язык ответа не роняет обещание в пустоту`() {
+        assertEquals("Answering in English.", Intents.switchNotice("fr-FR", "fr-FR"))
+    }
 }

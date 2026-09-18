@@ -202,6 +202,12 @@ Speaking and listening are decided differently, on purpose:
   connected, then the language you actually just spoke, then `VOICE_LANG`, then
   English. Switch to English mid-conversation and the answer comes back in
   English — no settings to visit.
+- **Say "Claude, English" and only the answers change.** The reply language is
+  a separate setting from what the microphone listens for, because Android's
+  recogniser handles one language at a time: dragging it along behind the
+  answer would make the shell deaf to the language you are actually speaking.
+  So you can speak Russian and be answered in English. "Claude, as I asked"
+  unpins it and goes back to answering in whatever you used.
 
 The tables live in [`daemon/voice_claude/lexicon.py`](daemon/voice_claude/lexicon.py)
 (what it hears) and [`daemon/voice_claude/i18n.py`](daemon/voice_claude/i18n.py)

@@ -1935,7 +1935,8 @@
           "token": "string",
           "device_id": "string",
           "app_version": "string",
-          "language": "en|ru|es|zh — the phone's language tag (BCP-47 is accepted, ru-RU reads as ru). Optional; what the person actually speaks overrides it per utterance."
+          "language": "en|ru|es|zh — the phone's language tag (BCP-47 is accepted, ru-RU reads as ru). Optional; what the person actually speaks overrides it per utterance.",
+          "reply_language": "en|ru|es|zh|'' — pin the language of the answers. Empty means answer in whatever language was spoken. Separate from `language`, which is what the phone's recogniser listens for."
         }
       },
       {
@@ -2002,7 +2003,8 @@
           "gates_triggered": "array<string>",
           "transcript": "string?",
           "alternatives": "array<string>? — прочие гипотезы распознавателя, подсказкой, без переписывания реплики",
-          "weight_profile": "acoustic_only|with_voiceprint|narrowband"
+          "weight_profile": "acoustic_only|with_voiceprint|narrowband",
+          "reply_language": "optional — same meaning as in hello, carried per utterance so a reconnect cannot lose the pin"
         }
       },
       {
@@ -2213,6 +2215,22 @@
         "dir": "daemon→phone",
         "fields": {
           "message": "string"
+        }
+      },
+      {
+        "id": "set_language",
+        "dir": "phone→daemon",
+        "fields": {
+          "reply": "en|ru|es|zh|'' — pin the answer language, empty to unpin"
+        },
+        "note": "«Клод, английский» меняет язык ответа, а не язык распознавания: распознаватель слушает один язык за раз, и таскать микрофон вслед за ответом значило бы оглохнуть на том, на котором только что говорили."
+      },
+      {
+        "id": "language",
+        "dir": "daemon→phone",
+        "fields": {
+          "reply": "the pinned answer language, empty when unpinned",
+          "speaking": "the language the daemon is answering in right now"
         }
       }
     ]

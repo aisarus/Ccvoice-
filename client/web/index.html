@@ -66,6 +66,7 @@
   <button class="chip" id="follow" aria-pressed="true" type="button"></button>
   <button class="chip" id="always" aria-pressed="false" type="button"></button>
   <button class="chip" id="lang" type="button"></button>
+  <button class="chip" id="reply" type="button"></button>
   <button class="chip" id="ambient" aria-pressed="false" type="button">ambient: off</button>
   <button class="chip" id="bystander" hidden aria-pressed="false" type="button"></button>
 </div>
@@ -133,7 +134,8 @@ const UI = {
     notConnected:"not connected", noLink:"no link", token:"access token", save:"save",
     auto:"auto", code:"code", chat:"chat", note:"note",
     follow:"conversation: ", always:"always listening: ", on:"on", off:"off",
-    language:"language: ", bystander:"other voices: ",
+    language:"language: ", answer:"answer: ", answerAuto:"as asked",
+    bystander:"other voices: ",
     bystanderHint:"Recording other people needs their consent — in many places that is the law. "
                   + "The buffer lives 10 minutes and is wiped when ambient goes off.",
     authIntro:"Claude is not connected. You can connect a subscription — no API key needed.",
@@ -164,7 +166,8 @@ const UI = {
     notConnected:"не подключено", noLink:"нет связи", token:"токен доступа", save:"сохранить",
     auto:"авто", code:"код", chat:"чат", note:"заметка",
     follow:"разговор: ", always:"слушать всегда: ", on:"вкл", off:"выкл",
-    language:"язык: ", bystander:"чужие реплики: ",
+    language:"язык: ", answer:"ответ: ", answerAuto:"как спросил",
+    bystander:"чужие реплики: ",
     bystanderHint:"Запись чужой речи требует согласия собеседников — во многих юрисдикциях "
                   + "это обязательно. Буфер живёт 10 минут и стирается при выключении ambient.",
     authIntro:"Claude не подключён. Можно подключить подписку — API-ключ не нужен.",
@@ -195,7 +198,8 @@ const UI = {
     notConnected:"sin conectar", noLink:"sin conexión", token:"token de acceso", save:"guardar",
     auto:"auto", code:"código", chat:"charla", note:"nota",
     follow:"conversación: ", always:"escucha continua: ", on:"sí", off:"no",
-    language:"idioma: ", bystander:"voces ajenas: ",
+    language:"idioma: ", answer:"respuesta: ", answerAuto:"como preguntes",
+    bystander:"voces ajenas: ",
     bystanderHint:"Grabar a otras personas necesita su consentimiento — en muchos sitios es "
                   + "obligatorio. El búfer dura 10 minutos y se borra al apagar ambient.",
     authIntro:"Claude no está conectado. Puedes conectar una suscripción — no hace falta clave API.",
@@ -226,7 +230,8 @@ const UI = {
     notConnected:"未连接", noLink:"连接断开", token:"访问令牌", save:"保存",
     auto:"自动", code:"代码", chat:"聊天", note:"笔记",
     follow:"对话：", always:"一直听：", on:"开", off:"关",
-    language:"语言：", bystander:"旁人的话：",
+    language:"语言：", answer:"回答：", answerAuto:"跟着你说的",
+    bystander:"旁人的话：",
     bystanderHint:"录下别人说的话需要对方同意——在很多地方这是法律要求。缓冲区只保留 10 分钟，"
                   + "关掉 ambient 时会清空。",
     authIntro:"Claude 还没有连接。可以连接订阅——不需要 API 密钥。",
@@ -254,6 +259,9 @@ const UI = {
   },
 };
 let lang = localStorage.getItem("vs_lang") || matchBrowser();
+/* Язык ответа отдельно от языка распознавания: распознаватель слушает один
+   язык за раз, а отвечать можно на любом. Пусто — «как спросил». */
+let replyLang = localStorage.getItem("vs_reply") || "";
 function matchBrowser(){
   const want = (navigator.language || "en").toLowerCase();
   const hit = LANGS.find(l => want.startsWith(l.code.slice(0, 2)));
@@ -464,7 +472,19 @@ el("lang").onclick = () => {
   document.documentElement.lang = lang.slice(0, 2);
   paintUI();
   /* Демон отвечает на языке телефона, пока не услышит другой. */
-  send({id:"hello", v:1, token:TOKEN, device_id:"web", app_version:"0.3.0", language:lang});
+  send({id:"hello", v:1, token:TOKEN, device_id:"web", app_version:"0.3.0",
+        language:lang, reply_language:replyLang});
+};
+
+/* «Ответ: как спросил» и дальше по кругу — это не тот же переключатель, что
+   язык распознавания: слушать браузер умеет один язык за раз, а отвечать —
+   на любом, и просят обычно именно второе. */
+el("reply").onclick = () => {
+  const order = ["", ...LANGS.map(l => l.code)];
+  replyLang = order[(order.indexOf(replyLang) + 1) % order.length];
+  try { localStorage.setItem("vs_reply", replyLang); } catch (e) {}
+  send({id:"set_language", reply:replyLang});
+  paintUI();
 };
 
 /* Один проход по всем надписям: язык меняется чипом, и половина интерфейса,
@@ -482,6 +502,9 @@ function paintUI(){
   set("always", T("always") + (always ? T("on") : T("off")));
   el("always").setAttribute("aria-pressed", String(always));
   set("lang", T("language") + (LANGS.find(l => l.code === lang) || LANGS[0]).name);
+  set("reply", T("answer") + (replyLang
+      ? (LANGS.find(l => l.code === replyLang) || LANGS[0]).name
+      : T("answerAuto")));
   set("bystander", T("bystander") + (bystander ? T("on") : T("off")));
   set("bystanderhint", T("bystanderHint"));
   if (!authStarted) set("authtext", T("authIntro"));
@@ -565,7 +588,9 @@ function scriptLang(text){
 function speak(text){
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
-  u.lang = scriptLang(text); u.rate = 1.05;
+  /* Закреплённый язык ответа побеждает письменность: человек просил
+     отвечать на нём, и текст пришедшего ответа этой просьбы не отменяет. */
+  u.lang = replyLang || scriptLang(text); u.rate = 1.05;
   u.onstart = () => { speaking = true; };
   u.onend = () => {
     speaking = false;
@@ -581,7 +606,8 @@ function connect(){
     if (!TOKEN){ el("tokenrow").hidden = false; hintOwned = true;
                  el("hint").textContent = T("needToken"); return; }
     hintOwned = false;
-    send({id:"hello", v:1, token:TOKEN, device_id:"web", app_version:"0.3.0", language:lang});
+    send({id:"hello", v:1, token:TOKEN, device_id:"web", app_version:"0.3.0",
+          language:lang, reply_language:replyLang});
   };
   ws.onclose = () => { connected = false; setState(T("noLink")); setTimeout(connect, 2000); };
   ws.onmessage = ev => {

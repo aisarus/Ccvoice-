@@ -187,4 +187,6 @@
     <string name="mic_switch_failed">no he podido pasar al micrófono de los auriculares — escucho con el teléfono</string>
     <string name="mic_sco_unavailable">el sistema no cede el micrófono de los auriculares fuera de una llamada — escucho con el teléfono</string>
     <string name="mic_channel_failed">el canal de los auriculares no se ha abierto: %1$s</string>
+    <string name="tts_no_voice">no hay voz para %1$s en este teléfono — la respuesta solo se muestra como texto</string>
+    <string name="tts_no_voice_spoken">Este teléfono no tiene voz para ese idioma. La respuesta está en la pantalla.</string>
 </resources>
