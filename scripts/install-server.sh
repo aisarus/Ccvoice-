@@ -11,7 +11,9 @@
 #   WORKSPACE     каталог, в котором будет работать Claude Code
 #   PORT          порт демона (по умолчанию 8787)
 #   PUBLIC_DIR    каталог публикации: что туда положено, то доступно по ссылке
-#   CODE_MODEL    модель для Claude Code (по умолчанию — та, что у CLI)
+#   CODE_MODEL    модель для Claude Code (по умолчанию best — самая сильная
+#                 из доступных аккаунту; ставится в файл окружения, где её
+#                 видно и откуда её легко убрать)
 #   CODE_EFFORT   усилие: low | medium | high | xhigh | max
 #   TOOLBOX=0     не ставить ffmpeg, ImageMagick и headless-браузер
 set -euo pipefail
@@ -180,7 +182,7 @@ PYTHONPATH=$ROOT/daemon
 PUBLIC_DIR=$PUBLIC
 PUBLIC_URL=$URL/p
 MCP_CONFIG=$MCP_FILE
-${CODE_MODEL:+CODE_MODEL=$CODE_MODEL}
+CODE_MODEL=${CODE_MODEL:-best}
 ${CODE_EFFORT:+CODE_EFFORT=$CODE_EFFORT}
 ${OAUTH:+CLAUDE_CODE_OAUTH_TOKEN=$OAUTH}
 ENV

@@ -184,7 +184,13 @@ else
     echo "публикация: выключена — сделанное некуда положить, ссылку назвать нечем"
     note "нет PUBLIC_DIR/PUBLIC_URL в $ENV_FILE — обнови: update-server.sh"
 fi
-printf 'модель    : %s\n' "$(value_of CODE_MODEL || true)$([ -z "$(value_of CODE_MODEL)" ] && echo 'по умолчанию CLI')"
+MODEL_VALUE="$(value_of CODE_MODEL)"
+if [ -n "$MODEL_VALUE" ]; then
+    printf 'модель    : %s\n' "$MODEL_VALUE"
+else
+    echo "модель    : не задана — берётся та, что у CLI по умолчанию"
+    note "нет CODE_MODEL в $ENV_FILE — обнови: update-server.sh"
+fi
 printf 'усилие    : %s\n' "$(value_of CODE_EFFORT || true)$([ -z "$(value_of CODE_EFFORT)" ] && echo 'по умолчанию')"
 MCP_VALUE="$(value_of MCP_CONFIG)"
 if [ -n "$MCP_VALUE" ] && [ -f "$MCP_VALUE" ]; then

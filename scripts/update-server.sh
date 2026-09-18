@@ -103,6 +103,11 @@ if [ -f "$ENV_FILE" ]; then
     add_env PUBLIC_DIR "$PUBLIC"
     add_env PUBLIC_URL "$BASE/p"
     add_env MCP_CONFIG "$ROOT/mcp.json"
+    # `best` — самая сильная модель из доступных этому аккаунту. Это
+    # единственная настройка здесь, которая стоит денег и лимитов, поэтому
+    # она названа вслух в выводе, а убирается одной строкой из файла
+    # окружения. Своя ставится так: CODE_MODEL=opus sudo -E bash $0
+    add_env CODE_MODEL "${CODE_MODEL:-best}"
 
     # Настройки, правила, навыки и субагенты живут в рабочей папке, а она от
     # репозитория отдельно: без этой строчки обновление кода их туда не
@@ -110,6 +115,7 @@ if [ -f "$ENV_FILE" ]; then
     WS="$(sed -n 's/^WORKSPACE_DIR=//p' "$ENV_FILE" | tail -1)"
     WS="${WS:-$ROOT/workspace}"
     bash "$ROOT/scripts/sync-workspace.sh" "$WS" | sed 's/^/— /'
+    echo "— модель: $(sed -n 's/^CODE_MODEL=//p' "$ENV_FILE" | tail -1), усилие решают настройки рабочей папки"
 fi
 
 # Инструменты, которыми Claude Code делает то, чего не умеет сам. Ставим
