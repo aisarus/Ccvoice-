@@ -145,7 +145,14 @@ object Intents {
         return null
     }
 
-    /** «Слушай все языки» / «слушай только по-русски». null — не об этом. */
+    /**
+     * Что делать с тем, как оболочка слушает.
+     *
+     * `language` — новый язык распознавания, null — оставить как есть.
+     * `multilingual` — слушать ли несколько языков сразу, null — не трогать.
+     */
+    data class Listen(val language: String?, val multilingual: Boolean?)
+
     private val LISTEN_ALL = listOf(
         "слушай все языки", "слушай любой язык", "понимай все языки",
         "listen to all languages", "listen in any language", "understand every language",
@@ -156,16 +163,45 @@ object Intents {
         "listen only", "listen to one language", "one language only",
         "escucha solo", "只听一种语言", "只听"
     )
+    /** Начала фраз «слушай …»: после них ожидается название языка. */
+    private val LISTEN_OPENERS = listOf(
+        "слушай по", "слушай на", "слушай", "распознавай",
+        "listen in", "listen to", "listen", "recognise", "recognize",
+        "escucha en", "escucha", "听", "识别"
+    )
 
-    fun multilingualSwitch(text: String): Boolean? {
+    /**
+     * «Слушай все языки», «слушай только русский», «слушай иврит».
+     *
+     * Отдельно от `languageSwitch`: «Клод, английский» меняет язык ответа, а
+     * «Клод, слушай английский» — язык микрофона. Разбирается одной функцией
+     * нарочно: «слушай только английский» — это обе перемены сразу, и при
+     * двух независимых проверках одна из них всегда съедала бы вторую.
+     */
+    fun listenSwitch(text: String): Listen? {
         val bare = stripWake(normalise(text))
-        fun hit(phrases: List<String>) = phrases.any {
+        fun hit(phrases: List<String>) = phrases.firstOrNull {
             bare == it || bare.startsWith("$it ") || (isCjk(it) && bare.startsWith(it))
         }
-        // «Слушай все языки» начинается не так, как «слушай только русский»,
-        // но проверяем сперва длинное: иначе «слушай» съест обе фразы.
-        if (hit(LISTEN_ALL)) return true
-        if (hit(LISTEN_ONE)) return false
+        if (hit(LISTEN_ALL) != null) return Listen(null, true)
+        hit(LISTEN_ONE)?.let { phrase ->
+            // «Слушай только английский» — это и один язык, и какой именно.
+            return Listen(languageIn(bare.removePrefix(phrase)), false)
+        }
+        hit(LISTEN_OPENERS)?.let { phrase ->
+            val named = languageIn(bare.removePrefix(phrase)) ?: return null
+            return Listen(named, null)
+        }
+        return null
+    }
+
+    /** Код языка, названный в этом куске речи, или null. */
+    private fun languageIn(rest: String): String? {
+        val bare = rest.trim().removePrefix("по ").removePrefix("на ").trim()
+        for ((code, words) in LANGUAGES) {
+            if (words.any { bare == it || bare.startsWith("$it ") }) return code
+            if (words.any { isCjk(it) && bare.startsWith(it) }) return code
+        }
         return null
     }
 

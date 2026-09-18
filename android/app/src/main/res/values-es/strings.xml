@@ -191,4 +191,5 @@
     <string name="tts_no_voice_spoken">Este teléfono no tiene voz para ese idioma. La respuesta está en la pantalla.</string>
     <string name="listening_multilingual">Escucho en todos los idiomas que conozco.</string>
     <string name="listening_one_language">Escucho en un solo idioma.</string>
+    <string name="listening_language">Ahora escucho en %1$s.</string>
 </resources>

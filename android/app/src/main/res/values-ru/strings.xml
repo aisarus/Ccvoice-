@@ -190,4 +190,5 @@
     <string name="tts_no_voice_spoken">На телефоне нет голоса для этого языка. Ответ на экране.</string>
     <string name="listening_multilingual">Слушаю все языки, которые знаю.</string>
     <string name="listening_one_language">Слушаю только один язык.</string>
+    <string name="listening_language">Теперь слушаю на %1$s.</string>
 </resources>

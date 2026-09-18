@@ -180,11 +180,30 @@ class IntentsTest {
 
     @Test
     fun `слушать все языки и слушать один — разные команды`() {
-        assertEquals(true, Intents.multilingualSwitch("клод, слушай все языки"))
-        assertEquals(true, Intents.multilingualSwitch("claude, listen to all languages"))
-        assertEquals(false, Intents.multilingualSwitch("клод, слушай только русский"))
-        assertEquals(false, Intents.multilingualSwitch("claude, listen only english"))
-        assertEquals(null, Intents.multilingualSwitch("клод, почини тесты"))
+        assertEquals(Intents.Listen(null, true), Intents.listenSwitch("клод, слушай все языки"))
+        assertEquals(Intents.Listen(null, true),
+                     Intents.listenSwitch("claude, listen to all languages"))
+        assertEquals(null, Intents.listenSwitch("клод, почини тесты"))
+    }
+
+    @Test
+    fun `слушай только английский — это обе перемены сразу`() {
+        // При двух независимых проверках одна всегда съедала бы вторую:
+        // «слушай только» срабатывало бы раньше, чем кто-то посмотрит,
+        // какой язык назван.
+        assertEquals(Intents.Listen("en-US", false),
+                     Intents.listenSwitch("клод, слушай только английский"))
+        assertEquals(Intents.Listen(null, false), Intents.listenSwitch("клод, слушай только"))
+    }
+
+    @Test
+    fun `слушай иврит меняет микрофон, а не язык ответа`() {
+        assertEquals(Intents.Listen("he-IL", null), Intents.listenSwitch("клод, слушай иврит"))
+        assertEquals(Intents.Listen("en-US", null),
+                     Intents.listenSwitch("claude, listen in english"))
+        // А вот это — язык ответа, и слушать оно ничего не меняет.
+        assertEquals(null, Intents.listenSwitch("клод, английский"))
+        assertEquals("en-US", Intents.languageSwitch("клод, английский"))
     }
 
     @Test

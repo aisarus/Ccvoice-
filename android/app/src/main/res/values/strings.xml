@@ -217,4 +217,5 @@
     <string name="tts_no_voice_spoken">There is no voice for that language on this phone. The answer is on the screen.</string>
     <string name="listening_multilingual">Listening in every language I know.</string>
     <string name="listening_one_language">Listening in one language only.</string>
+    <string name="listening_language">Listening in %1$s now.</string>
 </resources>

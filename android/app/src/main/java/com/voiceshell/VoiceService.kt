@@ -350,8 +350,8 @@ class VoiceService : Service() {
             report(getString(if (scope == "work") R.string.stopping_work else R.string.going_quiet))
             return
         }
-        Intents.multilingualSwitch(text)?.let { wanted ->
-            switchMultilingual(wanted)
+        Intents.listenSwitch(text)?.let { change ->
+            switchListening(change)
             return
         }
         Intents.languageSwitch(text)?.let { code ->
@@ -870,13 +870,17 @@ class VoiceService : Service() {
      * Распознаватель уже начатую реплику не переслушает — новые extras
      * подействуют со следующей, поэтому клиента сбрасываем сразу.
      */
-    private fun switchMultilingual(wanted: Boolean) {
-        prefs.multilingual = wanted
+    private fun switchListening(change: Intents.Listen) {
+        change.language?.let { prefs.language = it }
+        change.multilingual?.let { prefs.multilingual = it }
         runCatching { cloud?.destroy() }
         cloud = null
         val spoken = prefs.replyLanguage.ifBlank { prefs.language }
-        val line = getString(
-            if (wanted) R.string.listening_multilingual else R.string.listening_one_language)
+        val line = when {
+            change.language != null -> getString(R.string.listening_language, change.language)
+            change.multilingual == true -> getString(R.string.listening_multilingual)
+            else -> getString(R.string.listening_one_language)
+        }
         report(line)
         say(line, spoken)
     }
