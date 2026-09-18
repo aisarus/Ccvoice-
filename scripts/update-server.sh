@@ -103,6 +103,17 @@ if [ -f "$ENV_FILE" ]; then
     add_env PUBLIC_DIR "$PUBLIC"
     add_env PUBLIC_URL "$BASE/p"
     add_env MCP_CONFIG "$ROOT/mcp.json"
+
+    # Навыки живут в рабочей папке, а она от репозитория отдельно: без этой
+    # строчки обновление кода их туда не доносит и «сделай сайт» остаётся
+    # обычной просьбой без готового порядка действий.
+    WS="$(sed -n 's/^WORKSPACE_DIR=//p' "$ENV_FILE" | tail -1)"
+    WS="${WS:-$ROOT/workspace}"
+    if [ -d "$ROOT/skills" ]; then
+        mkdir -p "$WS/.claude/skills"
+        cp -r "$ROOT/skills/." "$WS/.claude/skills/" && \
+            echo "— навыки: $(find "$ROOT/skills" -name SKILL.md | wc -l) шт. в $WS/.claude/skills"
+    fi
 fi
 
 # Инструменты, которыми Claude Code делает то, чего не умеет сам. Ставим

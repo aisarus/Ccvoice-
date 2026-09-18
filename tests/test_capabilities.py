@@ -9,6 +9,9 @@ Code, а не пустую строку, — это разница между «
 момент идёт по улице.
 """
 import http
+import re
+from pathlib import Path
+
 import pytest
 
 from voice_claude import capabilities, server
@@ -164,3 +167,67 @@ def test_a_huge_file_is_refused_rather_than_read_into_memory(published, monkeypa
     (published / "видео.mp4").write_bytes(b"0" * 64)
     reply = server.published_response("/p/видео.mp4", published)
     assert reply.status_code == http.HTTPStatus.REQUEST_ENTITY_TOO_LARGE
+
+
+# -- набор навыков ---------------------------------------------------------
+#
+# Навык — это папка с SKILL.md, которую Claude Code подхватывает сам, по
+# описанию, из живой речи. Поэтому цена ошибки здесь тихая: неверный
+# заголовок не роняет ничего, навык просто не появляется в списке, и
+# «сделай сайт» остаётся просьбой без готового порядка действий. Узнать об
+# этом голосом нельзя, поэтому проверяем здесь.
+
+SKILLS = sorted((Path(__file__).resolve().parents[1] / "skills").glob("*/SKILL.md"))
+NAME = re.compile(r"[a-z][a-z0-9-]*")
+EFFORTS = {"low", "medium", "high", "xhigh", "max"}
+
+
+def _frontmatter(path):
+    text = path.read_text()
+    assert text.startswith("---\n"), f"{path}: заголовок должен начинаться с первой строки"
+    head, _, body = text[4:].partition("\n---\n")
+    meta = {}
+    for line in head.splitlines():
+        key, sep, value = line.partition(":")
+        assert sep, f"{path}: строка заголовка без двоеточия: {line!r}"
+        meta[key.strip()] = value.strip()
+    return meta, body
+
+
+def test_there_is_a_set_of_skills():
+    assert len(SKILLS) >= 5
+
+
+@pytest.mark.parametrize("path", SKILLS, ids=lambda p: p.parent.name)
+def test_skill_is_shaped_the_way_claude_code_expects(path):
+    meta, body = _frontmatter(path)
+    name = path.parent.name
+    # Имя папки становится командой, поэтому кириллица и пробелы в нём —
+    # навык, который не позвать.
+    assert NAME.fullmatch(name), f"{name}: только строчная латиница и дефис"
+    assert meta.get("name") == name, "имя в заголовке должно совпадать с папкой"
+    assert meta.get("effort", "high") in EFFORTS, meta.get("effort")
+    assert body.strip(), "навык без тела ничего не делает"
+
+
+@pytest.mark.parametrize("path", SKILLS, ids=lambda p: p.parent.name)
+def test_skill_describes_when_it_fires(path):
+    """Описание — единственное, по чему модель решает включить навык.
+
+    Человек говорит по-русски и не знает, что у навыка есть имя, поэтому в
+    описании должны стоять живые фразы, а не название функции.
+    """
+    meta, _ = _frontmatter(path)
+    description = meta.get("description", "")
+    assert len(description) > 80, "слишком короткое, чтобы по нему сработать"
+    assert "«" in description, "нет живых фраз, на которые навык включается"
+
+
+@pytest.mark.parametrize("path", SKILLS, ids=lambda p: p.parent.name)
+def test_skill_does_not_promise_what_the_shell_cannot_do(path):
+    """Навык, обещающий сочинить фотографию, — это заглушка, выданная за
+    фотографию, и человек узнает об этом последним."""
+    body = _frontmatter(path)[1].lower()
+    if "фотограф" in body:
+        assert "не можешь" in body or "нет" in body, \
+            "фотография упомянута без оговорки, что сочинить её нельзя"
