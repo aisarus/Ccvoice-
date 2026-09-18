@@ -1107,6 +1107,7 @@ def make_process_request(directory: Path = CLIENT_DIR,
                     "router_model": daemon.settings.router_model,
                     "workspace": str(Path(daemon.settings.workspace).expanduser()),
                     "github": github_ready(),
+                    "telegram": telegram.configured(),
                 }, ensure_ascii=False, indent=2) + "\n"
                 return http_response(http.HTTPStatus.OK, body.encode("utf-8"),
                                      "application/json; charset=utf-8")
