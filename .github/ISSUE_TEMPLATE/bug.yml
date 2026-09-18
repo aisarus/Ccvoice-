@@ -1,0 +1,65 @@
+name: Bug report
+description: Something behaves differently than it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Found a **security** problem instead? Do not open an issue — see
+        [SECURITY.md](https://github.com/aisarus/Ccvoice-/blob/main/SECURITY.md).
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you said or did, and what the system did back. Quote the words if it was voice.
+      placeholder: |
+        Said "Claude, run the tests". The phone lit up, then nothing came back.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of scripts/doctor.sh
+      description: |
+        Run it on the machine the daemon lives on and paste the whole thing —
+        it collects the code version, the service state, the tokens and a live
+        round-trip in one go, so nothing else needs asking.
+
+            sudo bash /opt/voice-shell/scripts/doctor.sh
+
+        From a checkout: `bash scripts/doctor.sh`. Add `--fast` to skip the two
+        slow probes.
+
+        **Redact one line before pasting.** The report shows the first nine
+        characters of each token. For the Claude tokens that is the fixed
+        `sk-ant-oa` prefix and harmless, but `VOICE_TOKEN` is random
+        throughout, so those nine characters are nine characters of a real
+        secret. Replace them with `…` in the `VOICE_TOKEN: ok, …` line.
+        Everything else in the report is safe to paste.
+      render: text
+    validations:
+      required: true
+
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where it went wrong
+      multiple: true
+      options:
+        - Android app
+        - Web client
+        - Daemon
+        - Telegram bridge
+        - Install or update scripts
+        - Not sure
+    validations:
+      required: true

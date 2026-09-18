@@ -1,0 +1,29 @@
+name: Idea
+description: Something the system should be able to do and cannot.
+labels: ["idea"]
+body:
+  - type: textarea
+    id: situation
+    attributes:
+      label: The situation you were in
+      description: |
+        What you were actually doing when you wanted this — not the feature,
+        the moment. Hands busy, away from the desk, in the middle of something.
+    validations:
+      required: true
+
+  - type: textarea
+    id: want
+    attributes:
+      label: What you wanted to happen
+      description: If it is a voice command, write the words you would say.
+    validations:
+      required: true
+
+  - type: textarea
+    id: now
+    attributes:
+      label: What you do today instead
+      description: Even "give up and open the laptop" is useful to know.
+    validations:
+      required: false

@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security problem
+    url: https://github.com/aisarus/Ccvoice-/blob/main/SECURITY.md
+    about: A vulnerability is not an issue. Read SECURITY.md and report it privately.

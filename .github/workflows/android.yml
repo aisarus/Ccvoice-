@@ -34,9 +34,98 @@ jobs:
         working-directory: android
         run: gradle --no-daemon testDebugUnitTest
 
+      # Ключ подписи. Есть секрет — подписываем им, и тогда обновление поверх
+      # установленного приложения встаёт только у того, у кого этот ключ.
+      # Нет секрета — остаётся отладочный ключ из репозитория: он открытый,
+      # зато сегодня ничего не ломается. Как завести свой: scripts/release-key.sh
+      - name: Взять ключ подписи
+        id: signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+            echo "::warning::ANDROID_KEYSTORE_BASE64 не задан — APK подписан открытым ключом из репозитория. Тем же ключом его подпишет кто угодно, поэтому релизом такая сборка не считается. Свой ключ: bash scripts/release-key.sh"
+            exit 0
+          fi
+          if [ -z "${KEYSTORE_PASSWORD:-}" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 задан, а ANDROID_KEYSTORE_PASSWORD — нет"
+            exit 1
+          fi
+          store="$RUNNER_TEMP/release.keystore"
+          printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > "$store"
+          chmod 600 "$store"
+          # Ключ проверяется до сборки нарочно: «пароль не подошёл» посреди
+          # gradle читается как поломка сборки, а это поломка секрета.
+          keytool -list -keystore "$store" -storepass "$KEYSTORE_PASSWORD" -alias voiceshell >/dev/null 2>&1 \
+            || { echo "::error::ключ из секрета не открывается: либо пароль не тот, либо внутри нет записи с именем voiceshell"; exit 1; }
+          fingerprint=$(keytool -list -v -keystore "$store" -storepass "$KEYSTORE_PASSWORD" 2>/dev/null \
+            | sed -n 's/.*SHA256: *//p' | head -1 | tr -d ':' | tr 'A-Z' 'a-z')
+          {
+            echo "store=$store"
+            echo "fingerprint=$fingerprint"
+          } >> "$GITHUB_OUTPUT"
+          echo "ключ из секрета, отпечаток: $fingerprint"
+
       - name: Собрать APK
         working-directory: android
-        run: gradle --no-daemon assembleDebug
+        env:
+          # Имена читает build.gradle.kts. Пустые — значит ключа из секрета нет.
+          ANDROID_KEYSTORE_FILE: ${{ steps.signing.outputs.store }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          args=(--no-daemon assembleDebug)
+          if [ -n "${ANDROID_KEYSTORE_FILE:-}" ]; then
+            args+=("-Pkeystore=$ANDROID_KEYSTORE_FILE")
+          fi
+          gradle "${args[@]}"
+
+      # Подпись проверяется по факту, а не по намерению. Секрет можно задать, а
+      # сборка всё равно возьмёт ключ из репозитория — если build.gradle.kts его
+      # не читает. Молча выдать такую сборку за релиз — худшее из возможного,
+      # поэтому здесь сравниваются отпечатки, и расхождение валит сборку.
+      - name: Проверить, каким ключом подписан APK
+        working-directory: android/app/build/outputs/apk/debug
+        env:
+          WANT: ${{ steps.signing.outputs.fingerprint }}
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          signer=""
+          # `|| true` здесь не украшение: при pipefail пустой find валит весь
+          # шаг, и «не нашёл apksigner» выглядит как «сборка сломалась».
+          if [ -n "$sdk" ]; then
+            signer=$(find "$sdk/build-tools" -name apksigner -type f 2>/dev/null \
+              | sort | tail -1 || true)
+          fi
+          if [ -n "$signer" ]; then
+            got=$("$signer" verify --print-certs app-debug.apk \
+              | sed -n 's/.*certificate SHA-256 digest: *//p' | head -1 || true)
+          else
+            # v1-подпись читается и keytool'ом: пусть шаг не падает из-за
+            # отсутствующего build-tools, раз проверка возможна и без него.
+            got=$(keytool -printcert -jarfile app-debug.apk 2>/dev/null \
+              | sed -n 's/.*SHA256: *//p' | head -1 | tr -d ':' || true)
+          fi
+          got=$(printf '%s' "$got" | tr 'A-Z' 'a-z')
+          [ -n "$got" ] || { echo "::error::не удалось прочитать подпись APK"; exit 1; }
+          echo "отпечаток ключа подписи: $got"
+
+          if [ -z "${WANT:-}" ]; then
+            echo "ключ: открытый отладочный из репозитория" > signing.txt
+            echo "отпечаток: $got" >> signing.txt
+            echo "этой сборке нельзя доверять как релизу: тем же ключом её подпишет кто угодно" >> signing.txt
+            exit 0
+          fi
+          if [ "$got" != "$WANT" ]; then
+            echo "::error::секрет ANDROID_KEYSTORE_BASE64 задан, но APK подписан не им: $got вместо $WANT. Значит android/app/build.gradle.kts по-прежнему берёт ключ из репозитория и не читает -Pkeystore / ANDROID_KEYSTORE_PASSWORD. Нужная правка описана в SECURITY.md, раздел «APK signing key»."
+            exit 1
+          fi
+          echo "ключ: свой, из секрета ANDROID_KEYSTORE_BASE64" > signing.txt
+          echo "отпечаток: $got" >> signing.txt
+          echo "подпись своя"
 
       # Запасной путь: некоторые браузеры и сети не дают докачать .apk,
       # а такой же файл в .zip проходит спокойно.
@@ -46,6 +135,9 @@ jobs:
           cp app-debug.apk voice-shell.apk
           zip -q voice-shell-apk.zip voice-shell.apk
           sha256sum app-debug.apk voice-shell-apk.zip > checksums.txt
+          # Чем подписано — рядом с суммами: скачавшему это нужно знать раньше,
+          # чем он поставит APK поверх своего.
+          cat signing.txt >> checksums.txt
           cat checksums.txt
 
       - uses: actions/upload-artifact@v4
