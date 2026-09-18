@@ -189,4 +189,6 @@
     <string name="mic_channel_failed">el canal de los auriculares no se ha abierto: %1$s</string>
     <string name="tts_no_voice">no hay voz para %1$s en este teléfono — la respuesta solo se muestra como texto</string>
     <string name="tts_no_voice_spoken">Este teléfono no tiene voz para ese idioma. La respuesta está en la pantalla.</string>
+    <string name="listening_multilingual">Escucho en todos los idiomas que conozco.</string>
+    <string name="listening_one_language">Escucho en un solo idioma.</string>
 </resources>

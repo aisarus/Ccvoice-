@@ -350,6 +350,10 @@ class VoiceService : Service() {
             report(getString(if (scope == "work") R.string.stopping_work else R.string.going_quiet))
             return
         }
+        Intents.multilingualSwitch(text)?.let { wanted ->
+            switchMultilingual(wanted)
+            return
+        }
         Intents.languageSwitch(text)?.let { code ->
             switchReplyLanguage(code, aloud = true)
             return
@@ -538,11 +542,29 @@ class VoiceService : Service() {
                     // Несколько гипотез: распознаватель почти всегда держит
                     // верный вариант вторым, когда путает имя из проекта.
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-                    putExtra("android.speech.extra.ENABLE_LANGUAGE_SWITCH", "adaptive")
-                    putStringArrayListExtra(
-                        "android.speech.extra.LANGUAGE_SWITCH_ALLOWED_LANGUAGES",
-                        arrayListOf("ru-RU", "en-US", "he-IL")
-                    )
+                    // Распознавание нескольких языков сразу (Android 13+).
+                    //
+                    // Здесь уже стояла попытка это включить, и она не
+                    // работала: значение «adaptive» такого API не бывает —
+                    // валидные это high_precision, balanced, quick_response, —
+                    // а переключение языков без включённого их определения не
+                    // работает вовсе. Отсюда и «на иврите не слышит».
+                    //
+                    // Даже так это «по возможности»: extras исполняет служба
+                    // распознавания, и не всякая их поддерживает. Не
+                    // поддержала — молча слушает один язык, как раньше.
+                    if (prefs.multilingual && Build.VERSION.SDK_INT >= 33) {
+                        val allowed = ArrayList(
+                            listOf(prefs.language) + Prefs.SUPPORTED.filter { it != prefs.language }
+                        )
+                        putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_DETECTION, true)
+                        putStringArrayListExtra(
+                            RecognizerIntent.EXTRA_LANGUAGE_DETECTION_ALLOWED_LANGUAGES, allowed)
+                        putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_SWITCH,
+                                 RecognizerIntent.LANGUAGE_SWITCH_BALANCED)
+                        putStringArrayListExtra(
+                            RecognizerIntent.EXTRA_LANGUAGE_SWITCH_ALLOWED_LANGUAGES, allowed)
+                    }
                 }
                 cloud?.setRecognitionListener(commandListener())
                 cloud?.startListening(intent)
@@ -840,6 +862,23 @@ class VoiceService : Service() {
         val spoken = prefs.replyLanguage.ifBlank { prefs.language }
         report(getString(R.string.language_set, spoken))
         if (aloud) say(Intents.switchNotice(prefs.replyLanguage, prefs.language), spoken)
+    }
+
+    /**
+     * «Слушай все языки» / «слушай только по-русски».
+     *
+     * Распознаватель уже начатую реплику не переслушает — новые extras
+     * подействуют со следующей, поэтому клиента сбрасываем сразу.
+     */
+    private fun switchMultilingual(wanted: Boolean) {
+        prefs.multilingual = wanted
+        runCatching { cloud?.destroy() }
+        cloud = null
+        val spoken = prefs.replyLanguage.ifBlank { prefs.language }
+        val line = getString(
+            if (wanted) R.string.listening_multilingual else R.string.listening_one_language)
+        report(line)
+        say(line, spoken)
     }
 
     private fun speak(text: String) {

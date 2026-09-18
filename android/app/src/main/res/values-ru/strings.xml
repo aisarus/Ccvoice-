@@ -188,4 +188,6 @@
     <string name="mic_channel_failed">канал гарнитуры не открылся: %1$s</string>
     <string name="tts_no_voice">нет голоса для языка «%1$s» — ответ только текстом</string>
     <string name="tts_no_voice_spoken">На телефоне нет голоса для этого языка. Ответ на экране.</string>
+    <string name="listening_multilingual">Слушаю все языки, которые знаю.</string>
+    <string name="listening_one_language">Слушаю только один язык.</string>
 </resources>

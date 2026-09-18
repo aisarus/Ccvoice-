@@ -145,6 +145,30 @@ object Intents {
         return null
     }
 
+    /** «Слушай все языки» / «слушай только по-русски». null — не об этом. */
+    private val LISTEN_ALL = listOf(
+        "слушай все языки", "слушай любой язык", "понимай все языки",
+        "listen to all languages", "listen in any language", "understand every language",
+        "escucha todos los idiomas", "听所有语言", "什么语言都听"
+    )
+    private val LISTEN_ONE = listOf(
+        "слушай только", "слушай один язык", "только один язык",
+        "listen only", "listen to one language", "one language only",
+        "escucha solo", "只听一种语言", "只听"
+    )
+
+    fun multilingualSwitch(text: String): Boolean? {
+        val bare = stripWake(normalise(text))
+        fun hit(phrases: List<String>) = phrases.any {
+            bare == it || bare.startsWith("$it ") || (isCjk(it) && bare.startsWith(it))
+        }
+        // «Слушай все языки» начинается не так, как «слушай только русский»,
+        // но проверяем сперва длинное: иначе «слушай» съест обе фразы.
+        if (hit(LISTEN_ALL)) return true
+        if (hit(LISTEN_ONE)) return false
+        return null
+    }
+
     /** Что сказать вслух о новом языке ответа — на нём же. */
     fun switchNotice(replyLanguage: String, recognitionLanguage: String): String {
         val spoken = replyLanguage.ifBlank { recognitionLanguage }

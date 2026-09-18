@@ -177,4 +177,21 @@ class IntentsTest {
     fun `незнакомый язык ответа не роняет обещание в пустоту`() {
         assertEquals("Answering in English.", Intents.switchNotice("fr-FR", "fr-FR"))
     }
+
+    @Test
+    fun `слушать все языки и слушать один — разные команды`() {
+        assertEquals(true, Intents.multilingualSwitch("клод, слушай все языки"))
+        assertEquals(true, Intents.multilingualSwitch("claude, listen to all languages"))
+        assertEquals(false, Intents.multilingualSwitch("клод, слушай только русский"))
+        assertEquals(false, Intents.multilingualSwitch("claude, listen only english"))
+        assertEquals(null, Intents.multilingualSwitch("клод, почини тесты"))
+    }
+
+    @Test
+    fun `слушать все языки не путается со сменой языка ответа`() {
+        // Обе фразы начинаются с обращения и обе про языки: если бы
+        // languageSwitch срабатывал первым, «слушай все языки» молча
+        // переключал бы язык ответа вместо распознавания.
+        assertEquals(null, Intents.languageSwitch("клод, слушай все языки"))
+    }
 }

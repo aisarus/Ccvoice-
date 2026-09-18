@@ -189,4 +189,6 @@
     <string name="mic_channel_failed">耳机通道没能打开：%1$s</string>
     <string name="tts_no_voice">这台手机没有 %1$s 的语音——答复只以文字显示</string>
     <string name="tts_no_voice_spoken">这台手机没有这种语言的语音，答复在屏幕上。</string>
+    <string name="listening_multilingual">我会听我认识的所有语言。</string>
+    <string name="listening_one_language">我只听一种语言。</string>
 </resources>

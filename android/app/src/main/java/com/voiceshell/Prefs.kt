@@ -38,6 +38,17 @@ class Prefs(context: Context) {
         get() = sp.getString("reply_language", "") ?: ""
         set(value) = sp.edit().putString("reply_language", value.trim()).apply()
 
+    /**
+     * Слушать несколько языков сразу (Android 13+).
+     *
+     * По умолчанию включено — таким и было намерение кода, который это уже
+     * пытался включить. Выключается голосом: если на конкретном телефоне от
+     * этого портится распознавание основного языка, спорить с ним незачем.
+     */
+    var multilingual: Boolean
+        get() = sp.getBoolean("multilingual", true)
+        set(value) = sp.edit().putBoolean("multilingual", value).apply()
+
     private fun deviceLanguage(): String {
         val want = java.util.Locale.getDefault().language.lowercase()
         return SUPPORTED.firstOrNull { it.startsWith(want) } ?: "en-US"
