@@ -201,4 +201,5 @@
     <string name="second_ear_language">комнату слушаю на %1$s</string>
     <string name="second_ear_expired">второе ухо закрылось само через час</string>
     <string name="second_ear_online">распознавания %1$s на устройстве нет — комната идёт через сеть</string>
+    <string name="heard_too_little">расслышал только «%1$s» — скажи ещё раз</string>
 </resources>

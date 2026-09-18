@@ -84,6 +84,15 @@ class VoiceService : Service() {
         private const val WINDOW_MS = 15_000L
         /** Столько ждём, что человек начнёт говорить, прежде чем взять расслышанное. */
         private const val FALLBACK_MS = 3_500L
+        // Локальная модель отпускает микрофон не в тот же миг, когда её
+        // остановили: поток записи закрывается чуть позже, и на канале
+        // гарнитуры — заметно позже.
+        private const val MIC_HANDOVER_MS = 150L
+        private const val MIC_RETRY_MS = 250L
+        // Одно нажатие система умеет доставить дважды, разными путями.
+        private const val BUTTON_DEBOUNCE_MS = 600L
+        // Короче этого одно слово от локальной модели — почти наверняка мусор.
+        private const val FALLBACK_MIN_CHARS = 12
         /** Распознаватель обязан ответить хоть чем-то; молчит дольше — он мёртв. */
         private const val RECOGNIZER_DEADLINE_MS = 15_000L
         /** Сколько ждать конца произнесения, если движок забыл сказать «готово». */
@@ -146,6 +155,8 @@ class VoiceService : Service() {
     // О каждом недостающем голосе говорим один раз, а не на каждой реплике.
     private val voicelessSaid = mutableSetOf<String>()
     private var session: MediaSessionCompat? = null
+    // Когда нажатие гарнитуры последний раз что-то сделало.
+    private var buttonActedAt = 0L
     private var cloud: SpeechRecognizer? = null
     private var wake: WakeWordEngine? = null
     private var route: AudioRoute? = null
@@ -494,6 +505,18 @@ class VoiceService : Service() {
         val text = fallbackText
         fallbackText = ""
         if (text.isBlank()) return
+        // Огрызок в одно слово — это не реплика, а то, что локальная модель
+        // успела поймать до передачи микрофона. Отправлять его значит
+        // получить в ухо «повтори, пожалуйста, что нужно?» — круг к модели,
+        // секунды и ощущение, что оболочка не слышит. Лучше сразу сказать,
+        // что не расслышали, и слушать снова.
+        val words = text.trim().split(Regex("\\s+"))
+        if (words.size < 2 && text.trim().length < FALLBACK_MIN_CHARS) {
+            report(getString(R.string.heard_too_little, text))
+            signals?.missed(route?.onBluetoothMic == true)
+            phase(R.string.state_waiting_for_wake)
+            return
+        }
         report(getString(R.string.heard_locally, text))
         deliver(text)
     }
@@ -663,6 +686,22 @@ class VoiceService : Service() {
             // конца круга, иначе команда уедет в буфер как чужая речь.
             stopRoom()
             runCatching { wake?.stop() }
+            startCloud(attempt = 1)
+        }
+    }
+
+    /**
+     * Запустить облачное распознавание, отдав микрофон по-настоящему.
+     *
+     * `wake?.stop()` возвращает управление раньше, чем освобождается сам
+     * поток записи, — особенно на канале bluetooth-гарнитуры. Старт впритык
+     * упирался в занятый микрофон и падал с ERROR_CLIENT: в логе это
+     * выглядело как «ошибка 5», а в ухе — как «в шумном месте не слышит»,
+     * потому что до сервера доходил только огрызок от локальной модели.
+     */
+    private fun startCloud(attempt: Int) {
+        main.postDelayed({
+            if (!awaitingCommand) return@postDelayed
             try {
                 if (cloud == null) cloud = SpeechRecognizer.createSpeechRecognizer(this)
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -674,9 +713,9 @@ class VoiceService : Service() {
                     // Реплика — на языке микрофона, что бы ни слушала комната.
                     hearing(this, prefs.language)
                 }
-                cloud?.setRecognitionListener(commandListener())
+                cloud?.setRecognitionListener(commandListener(attempt))
                 cloud?.startListening(intent)
-                if (fallback.isNotBlank()) main.postDelayed(fallbackTimer, FALLBACK_MS)
+                if (fallbackText.isNotBlank()) main.postDelayed(fallbackTimer, FALLBACK_MS)
                 main.postDelayed(recognizerWatchdog, RECOGNIZER_DEADLINE_MS)
             } catch (t: Throwable) {
                 awaitingCommand = false
@@ -684,10 +723,10 @@ class VoiceService : Service() {
                 deliverFallback()
                 resumeWake()
             }
-        }
+        }, if (attempt == 1) MIC_HANDOVER_MS else MIC_RETRY_MS)
     }
 
-    private fun commandListener() = object : CloudListener {
+    private fun commandListener(attempt: Int = 1) = object : CloudListener {
         override fun onResults(results: Bundle?) {
             val heard = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 .orEmpty().map { it.trim() }.filter { it.isNotEmpty() }
@@ -721,6 +760,19 @@ class VoiceService : Service() {
         }
 
         override fun onError(error: Int) {
+            // Занятый микрофон — не «не расслышал», а «не успели отдать».
+            // Один повтор через четверть секунды: к этому времени поток
+            // записи локальной модели закрыт наверняка. Отдавать вместо
+            // этого огрызок от неё — значит слать серверу «меня» и получать
+            // «повтори, пожалуйста», потратив круг и время человека.
+            if (error == SpeechRecognizer.ERROR_CLIENT && attempt == 1) {
+                Log.i(TAG, "recognizer busy, one more try")
+                main.removeCallbacks(recognizerWatchdog)
+                main.removeCallbacks(fallbackTimer)
+                runCatching { cloud?.cancel() }
+                startCloud(attempt = 2)
+                return
+            }
             finishCommand()
             if (error != SpeechRecognizer.ERROR_NO_MATCH &&
                 error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT
@@ -1191,10 +1243,16 @@ class VoiceService : Service() {
                     if (event != null && event.action == KeyEvent.ACTION_DOWN) {
                         val name = KeyEvent.keyCodeToString(event.keyCode)
                         Log.i(TAG, "headset key $name handled=$handled")
-                        // Нажатие дошло, но действие незнакомое: это третья,
-                        // самая неочевидная поломка, и молчать о ней нельзя —
-                        // снаружи она неотличима от «гарнитура ничего не шлёт».
-                        if (!handled) report(getString(R.string.headset_key_ignored, name))
+                        // На «не обработано» здесь полагаться нельзя: начиная
+                        // с Android 5 система сама разбирает кнопку уже после
+                        // этого колбэка, и false тут — обычное дело, а не
+                        // поломка. Поэтому ждём: если через полсекунды окно
+                        // так и не открылось, значит действительно мимо.
+                        main.postDelayed({
+                            if (System.currentTimeMillis() - buttonActedAt > 500) {
+                                report(getString(R.string.headset_key_ignored, name))
+                            }
+                        }, 500)
                     }
                     return handled
                 }
@@ -1272,6 +1330,13 @@ class VoiceService : Service() {
      * стал звучать неправильно раньше, чем начал давать неправильный ответ.
      */
     private fun armWindow() {
+        // Кнопку система умеет доставить дважды: своим путём и через
+        // приёмник из манифеста. Два окна подряд — это две попытки
+        // распознавания на один микрофон, то есть ERROR_CLIENT и потерянная
+        // реплика. Второе нажатие за полсекунды — то же самое нажатие.
+        val now = System.currentTimeMillis()
+        if (now - buttonActedAt < BUTTON_DEBOUNCE_MS) return
+        buttonActedAt = now
         if (speaking) silence()
         // Микрофон мог держать круг второго уха. Не отобрать его — значит
         // открыть окно, в которое никто не слушает: сказанное уехало бы в

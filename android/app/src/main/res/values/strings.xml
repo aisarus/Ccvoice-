@@ -228,4 +228,5 @@
     <string name="second_ear_language">the room is listened to in %1$s</string>
     <string name="second_ear_expired">the second ear closed itself after an hour</string>
     <string name="second_ear_online">no on-device %1$s recognition — the room goes through the network</string>
+    <string name="heard_too_little">only caught «%1$s» — say it again</string>
 </resources>

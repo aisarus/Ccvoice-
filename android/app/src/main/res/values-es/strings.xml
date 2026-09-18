@@ -202,4 +202,5 @@
     <string name="second_ear_language">la sala se escucha en %1$s</string>
     <string name="second_ear_expired">el segundo oído se ha cerrado solo al cabo de una hora</string>
     <string name="second_ear_online">no hay reconocimiento de %1$s en el dispositivo — la sala pasa por la red</string>
+    <string name="heard_too_little">solo capté «%1$s» — dilo otra vez</string>
 </resources>
