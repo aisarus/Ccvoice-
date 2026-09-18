@@ -51,6 +51,52 @@ silence. That is where "he misunderstood me" comes from.
 | Whether it is an echo | our own synthesis in the microphone is discarded, but that works worse through a speaker than through headphones |
 | Words that sound like "Клод" | "клот", "клад", "плод" count as the wake word too. "Код" and "чат" do not — those are how commands start |
 
+### It does not understand a command
+
+Command phrases from every language the shell knows are matched at the same
+time, so there is nothing to switch before speaking: «откати последнее» and
+"undo the last thing" are live in the same utterance slot. If a command is
+ignored anyway, it is one of these.
+
+| What to check | How to fix it |
+|---|---|
+| Whether the phrase is in the table at all | [`VOICE.md`](VOICE.md) lists every one in Russian and English; Spanish and Chinese are in [`lexicon.py`](../daemon/voice_claude/lexicon.py). A near miss is not a match — the tables are exact phrases, not keywords |
+| Whether the command opened the utterance | undo, memory and the target prefixes have to come first. Filler in front is stripped ("claude", «слушай», "ok", «пожалуйста»); a clause is not. «А это можно откатить?» is a question and stays one |
+| Whether it was Hebrew | there are no phrase tables for Hebrew — it is a recognition language only. Spoken Hebrew reaches Claude as ordinary speech, and the shell's own commands do not fire |
+| What the phone actually heard | the notification shows `heard on the phone: …` and what was sent. If the words there are wrong, the problem is recognition, not the command table |
+| Whether the daemon sees the same words | `say.py` sends text straight through, skipping recognition — see [Checking by hand](#checking-by-hand-without-a-microphone) |
+
+### It answers in a language you did not expect
+
+Usually that is the shell answering in the language it heard, which is what it is
+supposed to do, not a fault. The answer's language is decided per utterance, in
+this order: a language pinned by voice, then the language of the utterance
+itself, then what the phone declared when it connected, then `VOICE_LANG`, then
+English. One sentence in another language — or one the detector reads as another
+language — moves the next answer with it.
+
+| What to check | How to fix it |
+|---|---|
+| Whether a language is pinned | "Claude, English" pins the answers and beats everything else, including the language you are speaking. "Claude, as I asked" unpins it. A pin set days ago is the usual reason a whole session comes back in the wrong language |
+| Whether the utterance really was in that language | Latin script is decided by a short list of common words, so a short English-looking phrase inside a Spanish sentence can tip it. The next utterance re-decides on its own |
+| What the phone declared | the app's language switch, or the chip in the browser client, is sent in `hello` and is used when the utterance itself settles nothing |
+| `VOICE_LANG` | the deployment fallback, used when none of the above says anything |
+
+To move the fallback:
+
+```bash
+echo 'VOICE_LANG=en' | sudo tee -a /etc/voice-shell.env
+sudo systemctl restart voice-shell
+```
+
+It takes `en`, `ru`, `es` or `zh`. It is the last resort and not an override: a
+pinned language, an utterance whose language the shell recognises, and the
+language the phone declared all win over it. To hold the answers to one language
+whatever you speak, pin it by voice.
+
+Listening is not affected by any of this, pin or no pin. The shell goes on
+matching commands in every language whatever it is answering in.
+
 ### It says nothing back
 
 | What to check | How to fix it |
@@ -202,6 +248,7 @@ the phone.
 | The app is silent after a reboot | in the app, allow autostart and lift the battery usage restriction |
 | The service dies after a few minutes | the same: the system kills a foreground service when battery saving is on |
 | Connects and drops immediately | check the address and token in the settings; an address without TLS needs `http://`, not `https://` |
+| It mishears whole sentences in one language but not another | the app asks Android to recognise every language it knows, starting with the one picked on its screen, but only a recognition service that honours the request actually does it. Move the picked language by voice — "Claude, listen in English" — or on the app's screen; if multilingual recognition is what spoiled the main language, "listen only" stops it asking. "Claude, English" moves neither: that pins the answers. The daemon's command tables need no switching, they are all matched at once |
 | The voice in the headphones is quiet or "telephone-like" | that is correct: the headset microphone channel is narrowband. The **микрофон: телефон** button gives the wide band back and loses the headset microphone |
 | Stress marks sound wrong, or you can hear a "plus" | the **ударения** button: "знаком" instead of "авто", check with the "скажи" field |
 
