@@ -2239,10 +2239,19 @@
     "id": "config_defaults",
     "wake": {
       "enabled": true,
-      "word": "клод",
+      "word": "claude",
       "sensitivity": 0.55,
       "engine": "openwakeword|porcupine",
-      "on_device": true
+      "on_device": true,
+      "variants": [
+        "claude",
+        "клод",
+        "клоуд",
+        "клауд",
+        "claudio",
+        "克劳德"
+      ],
+      "why_variants": "Recognition mangles a short name more than anything else, and the wake word is the one word that has to survive every accent."
     },
     "vad": {
       "engine": "silero",
@@ -2254,7 +2263,7 @@
     "stt": {
       "primary": "whisper-large-v3-turbo @ daemon",
       "fallback": "android SpeechRecognizer",
-      "language": "ru",
+      "language": "follows config_defaults.language; the phone's recogniser takes one at a time",
       "vocabulary_boost": [
         "auth.ts",
         "npm",
@@ -2263,7 +2272,8 @@
         "rebase",
         "pytest",
         "deployment"
-      ]
+      ],
+      "multilingual": "Android 13+ language detection and switching, best effort: the recognition service may ignore it and listen in one language"
     },
     "tts": {
       "engine": "piper|system",
