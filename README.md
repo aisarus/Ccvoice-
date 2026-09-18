@@ -1,354 +1,392 @@
 # Voice Shell for Claude Code
 
-Голос поверх Claude Code. Телефон в кармане, гарнитура на голове, руки
-свободны: говоришь — Claude работает в репозитории и отвечает в ухо. Не новый
-агент, а транспорт голоса, роутинг и слой представления над уже работающей
-сессией.
+Talk to a running Claude Code session from your pocket: the phone stays in your
+pocket, the screen stays off, and the answer arrives in your ear.
+
+[Русский](README.ru.md) · [Español](README.es.md) · [中文](README.zh.md)
 
 ```
-Человек
-  ↕ голос
-Android
-  ↕ WebSocket (LAN / Tailscale)
-Desktop daemon
+you
+  ↕ speech
+Android app
+  ↕ WebSocket (LAN / Tailscale / HTTPS)
+daemon
   ↕
-существующая Claude Code session
+one long-lived Claude Code session
   ↕
-репозиторий / shell / git / tests
+repository / shell / git / tests
 ```
+
+It is not another agent. It is voice transport, routing and a presentation
+layer over a session that already works.
 
 ---
 
-## Пользоваться прямо сейчас
+## Why this and not the things that exist
 
-**1. Поставить приложение.**
-[Скачать APK](https://github.com/aisarus/Ccvoice-/releases/download/apk-latest/app-debug.apk)
-— он пересобирается на каждом пуше. Разреши микрофон и уведомления: без
-уведомлений фоновая служба работать не имеет права.
+Claude Code already has a voice mode: you hold space at the keyboard and it
+types what you say. That is dictation — you are still at the machine, still
+reading the screen.
 
-**2. Поднять сервер.** По ssh, можно с телефона:
+Claude Code Remote Control and the Cursor mobile app put the session on your
+phone's screen. That is a remote control — you are still looking at something.
+
+Here nothing is on screen. A wake word runs on the phone itself, so the
+microphone can stay open without audio leaving the device. You say "Клод", wait
+for a tone, and speak. Claude works in the repository and reads the result back
+in one to three sentences. You can cut it off mid-answer. You can hand it a job
+and walk away — background tasks run on their own git worktree and report back
+when the ear is quiet.
+
+The price of that is narrow scope. Read [Limits](#limits) before you install.
+
+---
+
+## What you need
+
+| | |
+|---|---|
+| A machine that stays up | A VPS, or your own computer at home. The daemon has been run on Linux; that is all it has been tested on. |
+| Claude access | A Claude subscription (Pro or Max) if you are running this for yourself, or an Anthropic API key. See [Which credential](#which-credential). |
+| An Android phone | The app is Android only. There is no iOS app, and iOS sits in the last stage of the roadmap. |
+| Bluetooth headphones | Not required, but the whole point. The app raises the headset's own microphone so the phone is not listening through fabric. |
+
+A browser client also exists, for trying this without installing anything. It
+is weaker: no wake word, no always-on "stop". See [`docs/DEPLOY.md`](docs/DEPLOY.md).
+
+### Which credential
+
+A Claude Pro or Max subscription works when **you** run this on **your own**
+machine for **yourself**. Since February 2026 Anthropic no longer permits
+subscription OAuth credentials to be used from third-party products, so you
+cannot stand this up as a service and let other people talk to it on your
+subscription. If anyone other than you is going to use an instance, that
+instance needs its own Anthropic API key.
+
+The question this raised, and the letter written about it, are in
+[`docs/anthropic-inquiry.md`](docs/anthropic-inquiry.md).
+
+---
+
+## Install
+
+### The server
+
+Over ssh, from a phone if that is what you have:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aisarus/Ccvoice-/claude/voice-shell-claude-code-77wwh2/scripts/install-server.sh | CHECK=1 bash   # посмотреть, всё ли на месте
+# look first, change nothing
+curl -fsSL https://raw.githubusercontent.com/aisarus/Ccvoice-/claude/voice-shell-claude-code-77wwh2/scripts/install-server.sh | CHECK=1 bash
+
+# then install
 curl -fsSL https://raw.githubusercontent.com/aisarus/Ccvoice-/claude/voice-shell-claude-code-77wwh2/scripts/install-server.sh | sudo bash
 ```
 
-В конце скрипт печатает адрес и токен — их вписать в приложение (три поля:
-адрес, токен, язык). С доменом, указывающим на сервер, добавится HTTPS:
+The script installs Node, the Claude Code CLI and the Python dependencies, runs
+the test suite, writes a systemd unit, and prints an address and a token. It
+stops at the tests: if they fail, the service does not come up.
+
+Point a domain at the server and it adds HTTPS through Caddy:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aisarus/Ccvoice-/claude/voice-shell-claude-code-77wwh2/scripts/install-server.sh | sudo DOMAIN=voice.example.com bash
 ```
 
-**3. Говорить в два такта.** Это главное:
+Without a domain the port is open and the traffic is plain HTTP. The token
+keeps strangers out; it does not encrypt the conversation. Use a domain, or
+Tailscale with the port firewalled.
 
-> «Клод» · пауза · дождись сигнала · «прогони тесты»
-
-Обращение слышит маленькая локальная модель, саму реплику — распознаватель
-телефона, он на порядок точнее, но включается не мгновенно. Сказанное одним
-куском тоже работает, просто хуже.
-
-Все фразы, которые система понимает сама — цели, откат, память, стоп —
-[`docs/ГОЛОС.md`](docs/ГОЛОС.md).
-
-Сервера нет и ставить некуда? Тот же путь через браузер и Render, целиком с
-телефона — [`docs/DEPLOY.md`](docs/DEPLOY.md). Медленнее и без приложения, зато
-без ssh.
-
-### Обновить сервер
+Two commands run the server after that:
 
 ```bash
-sudo bash /opt/voice-shell/scripts/update-server.sh
+sudo bash /opt/voice-shell/scripts/update-server.sh   # fetch + reset, restart
+sudo bash /opt/voice-shell/scripts/doctor.sh --fast   # one report on everything
 ```
 
-Не `git pull`: он останавливается на разошедшихся ветках. Здесь fetch + reset,
-с рассказом о том, что пропадёт, и с меткой, по которой прежнее состояние
-возвращается.
+Updating is not `git pull`. On diverged branches `pull` stops and asks how to
+merge; there is nothing to merge here, the branch is the truth.
+`update-server.sh` does fetch + reset, prints what is about to disappear, and
+leaves a `before-update-…` tag to come back to.
 
-### Если не работает
+### The daemon on your own computer
+
+A cloud box cannot see your machine. To let Claude Code work on real projects,
+run the daemon where the projects are:
 
 ```bash
-sudo bash /opt/voice-shell/scripts/doctor.sh --fast
+curl -fsSL https://raw.githubusercontent.com/aisarus/Ccvoice-/claude/voice-shell-claude-code-77wwh2/scripts/install-desktop.sh | bash -s -- ~/your-project
 ```
 
-Один отчёт обо всём: код, служба, токены, доступ к Claude, ответ демона.
-Внизу — «итог» со списком найденного. Симптом за симптомом —
-[`docs/ЕСЛИ-НЕ-РАБОТАЕТ.md`](docs/ЕСЛИ-НЕ-РАБОТАЕТ.md).
+It clones the repository, installs dependencies, runs the tests, generates a
+token and starts the daemon. Reach it from outside the house over Tailscale.
+
+If a Claude Code session is sitting at that computer, hand it
+[`docs/desktop-handoff.json`](docs/desktop-handoff.json) instead: the same
+steps, machine-readable, including what to check and what to tell you.
+
+### The app
+
+[Download the APK](https://github.com/aisarus/Ccvoice-/releases/download/apk-latest/app-debug.apk)
+— rebuilt on every push to the working branch. Grant microphone and
+notification permissions: without notifications Android will not let a
+foreground service run at all. Then three fields, once: address, token,
+starting language.
+
+> **The released APK is signed with a debug key that lives in this repository,
+> password and all** — the keystore is `android/app/voice-shell.keystore` and
+> the password is in plain text in `android/app/build.gradle.kts`. It is there
+> on purpose: otherwise every CI build would get a fresh random key and updates
+> would not install over each other. The consequence is real. Anyone can build
+> an APK signed with that same key, and Android will accept it as an update to
+> yours. **Install the APK only from this repository's releases.** If you build
+> your own, generate your own keystore and keep it out of the repository.
 
 ---
 
-## Что здесь
+## How to talk
 
-| Файл | Что это |
+Two beats. This is the part people get wrong:
+
+> "Клод" · pause · wait for the tone · "run the tests"
+
+The wake word is heard by a small model on the phone (Vosk, ~45 MB, downloaded
+on first launch). Its only job is "Клод" and "stop". The utterance itself goes
+to the phone's own recognizer, which is far better but does not start
+instantly. Said in one breath it still works, worse: after 3.5 seconds the app
+stops waiting and sends whatever the small model heard.
+
+The tone after "Клод" is permission to speak. Speak before it and half the
+sentence is gone.
+
+| Sound | Meaning |
 |---|---|
-| [`spec/voice-shell.json`](spec/voice-shell.json) | Полная спека в машиночитаемом виде — единственный источник истины |
-| [`spec/voice-shell.schema.json`](spec/voice-shell.schema.json) | JSON Schema (draft 2020-12) для спеки |
-| [`scripts/validate_spec.py`](scripts/validate_spec.py) | Валидатор: схема + перекрёстные проверки согласованности |
-| [`daemon/`](daemon/) | `voice-claude-daemon`: роли говорящего, роутинг, формат речи, WebSocket |
-| [`client/web/`](client/web/index.html) | Клиент для Chrome на Android: push-to-talk, STT, TTS, earcons |
-| [`tests/`](tests/) | 174 теста, включая end-to-end по реальному протоколу |
-| [`Dockerfile`](Dockerfile) · [`render.yaml`](render.yaml) | Деплой одним нажатием, с телефона |
-| [`docs/ГОЛОС.md`](docs/ГОЛОС.md) | Все фразы, которые система понимает сама |
-| [`docs/ЕСЛИ-НЕ-РАБОТАЕТ.md`](docs/ЕСЛИ-НЕ-РАБОТАЕТ.md) | Симптом → что проверить → чем починить |
-| [`docs/DEPLOY.md`](docs/DEPLOY.md) | Пошаговый деплой без компьютера |
-| [`docs/desktop-handoff.json`](docs/desktop-handoff.json) | Машиночитаемое задание для Claude Code-сессии на твоём ПК |
-| [`android/`](android/) | Приложение: локальный wake word, фон, кнопка наушников |
-| [`scripts/doctor.sh`](scripts/doctor.sh) · [`scripts/update-server.sh`](scripts/update-server.sh) | Проверить состояние · обновить сервер |
+| short beep + vibration | microphone open, talk |
+| soft click + short vibration | utterance accepted, sent |
+| low beep | heard nothing, microphone closed empty |
+
+The wake word tolerates one letter: "клот", "клад", "плод" all count. "Код",
+"чат", "кот", "что", "как" never count — those are how commands start. Saying
+it during an answer is an interrupt: Claude stops talking and listens.
+
+Every utterance goes to one of three targets, and the daemon picks unless you
+name one:
+
+| Target | What it is | Changes the project |
+|---|---|---|
+| `код` | Claude Code in the working directory | yes |
+| `чат` | a separate conversation with no project access; web search and page reading only | no |
+| `заметка` | a line appended to an inbox file | no |
+
+Ambiguous goes to `чат` on purpose: a wrong `чат` costs a sentence, a wrong
+`код` has already done something.
+
+The shell also handles undo, memory, background tasks, a Telegram bridge and
+voice approvals by itself, without waking Claude. Every phrase it knows is in
+[`docs/VOICE.md`](docs/VOICE.md).
+
+### The command phrases are Russian
+
+This matters more than anything else on this page. The wake word answers to
+both "Клод" and "claude", the utterance is recognized in Russian, English or
+Hebrew, and Claude answers in the language you used. But the phrases the
+*shell* understands — routing prefixes, undo, memory, background tasks, the
+Telegram bridge, yes/no on a permission prompt — exist in Russian only. In
+English only "stop", "quiet", "enough", "shut up", "stop working", "abort",
+"cancel" and the language switch are wired up.
+
+Spoken to in English, this is a voice pipe to Claude Code and not much more.
+Nobody has written the phrase tables for the other languages yet.
+
+---
+
+## Optional pieces
+
+**GitHub.** The `код` target runs through a real shell, so GitHub works through
+`gh` once it has a token:
 
 ```bash
-python3 scripts/validate_spec.py
-# OK: voice-shell-for-claude-code v0.2.0 (29 top-level sections)
+sudo bash /opt/voice-shell/scripts/setup-github.sh ghp_YOUR_TOKEN "Your Name" you@example.com
 ```
 
-Валидатор работает без зависимостей (тогда проверяются только кросс-ссылки);
-`pip install jsonschema` добавляет проверку по схеме.
+Needs root and a running service — it writes to `/etc/voice-shell.env`. Token:
+[github.com/settings/tokens](https://github.com/settings/tokens) → classic →
+`repo` and `workflow`. A bad token is rejected on the spot rather than saved as
+a surprise for later.
 
-## Запустить с телефона, без компьютера
+**Telegram.** One preset chat, so a file can leave the machine by voice without
+a stranger's voice being able to redirect it:
 
-Браузер не даёт микрофон и распознавание речи на `http://` — нужен `https://`.
-Поэтому нормальный способ попробовать это без ПК — задеплоить.
+```bash
+sudo bash /opt/voice-shell/scripts/setup-telegram.sh
+```
 
-1. `render.com` → Sign in with GitHub → **New +** → **Blueprint** → этот репозиторий → **Apply**.
-   Render прочитает [`render.yaml`](render.yaml) и соберёт [`Dockerfile`](Dockerfile).
-2. Забрать сгенерированный `VOICE_TOKEN` из **Environment**.
-3. Открыть в Chrome `https://<твой-сервис>.onrender.com/?token=<VOICE_TOKEN>`, разрешить микрофон.
-4. Нажать **подключить подписку** — приложение проведёт через `claude setup-token`
-   прямо с телефона и выдаст токен, который вставляется в `CLAUDE_CODE_OAUTH_TOKEN`.
+It asks you for a bot token from @BotFather, finds your chat id from the first
+message you send the bot, and sends a test message there.
 
-Отдельный API-ключ не нужен: работает твоя подписка Claude. `ANTHROPIC_API_KEY`
-остаётся альтернативой, если нужен отдельный биллинг.
+**Voice approvals.** Off by default: `PERMISSION_MODE` is `auto` and nothing is
+ever asked. `guarded` asks before destructive things, `ask` asks before
+everything but safe reads.
 
-Пошагово, со всеми граблями (сон free-плана, GitHub-токен, чтобы работа не
-терялась, что уходит в Google при распознавании) — [`docs/DEPLOY.md`](docs/DEPLOY.md).
+---
 
-Render не обязателен: подойдёт любой хостинг с долго живущим контейнером,
-WebSocket и HTTPS (Railway, Koyeb, Fly.io, VPS через [`docker-compose.yml`](docker-compose.yml)).
-Serverless — Vercel, Netlify, Cloudflare Workers — **не** подойдёт: там процесс
-живёт только на время запроса, а нам нужна сессия, которая держится между репликами.
-
-## Запустить локально
+## Run it locally
 
 ```bash
 pip3 install -r daemon/requirements-dev.txt
-cd daemon && python3 -m voice_claude --workspace ~/твой-проект
+cd daemon && python3 -m voice_claude --workspace ~/your-project
 ```
 
-Клиент и WebSocket живут на одном порту (`8787` или `$PORT`), демон печатает
-токен при старте. На `http://` микрофон даст только `localhost`.
+Client and WebSocket share one port (`8787` or `$PORT`); the daemon prints a
+token at startup. Over plain `http://` the browser gives a microphone to
+`localhost` only.
 
-Без подключённой подписки (или `ANTHROPIC_API_KEY`) цели `code` и `chat` отвечают
-заглушкой — петля проходит целиком, и в ухо приходит честное «Claude недоступен»,
-а не выдуманный ответ.
+With no credential connected, `code` and `chat` answer with a stub. The loop
+still runs end to end and you hear an honest "Claude unavailable: …" with the
+reason, rather than an invented answer.
 
 ```bash
-python3 -m pytest tests -q        # 174 passed
-python3 scripts/validate_spec.py  # OK: voice-shell-for-claude-code v0.2.0
+python3 -m pytest tests -q        # 250 passed
+python3 scripts/validate_spec.py  # OK: voice-shell-for-claude-code v0.2.0 (29 top-level sections)
 ```
 
-Что уже настоящее: обращение «Клод» на самом устройстве, классификация
-говорящего с профилями (включая шёпот), роутинг chat/code/note с безопасным
-дефолтом и поправкой «не туда», точки отката, долговременная память,
-суммаризация вывода в 1–3 предложения, голосовые approvals, ударения для
-синтеза, наблюдатель за упавшими сборками, ambient-буфер с ролями и стиранием,
-WebSocket-протокол из спеки и push-to-talk клиент.
+The validator runs without dependencies, checking cross-references only;
+`pip install jsonschema` adds schema validation.
 
-Чего ещё нет: VAD-endpointing на устройстве, voiceprint, мультипроект,
-распознавание на своём сервере, проактивные подсказки по триггерам в ambient.
-Handoff между целями («перекинь это в код») написан в роутере, но демон его не
-вызывает — на живом цикле он не работает.
+---
 
-## На своём сервере
+## Limits
 
-Лучший вариант: не засыпает, Claude Code получает настоящую оболочку, адрес
-постоянный. Ставится по ssh одной командой — можно с телефона:
+**Not built:**
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/aisarus/Ccvoice-/claude/voice-shell-claude-code-77wwh2/scripts/install-server.sh | sudo bash
-```
+- **On-device VAD endpointing.** The app decides you have finished by timer,
+  not by hearing you stop.
+- **Voiceprint.** The speaker classifier carries a `with_voiceprint` profile
+  and weights for it, but the app never measures voiceprint similarity, so that
+  profile never runs. Speaker roles are decided on acoustics alone.
+- **Multi-project.** One workspace per daemon, no switching sessions by voice.
+- **Server-side speech recognition.** Recognition happens on the phone, or, in
+  the browser client, at Google. The daemon never sees audio.
+- **Proactive ambient suggestions.** Ambient `passive` works: the buffer holds
+  ten minutes and answers recall questions. The `assist` triggers are defined
+  in the spec and never fired.
+- **iOS.** No.
 
-С доменом, указывающим на сервер, добавится автоматический HTTPS:
+**Built but untuned:**
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/aisarus/Ccvoice-/claude/voice-shell-claude-code-77wwh2/scripts/install-server.sh | sudo DOMAIN=voice.example.com bash
-```
+- **Speaker identification** is implemented and tested against synthetic
+  profiles. It has never been calibrated on real recordings, so the thresholds
+  are guesses. Expect your own quiet speech to come back `unknown` from a cold
+  start.
 
-Скрипт ставит зависимости и CLI, прогоняет тесты, оформляет systemd-службу с
-автозапуском и печатает адрес с токеном для приложения. На тестах он
-останавливается: если они не прошли, служба не поднимается.
+**Sharp edges:**
 
-Дальше сервер живёт двумя командами:
+- `откати` on its own is an undo phrase. Shell commands are matched at the
+  start of an utterance, after fillers like "клод", "давай", "ну", so ordinary
+  conversation about rolling back is safe — but an utterance that opens with
+  "откати" performs a real `git reset --hard` to the previous checkpoint. The
+  reverted commit stays in git history.
+- Background tasks need the workspace to be a git repository. At most two run
+  at once.
+- Telegram refuses anything matching `.env`, keys, keystores or names
+  containing token/secret/password, anything outside the working directory, and
+  anything over 45 MB. It refuses out loud, with the reason.
+- The daemon under systemd usually runs as root. The Claude CLI refuses to run
+  as root with permissions disabled, so that behaviour is supplied through a
+  callback instead.
+- A checkpoint is written per utterance, not per file. Undo takes back
+  everything one utterance changed.
 
-| Команда | Что делает |
+---
+
+## What is in this repository
+
+| Path | What it is |
 |---|---|
-| `sudo bash /opt/voice-shell/scripts/update-server.sh` | забирает свежий код, доставляет зависимости, перезапускает службу |
-| `sudo bash /opt/voice-shell/scripts/doctor.sh --fast` | отчёт о состоянии со списком найденных проблем |
+| [`spec/voice-shell.json`](spec/voice-shell.json) | The full spec, machine-readable — the single source of truth |
+| [`spec/voice-shell.schema.json`](spec/voice-shell.schema.json) | JSON Schema (draft 2020-12) for the spec |
+| [`scripts/validate_spec.py`](scripts/validate_spec.py) | Validator: schema plus cross-reference consistency checks |
+| [`daemon/`](daemon/) | `voice-claude-daemon`: speaker roles, routing, voice formatting, WebSocket |
+| [`android/`](android/) | The app: on-device wake word, background service, headset button |
+| [`client/web/`](client/web/index.html) | Chrome-on-Android client: push-to-talk, STT, TTS, earcons |
+| [`tests/`](tests/) | 250 tests, including end-to-end over the real protocol |
+| [`Dockerfile`](Dockerfile) · [`render.yaml`](render.yaml) | One-click deploy, from a phone |
+| [`docs/VOICE.md`](docs/VOICE.md) | Every phrase the system understands by itself |
+| [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Symptom → what to check → how to fix it |
+| [`docs/DEPLOY.md`](docs/DEPLOY.md) | Step-by-step deploy with no computer |
+| [`docs/desktop-handoff.json`](docs/desktop-handoff.json) | Machine-readable brief for a Claude Code session on your PC |
 
-## Демон на своём компьютере
+---
 
-Облачный сервис не видит твою машину. Чтобы Claude Code работал с настоящими
-проектами, демон запускается локально:
+## Design decisions
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/aisarus/Ccvoice-/claude/voice-shell-claude-code-77wwh2/scripts/install-desktop.sh | bash -s -- ~/твой-проект
-```
+- **One physical action: `ACTIVATE`.** No tap/double-tap/swipe vocabulary —
+  that turns the thing into a TV remote. Everything else is speech and context.
+- **The headset button is the backup channel.** Intended split: ~90% wake word,
+  ~9% the dialogue window carrying on by itself, ~1% button.
+- **A 15-second dialogue window.** After an answer, no wake word needed.
+- **Your speech is never rewritten.** Claude's output is retold in one to three
+  sentences; the full output stays on screen.
+- **Barge-in is split.** "Стоп" stops the voice only. "Останови работу"
+  interrupts Claude Code.
+- **Route by meaning, not by code words.** A keyword table settles the obvious
+  instantly; on live speech a fast model picks the target within 2.5 seconds or
+  not at all. A spoken prefix, a chip in the UI or a previous correction is
+  already the human's decision and is never second-guessed.
+- **One long-lived session**, not a fresh Claude per request.
+- **No cloud of our own.** LAN at home, Tailscale outside.
 
-Скрипт клонирует репозиторий, ставит зависимости, прогоняет тесты, генерирует
-токен и запускает демон. Снаружи дома — через Tailscale.
+### Who is speaking
 
-Если за компьютером сидит Claude Code, отдай ему
-[`docs/desktop-handoff.json`](docs/desktop-handoff.json): там всё то же самое
-машиночитаемо — предусловия, шаги, что проверить и что сказать тебе.
-
-## GitHub
-
-Цель `код` работает через оболочку, поэтому GitHub ей доступен напрямую —
-нужен только `gh` и токен:
-
-```bash
-sudo bash /opt/voice-shell/scripts/setup-github.sh ghp_ТВОЙ_ТОКЕН "Имя" почта@example.com
-```
-
-Скрипт ставит `gh`, кладёт токен в окружение службы, настраивает git и
-проверяет доступ — негодный токен он отвергает сразу, а не оставляет сюрприз
-на потом. Токен: [github.com/settings/tokens](https://github.com/settings/tokens)
-→ classic → права `repo` и `workflow`. Нужен root и уже поднятая служба:
-скрипт пишет в `/etc/voice-shell.env`.
-
-После этого голосом работает «покажи мои репозитории», «создай репозиторий
-voice-notes», «посмотри пул-реквесты», «сделай коммит и запушь».
-
-## Приложение для Android
-
-[Скачать APK](https://github.com/aisarus/Ccvoice-/releases/download/apk-latest/app-debug.apk) ·
-собирается из [`android/`](android/) на каждом пуше.
-
-Обращение «Клод» распознаётся на самом телефоне, поэтому постоянно открытый
-микрофон не означает постоянный поток аудио наружу. Реплика после обращения
-распознаётся на выбранном языке — русский, английский, иврит. Фоновая служба
-живёт с погашенным экраном, кнопка гарнитуры разрешает реплику без обращения.
-Bluetooth-гарнитура слушается своим микрофоном: служба сама поднимает канал
-связи, иначе телефон продолжал бы слушать встроенным микрофоном из кармана
-([подробнее](android/README.md#микрофон-bluetooth-гарнитуры)).
-
-Говорить лучше в два такта: «Клод» · сигнал · фраза. Почему именно так и что
-ещё понимает приложение — [`docs/ГОЛОС.md`](docs/ГОЛОС.md).
-
-## Ключевые решения
-
-- **Одно физическое действие — `ACTIVATE`.** Никаких tap/double-tap/swipe-команд:
-  это превращает систему в пульт от телевизора. Всё остальное — речь и контекст.
-- **Кнопка Sony — запасной канал.** Цель: ~90% wake word, ~9% автопродолжение
-  диалога, ~1% нажатия.
-- **Окно диалога 15 с.** После ответа Claude wake word не нужен.
-- **Речь пользователя не переписывается**, вывод Claude — пересказывается
-  в 1–3 предложения (полный output остаётся на экране).
-- **Barge-in.** «Стоп» = только голос; «останови работу» = interrupt в Claude Code.
-- **Маршрут по смыслу, а не по кодовым словам.** Словарь решает очевидное
-  мгновенно, а на живой речи («сделай, чтобы форма не отправлялась дважды»)
-  цель выбирает модель — за 2,5 секунды или не выбирает вовсе. Произнесённый
-  префикс, чип и прошлая поправка её не спрашивают: это уже решение человека.
-- **Одна долговечная сессия**, а не новый Claude на каждый запрос.
-- **Никакого своего облака.** LAN дома, Tailscale снаружи.
-
-## Кто говорит: мастер или собеседник
-
-Приложение слушает и на каждом речевом сегменте решает роль, которая уходит
-Claude отдельной служебной строкой перед оригинальным транскриптом:
+The app decides a role for every speech segment and sends it to Claude as a
+service line ahead of the transcript:
 
 ```
 [voice-shell] speaker=master (говорит мастер) confidence=0.93 device=phone_mic
 
-Исправь ошибку и запусти тесты.
+Fix the bug and run the tests.
 ```
 
-Громкость — **главный** сигнал, но не единственный: близкий чужой голос или
-твоя тихая реплика сломали бы классификацию по одному уровню. Решение —
-взвешенная логистика по относительной громкости, SNR, direct-to-reverberant
-ratio, C50, ВЧ-содержанию, proximity-эффекту, опциональному локальному
-voiceprint и априорам устройства/непрерывности диалога.
+Loudness is the main signal but not the only one: a nearby stranger's voice, or
+your own quiet remark, would break a classifier built on level alone. The
+decision is weighted logistic regression over relative loudness, SNR,
+direct-to-reverberant ratio, C50, high-frequency content, proximity effect, an
+optional local voiceprint and device/continuity priors.
 
-| Роль | Что значит | Что можно |
+| Role | Meaning | Allowed |
 |---|---|---|
-| `master` | близкая чистая речь владельца | всё: wake, команды, barge-in, подтверждения |
-| `bystander` | чужая речь, телевизор, соседняя комната | ничего; по умолчанию не отправляется вовсе |
-| `unknown` | уверенности не хватает | ничего не исполняется, один короткий переспрос |
-| `self_echo` | собственный TTS в микрофоне | отбрасывается |
+| `master` | close, clean speech from the owner | everything: wake, commands, barge-in, approvals |
+| `bystander` | someone else, a TV, the next room | nothing; not sent at all by default |
+| `unknown` | not confident enough | nothing runs, one short re-ask |
+| `self_echo` | our own TTS in the microphone | discarded |
 
-При низкой уверенности роль становится `unknown`, а не выдумывается.
-Подтверждения (`Клод хочет удалить старую папку build. Разрешить?`) принимаются
-только от `master` с confidence ≥ 0.85.
+Low confidence produces `unknown` rather than a guess. Approvals are accepted
+only from `master` at confidence ≥ 0.85.
 
-Детали — секция `speaker_identification` в спеке: признаки, веса по профилям
-(`acoustic_only` / `with_voiceprint` / `narrowband`), пороги, гистерезис,
-жёсткие гейты, калибровка, локальная телеметрия и критерии приёмки.
+### The second ear (ambient)
 
-## Роутинг: chat ↔ code
+Off by default. Three submodes: `off`, `passive` (a local ten-minute ring
+transcript that leaves the device only when you ask it something) and `assist`
+(transcript streamed to the chat target).
 
-Не всё сказанное — задача для репозитория. Daemon держит несколько целей и
-решает, куда уходит реплика:
+Raw audio is never stored, the buffer is wiped on leaving the mode, and other
+people's speech does not enter it without a separate opt-in. Recording other
+people is regulated differently in different jurisdictions, which is why this
+is a setting with a private default rather than an implementation detail.
 
-| Цель | Бэкенд | Меняет мир | Бюджет задержки |
-|---|---|---|---|
-| `code` | Claude Agent SDK, persistent session | да | 3000 мс |
-| `chat` | Messages API, отдельный тред | нет | 1200 мс |
-| `note` | локальный inbox-файл | нет | 200 мс |
+Answers in ambient are `whisper_output`: one sentence, twelve words maximum,
+−6 dB, only in a silence gap of 1.2 s or longer, never over your own speech.
+The wake word is off in ambient — saying "Клод" in front of people is exactly
+what this mode avoids.
 
-Порядок решения: явный префикс → чип в интерфейсе → прошлая поправка → sticky-цель
-внутри окна диалога → классификатор → быстрая модель на незнакомых словах →
-дефолт. **Дефолт всегда `chat`**: неоднозначная реплика не должна исполняться.
+---
 
-Поправка «не туда» пересылает прошлую реплику в другую цель и запоминает
-пример: в следующий раз похожая фраза уйдёт правильно сразу.
+## Translations
 
-Handoff между целями («перекинь это в код», «объясни попроще») описан в спеке
-и написан в роутере, но демон его не вызывает — на живом цикле эти фразы
-работают как обычная реплика. Прошлый ответ вместе с ними не передаётся.
+[Русский](README.ru.md) · [Español](README.es.md) · [中文](README.zh.md)
 
-Какие фразы понимает система — [`docs/ГОЛОС.md`](docs/ГОЛОС.md).
-
-## Второе ухо (ambient)
-
-Выключено по умолчанию. Три подрежима:
-
-- `off` — микрофон открыт только после активации;
-- `passive` — локальный кольцевой транскрипт на 10 минут, наружу не уходит
-  ничего, пока не спросишь («что он сейчас сказал», «какую цифру он назвал»);
-- `assist` — транскрипт стримится в `chat`, проактивные подсказки только по
-  заранее заданным триггерам, не чаще двух за пять минут.
-
-Сырое аудио не хранится никогда, буфер шифруется и стирается при выходе из
-режима. Чужие реплики по умолчанию в буфер не попадают. Запись речи других людей
-регулируется законом и различается по юрисдикциям — поэтому это настройка с
-приватным дефолтом, а не деталь реализации.
-
-Ответ в ambient-режиме — `whisper_output`: одно предложение, максимум 12 слов,
-−6 дБ, только в паузу ≥1.2 с и никогда поверх твоей речи. Вход — шёпот
-(отдельный STT-профиль и профиль speaker ID), кнопка гарнитуры или текст;
-wake word в ambient выключен, потому что произносить «Клод» при людях — ровно
-то, чего мы избегаем.
-
-## Порядок сборки
-
-| Этап | Что | Состояние |
-|---|---|---|
-| S0 | вертикальный срез: daemon + WS + push-to-talk + STT + TTS | сделано |
-| S1 | wake word, VAD-endpointing, окно диалога, earcons, barge-in | wake word, окно, сигналы и barge-in сделаны; VAD-endpointing на устройстве — нет |
-| S2 | voice formatter + голосовые approvals | сделано |
-| S3 | speaker ID на реальных данных | классификатор есть, на реальных данных не откалиброван |
-| S4 | роутинг chat↔code | сделано, кроме handoff |
-| S5 | ambient passive + whisper | буфер и ответы по нему есть, проактивных подсказок по триггерам нет |
-| S6 | multi-project, voiceprint, iOS | нет |
-
-Стек и обоснования — секция `roadmap` в спеке.
-
-## Definition of Done (v0.1)
-
-Claude Code на ПК, проект открыт, телефон в кармане, Sony на голове — и
-следующие 10 минут ты не касаешься ПК:
-
-> «Клод, посмотри TODO и возьми следующую задачу.» → «Что именно будешь делать?»
-> → «Окей, делай.» → «Как успехи?» → «Продолжай.» → «Тесты проходят?»
-> → «Добей и закоммить.»
-
-Если весь цикл проходит комфортно, не доставая телефон и не глядя на монитор —
-MVP доказал идею.
+Documentation: [`docs/VOICE.md`](docs/VOICE.md) ·
+[`docs/ГОЛОС.md`](docs/ГОЛОС.md) (ru) ·
+[`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) ·
+[`docs/ЕСЛИ-НЕ-РАБОТАЕТ.md`](docs/ЕСЛИ-НЕ-РАБОТАЕТ.md) (ru) ·
+[`docs/DEPLOY.md`](docs/DEPLOY.md) ·
+[`docs/DEPLOY.ru.md`](docs/DEPLOY.ru.md) (ru)
