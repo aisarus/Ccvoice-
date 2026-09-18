@@ -49,4 +49,24 @@ class StressTest {
         assertEquals(Stress.STYLES, seen)
         assertEquals(Stress.AUTO, Stress.next(seen.last()))
     }
+
+    @Test
+    fun `плюс, который не ударение, доживает до синтеза`() {
+        // `strip` снимал каждый плюс подряд, а плюс в ответе чаще всего не
+        // ударение: «перешли на C++» звучало как «перешли на C», «2+2» — как
+        // «22». Это путь по умолчанию: он включается на любом движке, кроме
+        // RHVoice, то есть на обычном телефоне.
+        assertEquals("Перешли на C++ и g++.", Stress.strip("Перешли на C++ и g++."))
+        assertEquals("2+2 = 4", Stress.strip("2+2 = 4"))
+        assertEquals("Ветка feature/a+b собрана.", Stress.strip("Ветка feature/a+b собрана."))
+        // А ударение по-прежнему снимается.
+        assertEquals("коммит", Stress.strip("комм+ит"))
+        assertEquals("замок", Stress.strip("з+амок"))
+    }
+
+    @Test
+    fun `авто на обычном движке ведёт себя так же`() {
+        assertEquals("Собрал C++.", Stress.render("Собрал C++.", Stress.AUTO, ""))
+        assertEquals("коммит", Stress.render("комм+ит", Stress.AUTO, ""))
+    }
 }

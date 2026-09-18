@@ -21,6 +21,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.speech.RecognitionListener as CloudListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -93,6 +94,8 @@ class VoiceService : Service() {
         private const val BUTTON_DEBOUNCE_MS = 600L
         // Сколько раз пробовать поднять модель обращения, прежде чем жаловаться.
         private const val WAKE_RETRIES = 3
+        // Отдельное уведомление: то, что о работе, снимается вместе со службой.
+        private const val FAILURE_ID = 43
         // Короче этого одно слово от локальной модели — почти наверняка мусор.
         private const val FALLBACK_MIN_CHARS = 12
         /** Распознаватель обязан ответить хоть чем-то; молчит дольше — он мёртв. */
@@ -161,6 +164,7 @@ class VoiceService : Service() {
     private var buttonActedAt = 0L
     // Рукопожатие завершено и hello ушло: до этого сокет есть, а собеседника нет.
     @Volatile private var ready = false
+    private var wakeLock: PowerManager.WakeLock? = null
     private var cloud: SpeechRecognizer? = null
     private var wake: WakeWordEngine? = null
     private var route: AudioRoute? = null
@@ -214,6 +218,16 @@ class VoiceService : Service() {
     override fun onCreate() {
         super.onCreate()
         prefs = Prefs(this)
+        // Пока запись идёт, процессор не спит сам собой. Но сторожа нужны
+        // как раз тогда, когда запись умерла: телефон в кармане засыпает, и
+        // ни сердцебиение, ни переподключение не тикают до следующего
+        // касания экрана. Вся починка переставала работать ровно в том
+        // случае, ради которого писалась.
+        runCatching {
+            wakeLock = getSystemService(PowerManager::class.java)
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "voice-shell:listening")
+                .also { it.setReferenceCounted(false); it.acquire() }
+        }
         lastLine = getString(R.string.state_starting)
         // Второе ухо не переживает запуск службы. `onDestroy` гасит флаг сам,
         // но процесс могли убить и мимо него — а тогда телефон снова слушал
@@ -236,7 +250,16 @@ class VoiceService : Service() {
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0
             )
         } catch (t: Throwable) {
-            fail(getString(R.string.error_service_start, "${t.javaClass.simpleName}: ${t.message}"))
+            // Своим текстом прошлую ошибку не затираем: сюда приходят и
+            // случайные подъёмы — например, кнопкой гарнитуры по выключенной
+            // службе, — а под ними лежит настоящая причина смерти.
+            if (prefs.lastError.isBlank()) {
+                fail(getString(R.string.error_service_start,
+                               "${t.javaClass.simpleName}: ${t.message}"))
+            } else {
+                Log.e(TAG, "startForeground", t)
+                stopSelf()
+            }
             return
         }
 
@@ -393,6 +416,8 @@ class VoiceService : Service() {
             getSystemService(ConnectivityManager::class.java)
                 .unregisterNetworkCallback(networkWatch)
         }
+        runCatching { wakeLock?.release() }
+        wakeLock = null
         runCatching { signals?.release() }
         runCatching { route?.release() }
         runCatching { wake?.release() }
@@ -530,9 +555,18 @@ class VoiceService : Service() {
      * Через динамик это случается всегда, через наушники — когда звук утекает.
      * Сравниваем со сказанным: совпадающие куски — эхо, а не реплика.
      */
+    /**
+     * Наше ли это эхо.
+     *
+     * Окно отсчитывалось от НАЧАЛА реплики и истекало через двенадцать
+     * секунд. Ответ длиннее этого перебивал сам себя: на канале гарнитуры
+     * микрофон и динамик делят одну узкую линию, эхо там сильнее всего, и
+     * одно «Клод», расслышанное в собственном голосе, обрывало ответ на
+     * полуслове. Пока говорим — эхо есть по определению.
+     */
     private fun isOwnEcho(text: String): Boolean {
         if (lastSpoken.isBlank()) return false
-        if (System.currentTimeMillis() - spokeAt > 12_000) return false
+        if (!speaking && System.currentTimeMillis() - spokeAt > 12_000) return false
         val heard = Intents.normalise(text)
         if (heard.length < 4) return false
         if (lastSpoken.contains(heard) || heard.contains(lastSpoken)) return true
@@ -662,13 +696,16 @@ class VoiceService : Service() {
      * поднятым, и каждая следующая реплика отбросится на первой же строке.
      */
     private val speechWatchdog = Runnable {
-        if (speaking) {
-            speaking = false
-            spokeAt = System.currentTimeMillis()
-            windowUntil = System.currentTimeMillis() + WINDOW_MS
-            report(getString(R.string.tts_silent))
-            if (!awaitingCommand) resumeWake()
-        }
+        // Без оговорки про `speaking`: половина путей `say()` выходит, так и
+        // не начав говорить, — и слушатель остаётся выключенным, потому что
+        // выключают его до синтеза. Сторож обязан возвращать слух в обоих
+        // случаях, а не только когда речь оборвалась на полуслове.
+        val wasSpeaking = speaking
+        speaking = false
+        spokeAt = System.currentTimeMillis()
+        windowUntil = System.currentTimeMillis() + WINDOW_MS
+        if (wasSpeaking) report(getString(R.string.tts_silent))
+        if (!awaitingCommand) resumeWake()
     }
 
     /**
@@ -1731,11 +1768,19 @@ class VoiceService : Service() {
         val engine = when {
             speaks(tts, languageTag) -> tts
             spareReady -> if (speaks(spare, languageTag)) spare else null
+            // Системный движок пробовали поднять и не подняли: ждать больше
+            // нечего. Раньше сюда попадал КАЖДЫЙ следующий ответ — `pending`
+            // переписывался, `ensureSpare` выходил сразу, потому что объект
+            // уже есть, и реплика исчезала молча. Навсегда.
+            spare != null -> null
             else -> {
                 // Системный движок ещё не поднят: поднимаем и договариваем
                 // эту же реплику, когда он будет готов.
                 pending = text to languageTag
                 ensureSpare()
+                // Слушателя мы уже выключили, а речи не будет ещё секунду:
+                // без сторожа это дыра в слышимости, и молчаливая.
+                main.postDelayed(speechWatchdog, SPEECH_MARGIN_MS)
                 return
             }
         }
@@ -1757,6 +1802,11 @@ class VoiceService : Service() {
 
     private fun silence() {
         main.removeCallbacks(speechWatchdog)
+        // Оборванный ответ не открывает окно для продолжения разговора:
+        // `tts.stop()` зовёт `onDone`, а тот ставит окно на пятнадцать
+        // секунд. В шумной комнате в это окно влетала чужая фраза — и
+        // уезжала демону как сказанная хозяином.
+        windowUntil = 0
         runCatching { tts?.stop() }
         runCatching { spare?.stop() }
         pending = null
@@ -2098,10 +2148,38 @@ class VoiceService : Service() {
         }
     }
 
+    /**
+     * Служба умирает — и человек должен об этом узнать.
+     *
+     * Широковещание слушает только открытый экран. С телефоном в кармане оно
+     * не доходит никуда, а уведомления на этом пути ещё не было вовсе: смерть
+     * выглядела как полностью нормальный телефон. Человек узнавал о ней в
+     * следующий раз, когда случайно открывал приложение.
+     */
     private fun fail(reason: String) {
         Log.e(TAG, reason)
         runCatching { prefs.lastError = reason }
         sendBroadcast(Intent(ACTION_STATUS).setPackage(packageName).putExtra(EXTRA_TEXT, reason))
+        runCatching {
+            createChannel()
+            val open = PendingIntent.getActivity(
+                this, 0, Intent(this, MainActivity::class.java),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            getSystemService(NotificationManager::class.java).notify(
+                FAILURE_ID,
+                NotificationCompat.Builder(this, CHANNEL)
+                    .setSmallIcon(R.drawable.ic_mic)
+                    .setContentTitle(getString(R.string.service_died))
+                    .setContentText(reason)
+                    .setStyle(NotificationCompat.BigTextStyle().bigText(reason))
+                    .setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setOngoing(false)
+                    .setAutoCancel(true)
+                    .setContentIntent(open)
+                    .build()
+            )
+        }
         stopSelf()
     }
 }

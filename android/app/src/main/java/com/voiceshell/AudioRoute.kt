@@ -172,8 +172,34 @@ class AudioRoute(
         // Дальше ждём SCO_AUDIO_STATE_CONNECTED: раньше слушать нечего.
     }
 
+    /**
+     * Канал поднялся — если он и правда поднялся.
+     *
+     * На Android 12+ сюда приходили вслепую, через паузу после выбора
+     * устройства, и ничего не перепроверяли. Гарнитура, отвалившаяся за эти
+     * миллисекунды, оставляла «занято гарнитурой» защёлкнутым навсегда:
+     * `engage` дальше выходил сразу, а `disengage` приходит только с
+     * событием отключения, которого уже не будет. Всё остальное следовало
+     * за этим враньём — речь и сигналы уходили в канал связи, которого нет,
+     * то есть в тишину, а реплики метились как узкополосные.
+     */
     private fun ready(why: String) {
         if (engaged || !wanted) return
+        if (!bluetoothMicPresent()) {
+            restoreMode()
+            log(context.getString(R.string.mic_switch_failed))
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val live = runCatching {
+                audio.communicationDevice?.let { isBluetoothMic(it) }
+            }.getOrNull()
+            if (live != true) {
+                restoreMode()
+                log(context.getString(R.string.mic_switch_failed))
+                return
+            }
+        }
         engaged = true
         log(describe())
         onChanged(why)

@@ -41,7 +41,28 @@ object Stress {
         else -> if (engine.contains("rhvoice", ignoreCase = true)) text else strip(text)
     }
 
-    fun strip(text: String): String = text.filter { it != MARK && it != ACUTE }
+    /**
+     * Снять ударения — и только их.
+     *
+     * Раньше отсюда уходил каждый плюс, а плюс в ответе чаще всего не
+     * ударение: «перешли на C++ и g++» звучало как «перешли на C и g»,
+     * «2+2» — как «22». Демон ставит знак только перед гласной кириллицы,
+     * по этому признаку его и узнаём — так же, как это давно делает `acute`.
+     */
+    fun strip(text: String): String {
+        val out = StringBuilder(text.length)
+        var i = 0
+        while (i < text.length) {
+            val char = text[i]
+            if (char == MARK && i + 1 < text.length && VOWELS.contains(text[i + 1])) {
+                i++
+                continue
+            }
+            if (char != ACUTE) out.append(char)
+            i++
+        }
+        return out.toString()
+    }
 
     /** «комм+ит» → «коммит» с комбинирующим ударением после гласной. */
     fun acute(text: String): String {

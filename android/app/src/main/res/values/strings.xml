@@ -119,7 +119,7 @@
     <string name="readiness_link">link to the server</string>
     <string name="readiness_link_online">the daemon answers</string>
     <string name="readiness_link_connecting">connecting…</string>
-    <string name="readiness_link_unknown">the service is not running</string>
+    <string name="readiness_link_unknown">no word from the service yet — checking</string>
     <string name="readiness_fix_start">start</string>
     <string name="readiness_link_off">no address or token</string>
     <string name="readiness_link_no_network">the phone is offline</string>
@@ -230,4 +230,5 @@
     <string name="second_ear_online">no on-device %1$s recognition — the room goes through the network</string>
     <string name="heard_too_little">only caught «%1$s» — say it again</string>
     <string name="language_not_supported">the daemon does not speak %1$s — answering in the language of the question</string>
+    <string name="service_died">Voice Shell stopped</string>
 </resources>

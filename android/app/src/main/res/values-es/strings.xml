@@ -93,7 +93,7 @@
     <string name="readiness_link">conexión con el servidor</string>
     <string name="readiness_link_online">el daemon responde</string>
     <string name="readiness_link_connecting">conectando…</string>
-    <string name="readiness_link_unknown">el servicio no está en marcha</string>
+    <string name="readiness_link_unknown">todavía no hay señales del servicio — comprobando</string>
     <string name="readiness_fix_start">iniciar</string>
     <string name="readiness_link_off">falta la dirección o el token</string>
     <string name="readiness_link_no_network">el teléfono está sin conexión</string>
@@ -204,4 +204,5 @@
     <string name="second_ear_online">no hay reconocimiento de %1$s en el dispositivo — la sala pasa por la red</string>
     <string name="heard_too_little">solo capté «%1$s» — dilo otra vez</string>
     <string name="language_not_supported">el daemon no habla %1$s — responde en el idioma de la pregunta</string>
+    <string name="service_died">Voice Shell se detuvo</string>
 </resources>

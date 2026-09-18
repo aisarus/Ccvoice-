@@ -92,7 +92,7 @@
     <string name="readiness_link">связь с сервером</string>
     <string name="readiness_link_online">демон отвечает</string>
     <string name="readiness_link_connecting">подключаюсь…</string>
-    <string name="readiness_link_unknown">служба не запущена</string>
+    <string name="readiness_link_unknown">от службы пока нет вестей — проверяю</string>
     <string name="readiness_fix_start">запустить</string>
     <string name="readiness_link_off">не заданы адрес или токен</string>
     <string name="readiness_link_no_network">телефон не в сети</string>
@@ -203,4 +203,5 @@
     <string name="second_ear_online">распознавания %1$s на устройстве нет — комната идёт через сеть</string>
     <string name="heard_too_little">расслышал только «%1$s» — скажи ещё раз</string>
     <string name="language_not_supported">демон не говорит на «%1$s» — отвечает на языке вопроса</string>
+    <string name="service_died">Voice Shell остановился</string>
 </resources>

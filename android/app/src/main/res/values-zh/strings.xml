@@ -93,7 +93,7 @@
     <string name="readiness_link">与服务器的连接</string>
     <string name="readiness_link_online">守护进程有响应</string>
     <string name="readiness_link_connecting">正在连接…</string>
-    <string name="readiness_link_unknown">服务没有运行</string>
+    <string name="readiness_link_unknown">还没收到服务的消息——正在检查</string>
     <string name="readiness_fix_start">启动</string>
     <string name="readiness_link_off">还没填地址或令牌</string>
     <string name="readiness_link_no_network">手机没有联网</string>
@@ -204,4 +204,5 @@
     <string name="second_ear_online">设备上没有 %1$s 的离线识别——周围的话要走网络</string>
     <string name="heard_too_little">只听到「%1$s」——再说一遍</string>
     <string name="language_not_supported">守护进程不会说 %1$s——将用提问的语言回答</string>
+    <string name="service_died">Voice Shell 已停止</string>
 </resources>
