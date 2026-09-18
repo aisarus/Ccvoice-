@@ -60,7 +60,7 @@
     <string name="action_auth_done">done</string>
     <string name="action_copy_error">copy the last error</string>
     <string name="status_idle">not running</string>
-    <string name="help_text">Switch languages by voice: “Claude, Spanish”, “Claude, Chinese”, “Claude, Russian”, “Claude, English”. Commands are understood in English, Russian, Spanish and Chinese, all at once — you never have to say which one you are about to use. An answer comes back in the language you spoke. The wake word “Claude” is heard by the phone itself, with no internet; after it, your words are recognised in the chosen language. Say “Claude…” and only the text of what you said leaves the phone. The headset button lets you speak without the wake word. “Stop” silences the voice, “stop working” interrupts the work.</string>
+    <string name="help_text">Switch languages by voice: “Claude, Spanish”, “Claude, Chinese”, “Claude, Russian”, “Claude, English”. Commands are understood in English, Russian, Spanish and Chinese, all at once — you never have to say which one you are about to use. An answer comes back in the language you spoke. The wake word “Claude” is heard by the phone itself, with no internet; after it, your words are recognised in the chosen language. Say “Claude…” and only the text of what you said leaves the phone. The headset button lets you speak without the wake word. “Stop” silences the voice, “stop working” interrupts the work. “Claude, second ear” starts listening to the people around you and retells it in your language when you ask; “Claude, turn off the second ear” stops it. The room can be recognised in its own language: “second ear in Hebrew”. While the ear is open the notification says so — recording other people needs their consent — and it closes itself after an hour and when the app stops.</string>
 
     <!-- Переключатели: подпись кнопки и есть её состояние. -->
     <string name="speech_on">speech: on</string>
@@ -218,4 +218,13 @@
     <string name="listening_multilingual">Listening in every language I know.</string>
     <string name="listening_one_language">Listening in one language only.</string>
     <string name="listening_language">Listening in %1$s now.</string>
+
+    <!-- Второе ухо: телефон слушает не хозяина, и об этом должно быть видно. -->
+    <string name="state_room">listening to the room</string>
+    <string name="second_ear_badge">%1$s · second ear</string>
+    <string name="second_ear_open">second ear is open — the people around you are being listened to</string>
+    <string name="second_ear_closed">second ear is closed</string>
+    <string name="second_ear_language">the room is listened to in %1$s</string>
+    <string name="second_ear_expired">the second ear closed itself after an hour</string>
+    <string name="second_ear_online">no on-device %1$s recognition — the room goes through the network</string>
 </resources>

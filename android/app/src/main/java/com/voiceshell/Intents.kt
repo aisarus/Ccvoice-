@@ -163,11 +163,19 @@ object Intents {
         "listen only", "listen to one language", "one language only",
         "escucha solo", "只听一种语言", "只听"
     )
-    /** Начала фраз «слушай …»: после них ожидается название языка. */
+    /**
+     * Начала фраз «слушай …»: после них ожидается название языка.
+     *
+     * Предлог в список не входит нарочно. Пока здесь стояло «слушай на»,
+     * оно срабатывало раньше голого «слушай» и съедало «на», а в списке
+     * языков лежит именно «на иврите» — и «слушай на иврите» не понималось
+     * вовсе. Предлог снимает `languageIn`, и снимает после того, как
+     * попробует название целиком.
+     */
     private val LISTEN_OPENERS = listOf(
-        "слушай по", "слушай на", "слушай", "распознавай",
-        "listen in", "listen to", "listen", "recognise", "recognize",
-        "escucha en", "escucha", "听", "识别"
+        "слушай", "распознавай",
+        "listen to", "listen", "recognise", "recognize",
+        "escucha", "听", "识别"
     )
 
     /**
@@ -195,12 +203,82 @@ object Intents {
         return null
     }
 
-    /** Код языка, названный в этом куске речи, или null. */
+    /**
+     * Код языка, названный в этом куске речи, или null.
+     *
+     * Сначала пробуем то, что сказано, целиком: «на иврите» и «по русски»
+     * лежат в списке языков именно так. Только если целиком не узналось,
+     * снимаем предлог — иначе «на иврите» превращалось в «иврите», которого
+     * в списке нет, и название языка терялось на ровном месте.
+     */
     private fun languageIn(rest: String): String? {
-        val bare = rest.trim().removePrefix("по ").removePrefix("на ").trim()
+        val bare = rest.trim()
+        return named(bare) ?: named(
+            bare.removePrefix("по ").removePrefix("на ")
+                .removePrefix("in ").removePrefix("en ").trim()
+        )
+    }
+
+    private fun named(bare: String): String? {
         for ((code, words) in LANGUAGES) {
             if (words.any { bare == it || bare.startsWith("$it ") }) return code
             if (words.any { isCjk(it) && bare.startsWith(it) }) return code
+        }
+        return null
+    }
+
+    /**
+     * Что делать со вторым ухом.
+     *
+     * `open` — открыть или закрыть, `language` — на каком языке распознавать
+     * комнату (null — оставить как есть). Названный язык не открывает ухо
+     * отдельной командой: «второе ухо на иврите» — это и «слушай вокруг», и
+     * «вокруг говорят на иврите», и разделять их значило бы требовать две
+     * фразы там, где человек говорит одну.
+     */
+    data class SecondEar(val open: Boolean, val language: String?)
+
+    /**
+     * Фразы второго уха — те же, что в `lexicon.py` демона.
+     *
+     * Список продублирован нарочно: телефон обязан узнать команду сам, иначе
+     * он не перестанет слушать комнату (или не начнёт) до ответа по сети. Но
+     * узнать он должен ровно то же, что и демон, — иначе один из двоих будет
+     * считать ухо открытым, а второй закрытым.
+     */
+    private val EAR_ON = listOf(
+        "второе ухо", "включи второе ухо", "открой второе ухо",
+        "слушай вокруг", "слушай комнату", "слушай что вокруг",
+        "second ear", "turn on the second ear", "open the second ear",
+        "listen around", "listen to the room",
+        "segundo oído", "segundo oido", "escucha alrededor",
+        "第二只耳朵", "听周围"
+    )
+    private val EAR_OFF = listOf(
+        "выключи второе ухо", "убери второе ухо", "закрой второе ухо",
+        "хватит слушать вокруг", "перестань слушать вокруг", "без второго уха",
+        "turn off the second ear", "close the second ear", "stop the second ear",
+        "stop listening around", "no second ear",
+        "apaga el segundo oído", "apaga el segundo oido", "deja de escuchar alrededor",
+        "关掉第二只耳朵", "别听周围了"
+    )
+
+    /**
+     * «Клод, второе ухо» · «выключи второе ухо» · «второе ухо на иврите».
+     *
+     * Проверяется раньше «стопа» — и это не вкусовщина: «хватит слушать
+     * вокруг» начинается со слова «хватит», которым гасят голос. При обратном
+     * порядке ухо не закрылось бы никогда, а человек, попросивший перестать
+     * слушать чужих, получил бы тишину вместо закрытого уха.
+     */
+    fun secondEar(text: String): SecondEar? {
+        val bare = stripWake(normalise(text))
+        fun hit(phrases: List<String>) = phrases.firstOrNull {
+            bare == it || bare.startsWith("$it ") || (isCjk(it) && bare.startsWith(it))
+        }
+        if (hit(EAR_OFF) != null) return SecondEar(false, null)
+        hit(EAR_ON)?.let { phrase ->
+            return SecondEar(true, languageIn(bare.removePrefix(phrase)))
         }
         return null
     }

@@ -87,6 +87,42 @@ class VoiceService : Service() {
         private const val SPEECH_CAP_MS = 120_000L
         /** Раз в полминуты проверяем, что нас всё ещё можно позвать. */
         private const val HEARTBEAT_MS = 30_000L
+        /**
+         * Сколько второе ухо может быть открыто, если о нём забыли.
+         *
+         * Час — не про батарею одну: открытый микрофон на чужую речь не должен
+         * переживать разговор, ради которого его открыли. Закрывается само,
+         * молча (человек может быть в середине фразы), но видно в уведомлении,
+         * а на вопрос к буферу демон честно ответит, что ухо закрыто.
+         */
+        private const val EAR_MAX_MS = 60 * 60 * 1000L
+        /**
+         * Сколько кругов облачного распознавания подряд позволено комнате.
+         *
+         * Пока в комнате говорят, круги идут один за другим — иначе каждая
+         * вторая фраза терялась бы в паузе. Но телевизор или кафе говорят без
+         * остановки часами, и тогда этот счётчик возвращает микрофон модели
+         * обращения: следующий круг начнётся только с новой речи.
+         */
+        private const val EAR_CHAIN_MAX = 20
+        /** Столько пустых кругов подряд означают, что в комнате замолчали. */
+        private const val EAR_IDLE_MAX = 2
+        /** Хвост собственной реплики: столько после неё комнату не слушаем. */
+        private const val EAR_ECHO_GAP_MS = 1_200L
+        /** Сколько тишины считать концом чужой фразы. */
+        private const val EAR_SILENCE_MS = 1_500L
+        /**
+         * Пауза перед новым кругом там, где начать его больше некому.
+         *
+         * Круг комнаты обычно начинается с речи, которую услышала локальная
+         * модель. Если она на этом телефоне не поднялась, сказать «вокруг
+         * заговорили» некому, и ухо возвращается к микрофону само, выждав
+         * паузу. Это дороже — и это единственный способ, которым второе ухо
+         * там вообще работает.
+         */
+        private const val EAR_RETRY_MS = 5_000L
+        /** Столько длится один круг, если рядом говорят без пауз. */
+        private const val EAR_ROUND_MS = 60_000L
         private const val TAG = "VoiceShell"
     }
 
@@ -127,6 +163,21 @@ class VoiceService : Service() {
     /** Сколько реплик подряд демон отверг как чужую речь. */
     private var roleGates = 0
 
+    // ---------- что помнит второе ухо ----------
+    /** Распознаватель комнаты: у него свой язык и свой круг жизни. */
+    private var roomEar: SpeechRecognizer? = null
+    private var roomListening = false
+    /** Кругов подряд без возврата микрофона модели обращения. */
+    private var roomChain = 0
+    /** Пустых кругов подряд: столько тишины — и микрофон отдаём обратно. */
+    private var roomIdle = 0
+    /** Сначала пробуем распознавание на устройстве: оно не стоит ни трафика,
+     *  ни квоты. Движок отказался — переходим в сеть и говорим об этом раз. */
+    private var roomOffline = true
+    private var roomOfflineSaid = false
+    /** Об отказавшем распознавателе говорим раз на открытое ухо, а не раз в круг. */
+    private var roomErrorSaid = false
+
     private var linkState = LinkState.OFF
     private var attempt = 0
     private var reconnectScheduled = false
@@ -137,6 +188,11 @@ class VoiceService : Service() {
         super.onCreate()
         prefs = Prefs(this)
         lastLine = getString(R.string.state_starting)
+        // Второе ухо не переживает запуск службы. `onDestroy` гасит флаг сам,
+        // но процесс могли убить и мимо него — а тогда телефон снова слушал
+        // бы чужой разговор, о котором его уже никто не просил, и ещё и без
+        // часового предела: он живёт в отложенном вызове, а не в настройках.
+        prefs.secondEar = false
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
@@ -292,6 +348,13 @@ class VoiceService : Service() {
 
     override fun onDestroy() {
         stopped = true
+        // Второе ухо не переживает приложение: спека требует стирать буфер
+        // при выходе, а открытый микрофон на чужую речь тем более не должен
+        // молча дождаться следующего запуска. Демону говорим, пока сокет жив.
+        if (prefs.secondEar) {
+            runCatching { prefs.secondEar = false }
+            send(JSONObject().put("id", "ambient_control").put("submode", "off").put("wipe", true))
+        }
         main.removeCallbacksAndMessages(null)
         runCatching {
             getSystemService(ConnectivityManager::class.java)
@@ -301,6 +364,7 @@ class VoiceService : Service() {
         runCatching { route?.release() }
         runCatching { wake?.release() }
         runCatching { cloud?.destroy() }
+        runCatching { roomEar?.destroy() }
         runCatching { tts?.shutdown() }
         runCatching { spare?.shutdown() }
         runCatching { session?.release() }
@@ -336,7 +400,13 @@ class VoiceService : Service() {
      */
     private fun onRouteChanged(why: String) {
         Log.i(TAG, "route: $why")
-        if (!wakeReady || speaking || awaitingCommand) return
+        if (speaking || awaitingCommand) return
+        // Круг комнаты открыт на прежнем микрофоне, и переезжать сам он не
+        // умеет — как и распознавание обращения. Следующий круг начнётся уже
+        // на новом, с первой же услышанной фразы.
+        stopRoom()
+        if (!wakeReady) return
+        // Дальше — про модель обращения; комнату мы уже вернули на место.
         runCatching { wake?.stop() }
         resumeWake()
     }
@@ -344,6 +414,12 @@ class VoiceService : Service() {
     // ---------- разбор реплики ----------
     private fun handle(text: String) {
         if (isOwnEcho(text)) return
+        // Раньше «стопа»: «хватит слушать вокруг» начинается со слова, которым
+        // гасят голос, и при обратном порядке ухо не закрылось бы никогда.
+        Intents.secondEar(text)?.let { change ->
+            secondEarCommand(change, text)
+            return
+        }
         Intents.stopIntent(text)?.let { scope ->
             silence()
             send(JSONObject().put("id", "interrupt").put("scope", scope))
@@ -365,7 +441,14 @@ class VoiceService : Service() {
             silence()
         }
         val windowOpen = System.currentTimeMillis() < windowUntil
-        if (!windowOpen && !Intents.hasWake(text)) return
+        if (!windowOpen && !Intents.hasWake(text)) {
+            // Это говорили не нам. Пока ухо закрыто — дальше и не идём, как
+            // было всегда. Открыто — значит рядом идёт разговор, и вот он:
+            // локальная модель услышала речь, а расслышать её как следует,
+            // да ещё на языке комнаты, может только распознаватель телефона.
+            if (prefs.secondEar) listenToRoom()
+            return
+        }
         windowUntil = 0
 
         // Модель обращения — самая маленькая в системе: её дело услышать
@@ -508,7 +591,12 @@ class VoiceService : Service() {
      */
     private val heartbeat = object : Runnable {
         override fun run() {
-            if (wakeReady && !speaking && !awaitingCommand && wake?.isRunning != true) {
+            // Пока микрофон держит комната, модель обращения и не должна
+            // работать: без этой оговорки heartbeat раз в полминуты решал бы,
+            // что слушатель встал, и обрывал чужой разговор на полуслове.
+            if (wakeReady && !speaking && !awaitingCommand && !roomListening &&
+                wake?.isRunning != true
+            ) {
                 report(getString(R.string.listener_restarted))
                 resumeWake()
             }
@@ -524,6 +612,38 @@ class VoiceService : Service() {
         }
     }
 
+    /**
+     * Что сказать распознавателю про язык — одинаково обоим ушам.
+     *
+     * Языка два: реплику слушаем на языке микрофона, комнату — на её
+     * собственном, и это разные вызовы с разным `language`. А вот просьба к
+     * распознавателю определять и переключать язык самому — общая, и живёт
+     * она здесь в одном экземпляре: два блока разъехались бы на первой же
+     * правке, и разъехались бы молча.
+     *
+     * Здесь уже стояла попытка это включить, и она не работала: значение
+     * «adaptive» такого API не бывает — валидные это high_precision, balanced,
+     * quick_response, — а переключение языков без включённого их определения
+     * не работает вовсе. Отсюда и «на иврите не слышит».
+     *
+     * Даже так это «по возможности»: extras исполняет служба распознавания, и
+     * не всякая их поддерживает. Не поддержала — молча слушает один язык.
+     */
+    private fun hearing(intent: Intent, language: String) {
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
+        if (!prefs.multilingual || Build.VERSION.SDK_INT < 33) return
+        // Язык микрофона в списке всегда: на нём зовут по имени, и ухо
+        // комнаты обязано узнать обращение, пока держит микрофон.
+        val allowed = ArrayList(listOf(language) + Prefs.SUPPORTED.filter { it != language })
+        intent.putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_DETECTION, true)
+        intent.putStringArrayListExtra(
+            RecognizerIntent.EXTRA_LANGUAGE_DETECTION_ALLOWED_LANGUAGES, allowed)
+        intent.putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_SWITCH,
+                        RecognizerIntent.LANGUAGE_SWITCH_BALANCED)
+        intent.putStringArrayListExtra(
+            RecognizerIntent.EXTRA_LANGUAGE_SWITCH_ALLOWED_LANGUAGES, allowed)
+    }
+
     private fun listenForCommand(fallback: String = "") {
         if (awaitingCommand) return
         awaitingCommand = true
@@ -532,39 +652,20 @@ class VoiceService : Service() {
             // Копилка громкости — только про эту реплику: кадры прошлой
             // сделали бы «фоном» чужой голос из прошлого разговора.
             meter.reset()
+            // Реплика важнее комнаты: микрофон отбираем у неё, не дожидаясь
+            // конца круга, иначе команда уедет в буфер как чужая речь.
+            stopRoom()
             runCatching { wake?.stop() }
             try {
                 if (cloud == null) cloud = SpeechRecognizer.createSpeechRecognizer(this)
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, prefs.language)
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
                     // Несколько гипотез: распознаватель почти всегда держит
                     // верный вариант вторым, когда путает имя из проекта.
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-                    // Распознавание нескольких языков сразу (Android 13+).
-                    //
-                    // Здесь уже стояла попытка это включить, и она не
-                    // работала: значение «adaptive» такого API не бывает —
-                    // валидные это high_precision, balanced, quick_response, —
-                    // а переключение языков без включённого их определения не
-                    // работает вовсе. Отсюда и «на иврите не слышит».
-                    //
-                    // Даже так это «по возможности»: extras исполняет служба
-                    // распознавания, и не всякая их поддерживает. Не
-                    // поддержала — молча слушает один язык, как раньше.
-                    if (prefs.multilingual && Build.VERSION.SDK_INT >= 33) {
-                        val allowed = ArrayList(
-                            listOf(prefs.language) + Prefs.SUPPORTED.filter { it != prefs.language }
-                        )
-                        putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_DETECTION, true)
-                        putStringArrayListExtra(
-                            RecognizerIntent.EXTRA_LANGUAGE_DETECTION_ALLOWED_LANGUAGES, allowed)
-                        putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_SWITCH,
-                                 RecognizerIntent.LANGUAGE_SWITCH_BALANCED)
-                        putStringArrayListExtra(
-                            RecognizerIntent.EXTRA_LANGUAGE_SWITCH_ALLOWED_LANGUAGES, allowed)
-                    }
+                    // Реплика — на языке микрофона, что бы ни слушала комната.
+                    hearing(this, prefs.language)
                 }
                 cloud?.setRecognitionListener(commandListener())
                 cloud?.startListening(intent)
@@ -594,6 +695,12 @@ class VoiceService : Service() {
                 return
             }
             fallbackText = ""
+            // Тот же порядок, что и у локальной модели: «хватит слушать
+            // вокруг» начинается со слова, которым гасят голос.
+            Intents.secondEar(text)?.let { change ->
+                secondEarCommand(change, text)
+                return
+            }
             Intents.stopIntent(text)?.let { scope ->
                 silence()
                 send(JSONObject().put("id", "interrupt").put("scope", scope))
@@ -659,12 +766,385 @@ class VoiceService : Service() {
 
     private fun resumeWake() {
         if (!wakeReady) return
+        // Микрофон занят комнатой: отнимать его посреди чужой фразы нельзя, а
+        // отнял бы кто угодно — сторож синтеза, смена маршрута, heartbeat.
+        if (roomListening) return
         runCatching {
             wake?.start(
                 onText = { text -> main.post { handle(text) } },
                 onError = { t -> report(getString(R.string.wake_error, t.message.orEmpty())) }
             )
         }.onFailure { report(getString(R.string.wake_stopped, it.javaClass.simpleName)) }
+    }
+
+    // ---------- второе ухо ----------
+    /**
+     * Открыть или закрыть второе ухо на самой трубке.
+     *
+     * Флаг живёт в настройках, а не в памяти службы, потому что службу
+     * перезапускает система; но пережить остановку приложения он не должен —
+     * это делает `onDestroy`.
+     */
+    private fun setEar(open: Boolean, line: Int) {
+        val changed = open != prefs.secondEar
+        prefs.secondEar = open
+        main.removeCallbacks(earTimeout)
+        if (open) {
+            // Новый разговор — новая попытка обойтись распознаванием на
+            // устройстве: прошлый отказ мог быть про другой язык комнаты.
+            roomOffline = true
+            roomOfflineSaid = false
+            roomErrorSaid = false
+            main.postDelayed(earTimeout, EAR_MAX_MS)
+            // Там, где локальной модели нет, первый круг тоже некому начать.
+            roomLater()
+        } else {
+            stopRoom()
+            if (!speaking && !awaitingCommand) resumeWake()
+        }
+        // Индикатор обязателен по спеке и не для красоты: телефон слушает
+        // других людей. `report` перерисовывает уведомление, а в нём уже
+        // стоит пометка про открытое ухо.
+        if (changed) report(getString(line))
+    }
+
+    /**
+     * «Клод, второе ухо» · «выключи второе ухо» · «второе ухо на иврите».
+     *
+     * Телефон переключает себя сам и сразу, не дожидаясь круга по сети: иначе
+     * «перестань слушать» означало бы «перестань через полсекунды, если
+     * связь жива». А саму фразу отдаём демону как обычную реплику — он
+     * ответит вслух, назовёт согласие собеседников и разошлёт своё состояние.
+     * Своего подтверждения телефон не говорит: два ответа на одну команду
+     * хуже, чем один.
+     */
+    private fun secondEarCommand(change: Intents.SecondEar, said: String) {
+        change.language?.let { code ->
+            prefs.ambientLanguage = code
+            // Уже начатый круг языка не переслушает, а extras достаются
+            // распознавателю при старте — поэтому клиента пересоздаём.
+            stopRoom()
+            runCatching { roomEar?.destroy() }
+            roomEar = null
+            report(getString(R.string.second_ear_language, code))
+        }
+        setEar(change.open,
+               if (change.open) R.string.second_ear_open else R.string.second_ear_closed)
+        deliver(said)
+    }
+
+    /**
+     * Час прошёл, а ухо всё открыто.
+     *
+     * Молча — потому что человек может быть в середине разговора, и голос в
+     * ухе посреди чужой фразы хуже, чем закрытое ухо. Видно в уведомлении, а
+     * на вопрос к буферу демон сам ответит, что ухо закрыто.
+     */
+    private val earTimeout = Runnable {
+        if (prefs.secondEar) {
+            setEar(false, R.string.second_ear_expired)
+            send(JSONObject().put("id", "ambient_control").put("submode", "off").put("wipe", true))
+        }
+    }
+
+    /**
+     * Послушать комнату — один круг распознавания.
+     *
+     * Круг начинается только после того, как локальная модель услышала речь:
+     * в тихой комнате открытое ухо не стоит ничего сверх обычного дня, и это
+     * главное, чем оплачен непрерывный режим. Пока в комнате говорят, круги
+     * идут один за другим — иначе каждая вторая фраза терялась бы в паузе
+     * между ними.
+     */
+    private fun listenToRoom(): Boolean {
+        if (!prefs.secondEar || roomListening || awaitingCommand || speaking) return false
+        // Слать некуда — значит и слушать чужой разговор незачем: буфер живёт
+        // у демона, а `send` без связи только копил бы попытки достучаться.
+        if (socket == null) return false
+        // Хвост собственной реплики ещё звучит в комнате.
+        if (System.currentTimeMillis() - spokeAt < EAR_ECHO_GAP_MS) return false
+        if (roomChain >= EAR_CHAIN_MAX) {
+            // Телевизор в комнате говорит часами. Микрофон возвращается
+            // модели обращения, а следующий круг начнётся с новой речи.
+            roomChain = 0
+            return false
+        }
+        roomListening = true
+        main.post {
+            runCatching { wake?.stop() }
+            try {
+                if (roomEar == null) roomEar = SpeechRecognizer.createSpeechRecognizer(this)
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                             RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+                    // Гипотеза одна: чужую реплику никто не переписывает, её
+                    // только пересказывают, и вторая догадка тут не помощь.
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                    putExtra(
+                        RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,
+                        EAR_SILENCE_MS
+                    )
+                    // Распознавание на устройстве, пока движок его тянет:
+                    // час чужого разговора через сеть — это и батарея, и квота.
+                    putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, roomOffline)
+                    hearing(this, prefs.ambientLanguage)
+                }
+                roomEar?.setRecognitionListener(roomListener())
+                roomEar?.startListening(intent)
+                roomChain++
+                phase(R.string.state_room)
+                // Пока распознаватель не отозвался, срок у него короткий:
+                // мёртвый круг держит микрофон, а с ним и слово «Клод».
+                main.postDelayed(roomWatchdog, RECOGNIZER_DEADLINE_MS)
+            } catch (t: Throwable) {
+                roomListening = false
+                report(getString(R.string.recognition_unavailable, t.javaClass.simpleName))
+                giveMicBack()
+            }
+        }
+        return true
+    }
+
+    /**
+     * Продолжить слушать комнату — или вернуть микрофон.
+     *
+     * Круг кончился, а следующий может и не начаться: связь отвалилась, счёт
+     * кругов подряд упёрся в потолок, хозяин заговорил сам. Тогда микрофон
+     * обязан вернуться модели обращения сразу, а не через полминуты, когда
+     * его хватится heartbeat: полминуты без wake word выглядят как «оглох».
+     */
+    private fun keepListening() {
+        if (!listenToRoom()) giveMicBack()
+    }
+
+    /** Распознаватель комнаты замолчал совсем — микрофон обратно. */
+    /**
+     * Круг затянулся: человек рядом говорит без остановки.
+     *
+     * Останавливаем, а не отменяем: остановка отдаёт расслышанное, отмена
+     * выбрасывает его — а это целая минута чужого разговора, ради которой
+     * ухо и открывали. Длинная речь так разрежется на куски по минуте, и
+     * каждый кусок дойдёт до буфера.
+     */
+    private val roomWatchdog = Runnable {
+        if (roomListening) {
+            // Круг, который не отозвался вовсе, остановка тоже расшевелит:
+            // разбираться, что именно с ним не так, микрофону не поможет.
+            runCatching { roomEar?.stopListening() }
+            main.postDelayed(roomGiveUp, RECOGNIZER_DEADLINE_MS)
+        }
+    }
+
+    /** А вот теперь распознаватель точно мёртв: микрофон нужен кому-то ещё. */
+    private val roomGiveUp = Runnable {
+        if (roomListening) {
+            runCatching { roomEar?.cancel() }
+            finishRoom()
+            giveMicBack()
+        }
+    }
+
+    private fun roomListener() = object : CloudListener {
+        override fun onResults(results: Bundle?) {
+            val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                .orEmpty().map { it.trim() }.firstOrNull { it.isNotEmpty() }.orEmpty()
+            finishRoom()
+            if (text.isEmpty()) { roomFellSilent(); return }
+            // Собственный ответ, вернувшийся через динамик. В буфере он был бы
+            // и ложью («это сказали вокруг»), и мусором: Claude пересказал бы
+            // человеку его же вопрос.
+            if (isOwnEcho(text)) { keepListening(); return }
+            // Пока ухо держит микрофон, оно единственное, что слышит комнату,
+            // — и обращение тоже. Поэтому обращённое к нам разбирается здесь,
+            // а не уходит в буфер как чужая речь.
+            Intents.secondEar(text)?.let { change ->
+                secondEarCommand(change, text)
+                return
+            }
+            if (Intents.hasWake(text)) {
+                stopRoom()
+                // Фразу уже сказали целиком: держим её запасным вариантом,
+                // как и при обращении, расслышанном локальной моделью.
+                listenForCommand(Intents.stripWake(text))
+                return
+            }
+            roomIdle = 0
+            overhear(text)
+            keepListening()
+        }
+
+        override fun onError(error: Int) {
+            finishRoom()
+            // Движок не умеет этот язык без сети. Спорить незачем: дальше
+            // слушаем через сеть и говорим об этом один раз за открытое ухо.
+            if (roomOffline && (error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ||
+                                error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED)) {
+                roomOffline = false
+                if (!roomOfflineSaid) {
+                    roomOfflineSaid = true
+                    report(getString(R.string.second_ear_online, prefs.ambientLanguage))
+                }
+                keepListening()
+                return
+            }
+            if (error == SpeechRecognizer.ERROR_NO_MATCH ||
+                error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+            ) {
+                roomFellSilent()
+                return
+            }
+            // Занятый распознаватель, оборванная сеть, отозванное разрешение:
+            // чинить это кругами нельзя, и микрофон честнее отдать обратно.
+            // Сказать об этом хватит одного раза: там, где локальной модели
+            // нет, круг повторяется сам, и жалоба повторялась бы с ним.
+            if (!roomErrorSaid) {
+                roomErrorSaid = true
+                report(getString(R.string.recognition_error, error))
+            }
+            giveMicBack()
+        }
+
+        // Ни громкость, ни начало речи здесь не считаются нарочно: копилка
+        // громкости меряет норму хозяина на этом микрофоне, и чужие голоса
+        // сдвинули бы её так, что хозяин перестал бы быть похож на себя.
+        /**
+         * Распознаватель жив и слушает — можно дать кругу полный срок.
+         *
+         * Единственное, зачем здесь этот колбэк: ни громкость, ни начало
+         * речи не считаются нарочно (см. ниже).
+         */
+        override fun onReadyForSpeech(params: Bundle?) {
+            main.removeCallbacks(roomWatchdog)
+            main.postDelayed(roomWatchdog, EAR_ROUND_MS)
+        }
+
+        override fun onBeginningOfSpeech() = Unit
+        override fun onRmsChanged(rmsdB: Float) = Unit
+        override fun onBufferReceived(buffer: ByteArray?) = Unit
+        override fun onEndOfSpeech() = Unit
+        override fun onPartialResults(partialResults: Bundle?) = Unit
+        override fun onEvent(eventType: Int, params: Bundle?) = Unit
+    }
+
+    private fun finishRoom() {
+        roomListening = false
+        main.removeCallbacks(roomWatchdog)
+        main.removeCallbacks(roomGiveUp)
+    }
+
+    /** Круг прошёл впустую: пара таких подряд — и в комнате точно замолчали. */
+    private fun roomFellSilent() {
+        roomIdle++
+        if (roomIdle >= EAR_IDLE_MAX) giveMicBack() else keepListening()
+    }
+
+    /** Микрофон возвращается модели обращения: её дело — услышать «Клод». */
+    private fun giveMicBack() {
+        // Круг кончился вместе с чередой: потолок считает подряд идущие
+        // круги, а не все за день, иначе разговор после паузы упирался бы
+        // в потолок, набранный полчаса назад.
+        roomChain = 0
+        roomIdle = 0
+        phase(R.string.state_waiting_for_wake)
+        if (!speaking && !awaitingCommand) resumeWake()
+        roomLater()
+    }
+
+    /**
+     * Напомнить себе вернуться к комнате.
+     *
+     * Нужно ровно там, где локальной модели нет: она и есть то, что говорит
+     * «вокруг заговорили», и без неё круг комнаты, однажды прерванный
+     * репликой хозяина или сменой микрофона, не начался бы больше никогда.
+     * Возвращаться мешает всё подряд — идёт команда, звучит ответ, — поэтому
+     * попытка повторяется, а не делается один раз: `keepListening` сам
+     * назначит следующую, если сейчас нельзя.
+     */
+    private fun roomLater() {
+        if (!prefs.secondEar || wakeReady) return
+        main.removeCallbacks(roomAgain)
+        main.postDelayed(roomAgain, EAR_RETRY_MS)
+    }
+
+    private val roomAgain = Runnable { keepListening() }
+
+    private fun stopRoom() {
+        main.removeCallbacks(roomAgain)
+        if (roomListening) runCatching { roomEar?.cancel() }
+        finishRoom()
+        roomChain = 0
+        roomIdle = 0
+        if (phase == R.string.state_room) phase(R.string.state_waiting_for_wake)
+        // Ухо закрывают до `stopRoom`, поэтому здесь это уже не «закрыли», а
+        // «микрофон понадобился кому-то ещё» — и к комнате надо вернуться.
+        roomLater()
+    }
+
+    /**
+     * Услышанное вокруг уходит демону — и больше никуда.
+     *
+     * Отдельно от `deliver` нарочно, и дело не в одном поле. Такая реплика не
+     * маршрутизируется и не исполняется, поэтому её не сопровождают ни
+     * earcon принятой команды, ни признаки говорящего: признаки меряются
+     * относительно нормы хозяина на этом микрофоне, и чужой голос, попавший
+     * в норму, сделал бы хозяина непохожим на себя.
+     */
+    private fun overhear(text: String) {
+        val device = if (route?.onBluetoothMic == true) "sony_mic" else "phone_mic"
+        send(
+            JSONObject()
+                .put("id", "speech_segment")
+                .put("segment_id", System.currentTimeMillis().toString())
+                .put("transcript", text)
+                .put("device", device)
+                .put("narrowband", route?.onBluetoothMic == true)
+                // Роль — не догадка акустики, а факт: этого нам не говорили.
+                .put("role", "bystander")
+                .put("role_source", "hint")
+                .put("ambient", true)
+        )
+    }
+
+    /**
+     * Демон сказал, что стало с его буфером.
+     *
+     * Состояний двое — ухо телефона и буфер демона, — и разойтись им нельзя:
+     * открытое ухо при закрытом буфере шлёт чужую речь в никуда, а закрытое
+     * при открытом означает, что человек попросил перестать, а его слушают.
+     * Поэтому рассылка демона побеждает: он один знает, что с буфером.
+     */
+    private fun onAmbient(message: JSONObject) {
+        val open = message.optString("submode", "off") != "off"
+        if (open == prefs.secondEar) return
+        setEar(open, if (open) R.string.second_ear_open else R.string.second_ear_closed)
+    }
+
+    /**
+     * Связь поднялась заново, а ухо так и осталось открытым.
+     *
+     * Демон мог перезапуститься с закрытым буфером — тогда чужая речь уходила
+     * бы ему и молча пропадала, а человек услышал бы «вокруг я ничего не
+     * слышал» в ответ на вопрос о разговоре, который шёл при нём. Просим
+     * открыть буфер обратно; вслух об этом не говорим — согласие уже
+     * назвали, когда ухо открывали, и повторять его на каждый обрыв связи
+     * значит превратить его в шум.
+     */
+    private fun restoreEar(welcome: JSONObject) {
+        val daemonOpen = welcome.optString("ambient", "off") != "off"
+        if (daemonOpen == prefs.secondEar) return
+        if (prefs.secondEar) {
+            send(
+                JSONObject().put("id", "ambient_control").put("submode", "passive")
+                    .put("bystander_transcript", true)
+            )
+            return
+        }
+        // Обратный случай: буфер демона открыт, а слушать его некому — так
+        // бывает после перезапуска приложения. Открытый буфер без микрофона
+        // хуже закрытого: на вопрос «что он сказал» он ответит вчерашним
+        // разговором и промолчит про сегодняшний.
+        send(JSONObject().put("id", "ambient_control").put("submode", "off").put("wipe", true))
     }
 
     // ---------- кнопка гарнитуры ----------
@@ -875,6 +1355,11 @@ class VoiceService : Service() {
         change.multilingual?.let { prefs.multilingual = it }
         runCatching { cloud?.destroy() }
         cloud = null
+        // Комната слушается на языке микрофона, пока ей не задали свой, — и
+        // её распознаватель держит прежние extras до пересоздания.
+        stopRoom()
+        runCatching { roomEar?.destroy() }
+        roomEar = null
         val spoken = prefs.replyLanguage.ifBlank { prefs.language }
         val line = when {
             change.language != null -> getString(R.string.listening_language, change.language)
@@ -916,7 +1401,14 @@ class VoiceService : Service() {
         spokeAt = System.currentTimeMillis()
         // Через динамик микрофон слышит нас самих: на это время он засыпает.
         // В наушниках эхо-пути нет, и «стоп» продолжает работать.
-        if (!onHeadphones()) runCatching { wake?.stop() }
+        if (!onHeadphones()) {
+            runCatching { wake?.stop() }
+            // И второе ухо тоже: свой же ответ, услышанный из динамика,
+            // лёг бы в буфер как чужая речь — и Claude пересказал бы его.
+            // В наушниках этого пути нет, и комнату можно слушать дальше:
+            // ответ звучит в ухе, разговор рядом продолжается.
+            stopRoom()
+        }
 
         val engine = when {
             speaks(tts, languageTag) -> tts
@@ -1051,7 +1543,11 @@ class VoiceService : Service() {
 
     private fun onServerMessage(message: JSONObject) {
         when (message.optString("id")) {
-            "welcome" -> report(getString(R.string.ready_credential, message.optString("credential")))
+            "welcome" -> {
+                report(getString(R.string.ready_credential, message.optString("credential")))
+                restoreEar(message)
+            }
+            "ambient_control" -> onAmbient(message)
             "route" -> onRoute(message)
             "voice_summary" -> {
                 val text = message.optString("text")
@@ -1180,7 +1676,14 @@ class VoiceService : Service() {
             .setContentTitle(getString(R.string.notification_title, getString(phase)))
             // Фаза говорит, слушает ли телефон; строка связи — дойдёт ли
             // сказанное до демона. Без второй первая обманчива.
-            .setSubText(getString(linkState.label))
+            //
+            // Открытое второе ухо стоит рядом и не исчезает ни на одной фазе:
+            // телефон слушает других людей, и это должно быть видно всё время,
+            // а не только в ту секунду, когда ухо открыли.
+            .setSubText(
+                if (prefs.secondEar) getString(R.string.second_ear_badge, getString(linkState.label))
+                else getString(linkState.label)
+            )
             .setContentText(text)
             .setContentIntent(open)
             .addAction(0, getString(R.string.action_speak), listen)

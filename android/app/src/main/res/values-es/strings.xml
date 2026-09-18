@@ -34,7 +34,7 @@
     <string name="action_auth_done">listo</string>
     <string name="action_copy_error">copiar el último error</string>
     <string name="status_idle">sin iniciar</string>
-    <string name="help_text">El idioma se cambia por voz: «Claude, español», «Claude, chino», «Claude, inglés», «Claude, ruso». Las órdenes se entienden en español, inglés, ruso y chino a la vez: nunca hace falta avisar de cuál vas a usar. La respuesta vuelve en el idioma en el que hablaste. La palabra de activación «Claude» la oye el propio teléfono, sin internet; después, lo que digas se reconoce en el idioma elegido. Di «Claude…» y del teléfono solo sale el texto de lo que has dicho. El botón de los auriculares permite hablar sin la palabra de activación. «para» calla la voz y «detén el trabajo» interrumpe la tarea.</string>
+    <string name="help_text">El idioma se cambia por voz: «Claude, español», «Claude, chino», «Claude, inglés», «Claude, ruso». Las órdenes se entienden en español, inglés, ruso y chino a la vez: nunca hace falta avisar de cuál vas a usar. La respuesta vuelve en el idioma en el que hablaste. La palabra de activación «Claude» la oye el propio teléfono, sin internet; después, lo que digas se reconoce en el idioma elegido. Di «Claude…» y del teléfono solo sale el texto de lo que has dicho. El botón de los auriculares permite hablar sin la palabra de activación. «para» calla la voz y «detén el trabajo» interrumpe la tarea. «Claude, segundo oído» hace que el teléfono escuche a quienes están alrededor y te lo cuente en tu idioma cuando preguntes; «Claude, apaga el segundo oído» lo detiene. La sala puede reconocerse en su propio idioma: «segundo oído en hebreo». Mientras el oído está abierto la notificación lo dice —grabar a otras personas necesita su consentimiento— y se cierra solo al cabo de una hora y cuando la aplicación se detiene.</string>
 
     <!-- Переключатели: подпись кнопки и есть её состояние. -->
     <string name="speech_on">voz: activada</string>
@@ -192,4 +192,13 @@
     <string name="listening_multilingual">Escucho en todos los idiomas que conozco.</string>
     <string name="listening_one_language">Escucho en un solo idioma.</string>
     <string name="listening_language">Ahora escucho en %1$s.</string>
+
+    <!-- Второе ухо: телефон слушает не хозяина, и об этом должно быть видно. -->
+    <string name="state_room">escuchando la sala</string>
+    <string name="second_ear_badge">%1$s · segundo oído</string>
+    <string name="second_ear_open">el segundo oído está abierto — se escucha a quienes están cerca</string>
+    <string name="second_ear_closed">el segundo oído está cerrado</string>
+    <string name="second_ear_language">la sala se escucha en %1$s</string>
+    <string name="second_ear_expired">el segundo oído se ha cerrado solo al cabo de una hora</string>
+    <string name="second_ear_online">no hay reconocimiento de %1$s en el dispositivo — la sala pasa por la red</string>
 </resources>

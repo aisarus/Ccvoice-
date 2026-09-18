@@ -49,6 +49,31 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("multilingual", true)
         set(value) = sp.edit().putBoolean("multilingual", value).apply()
 
+    /**
+     * Второе ухо: слушать ли, что говорят вокруг.
+     *
+     * Выключено по умолчанию и остаётся выключенным, пока человек не скажет
+     * вслух «второе ухо»: включать микрофон на чужую речь молча нельзя ни по
+     * спеке, ни по закону — согласие собеседников остаётся на человеке, и он
+     * должен знать, что оно понадобилось. Служба гасит флаг при остановке,
+     * чтобы ухо не пережило приложение.
+     */
+    var secondEar: Boolean
+        get() = sp.getBoolean("second_ear", false)
+        set(value) = sp.edit().putBoolean("second_ear", value).apply()
+
+    /**
+     * Язык комнаты: на чём распознавать чужую речь.
+     *
+     * Третья ось языка, и без неё второе ухо бессмысленно ровно там, где оно
+     * нужнее всего: человек говорит по-русски, вокруг говорят на иврите, а
+     * распознаватель Android слушает один язык за раз. Пусто — комната
+     * слушается на языке микрофона; меняется голосом: «второе ухо на иврите».
+     */
+    var ambientLanguage: String
+        get() = (sp.getString("ambient_language", "") ?: "").ifBlank { language }
+        set(value) = sp.edit().putString("ambient_language", value.trim()).apply()
+
     private fun deviceLanguage(): String {
         val want = java.util.Locale.getDefault().language.lowercase()
         return SUPPORTED.firstOrNull { it.startsWith(want) } ?: "en-US"
