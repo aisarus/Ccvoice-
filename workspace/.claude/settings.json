@@ -1,5 +1,7 @@
 {
   "ultracode": true,
+  "enableWorkflows": true,
+  "workflowSizeGuideline": "medium",
 
   "promptCacheTtl": "1h",
   "subagentPromptCacheTtl": "1h",

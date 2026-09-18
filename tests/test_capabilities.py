@@ -253,6 +253,9 @@ def test_settings_are_valid_json_with_the_keys_that_matter():
     # оплачивает весь разговор и ждёт его пересчёта.
     assert settings["promptCacheTtl"] == "1h"
     assert settings["subagentPromptCacheTtl"] == "1h"
+    # На Pro динамические воркфлоу выключены по умолчанию, а без них
+    # ultracode остаётся просто высоким усилием и ничего не планирует.
+    assert settings["enableWorkflows"] is True
 
 
 def test_settings_keep_secrets_out_of_reach():
