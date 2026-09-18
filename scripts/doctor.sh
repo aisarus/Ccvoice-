@@ -201,6 +201,31 @@ command -v voice-imagine >/dev/null 2>&1 \
     && echo "генератор картинок: voice-imagine" \
     || echo "генератор картинок: не подключён — рисовать сессия умеет, сочинить фотографию нет"
 
+WS_VALUE="$(value_of WORKSPACE_DIR)"
+WS_VALUE="${WS_VALUE:-$ROOT/workspace}"
+if [ -d "$WS_VALUE/.claude" ]; then
+    printf 'рабочая папка: %s — навыков %s, субагентов %s, правил %s\n' "$WS_VALUE" \
+        "$(find "$WS_VALUE/.claude/skills" -name SKILL.md 2>/dev/null | wc -l)" \
+        "$(find "$WS_VALUE/.claude/agents" -name '*.md' 2>/dev/null | wc -l)" \
+        "$(find "$WS_VALUE/.claude/rules" -name '*.md' 2>/dev/null | wc -l)"
+    SET="$WS_VALUE/.claude/settings.json"
+    if [ -f "$SET" ] && python3 -c "import json,sys;json.load(open(sys.argv[1]))" "$SET" 2>/dev/null; then
+        printf 'настройки : ultracode=%s, кэш=%s\n' \
+            "$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('ultracode',False))" "$SET")" \
+            "$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('promptCacheTtl','по умолчанию'))" "$SET")"
+    elif [ -f "$SET" ]; then
+        echo "настройки : $SET не разбирается как JSON — Claude Code молча работает без них"
+        note "сломан $SET — обнови: update-server.sh"
+    else
+        echo "настройки : нет $SET"
+        note "нет настроек Claude Code в рабочей папке — обнови: update-server.sh"
+    fi
+    [ -f "$WS_VALUE/CLAUDE.md" ] || note "нет $WS_VALUE/CLAUDE.md — обнови: update-server.sh"
+else
+    echo "рабочая папка: $WS_VALUE без .claude — Claude Code работает без навыков и правил"
+    note "рабочая папка не настроена — sudo bash $ROOT/scripts/update-server.sh"
+fi
+
 line "последние логи"
 if command -v journalctl >/dev/null 2>&1; then
     logs="$(journalctl -u voice-shell -n 12 --no-pager 2>/dev/null)"

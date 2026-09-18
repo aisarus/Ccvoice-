@@ -19,6 +19,7 @@ ffmpeg в двух шагах.
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 from dataclasses import dataclass, field
@@ -51,7 +52,9 @@ class Capabilities:
     public_dir: Path | None = None
     public_url: str | None = None
     model: str | None = None
+    fallback_model: str | None = None
     effort: str | None = None
+    ultracode: bool = False
     skills: str | list[str] | None = None
     mcp_config: Path | None = None
     image_command: str | None = None
@@ -161,10 +164,17 @@ class Capabilities:
             "from memory on anything that could have changed.",
             "- The Task tool runs subagents in parallel. Work that fans out — "
             "reading many sources, checking many files, trying several "
-            "approaches — goes to subagents, and you keep the conclusion.",
+            "approaches — goes to subagents, and you keep the conclusion. "
+            "Named subagents live in `.claude/agents/`: scout for quick "
+            "lookups, researcher for sourced facts, critic for an adversarial "
+            "reread before you call something done, builder for pages.",
             "- Long jobs are fine. Nobody is watching a progress bar; a good "
             "answer in four minutes beats a hedge in twenty seconds.",
         ]
+        if self.ultracode:
+            lines.append(
+                "- Ultracode is on: plan a workflow for anything substantive "
+                "instead of waiting to be asked.")
         return "\n".join(lines)
 
 
@@ -207,12 +217,31 @@ def detect(workspace: str | Path, environ: dict[str, str] | None = None) -> Capa
     if skills not in (None, "all"):
         skills = [name.strip() for name in str(skills).split(",") if name.strip()]
 
+    # Ultracode живёт в настройках рабочей папки, а не в окружении: ключ
+    # такой есть только у файла настроек. Читаем его здесь, чтобы знать две
+    # вещи — сказать о нём сессии и не перебить его уровнем усилия.
+    ultracode = False
+    settings = workspace / ".claude" / "settings.json"
+    try:
+        ultracode = bool(json.loads(settings.read_text()).get("ultracode"))
+    except (OSError, ValueError):
+        pass
+
+    # Явный уровень усилия отключает оркестровку ultracode: он идёт первым в
+    # порядке разрешения и заменяет её xhigh собой. Поэтому по умолчанию не
+    # передаём ничего и отдаём решение настройкам.
+    effort = (env.get("CODE_EFFORT") or "").strip() or None
+
     return Capabilities(
         workspace=workspace,
         public_dir=public_dir,
         public_url=public_url,
         model=(env.get("CODE_MODEL") or "").strip() or None,
-        effort=(env.get("CODE_EFFORT") or "").strip() or None,
+        # Перегруженная модель — это тишина в ухе. Запасная стоит по
+        # умолчанию: лучше ответить послабее, чем не ответить.
+        fallback_model=(env.get("CODE_FALLBACK_MODEL") or "sonnet").strip() or None,
+        effort=effort,
+        ultracode=ultracode,
         skills=skills,
         mcp_config=mcp_config,
         image_command=_first("voice-imagine") or None,

@@ -113,11 +113,10 @@ else
     git clone --quiet https://github.com/aisarus/Ccvoice-.git "$ROOT"
     git -C "$ROOT" checkout --quiet "$BRANCH"
 fi
-mkdir -p "$WORKSPACE" "$PUBLIC" "$WORKSPACE/.claude/skills"
-# Навыки: папка с SKILL.md, которую Claude Code подхватывает сам. Копируем
-# содержимое, а не папку целиком, — свои навыки человека, лежащие рядом,
-# остаются на месте.
-cp -r "$ROOT/skills/." "$WORKSPACE/.claude/skills/" 2>/dev/null || true
+mkdir -p "$WORKSPACE" "$PUBLIC"
+# Настройки, правила, навыки и субагенты Claude Code. Рабочая папка лежит
+# отдельно от репозитория, и без этого шага она остаётся пустой.
+bash "$ROOT/scripts/sync-workspace.sh" "$WORKSPACE"
 
 say "Зависимости"
 python3 -m venv "$ROOT/.venv"

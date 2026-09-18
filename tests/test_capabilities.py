@@ -9,6 +9,7 @@ Code, а не пустую строку, — это разница между «
 момент идёт по улице.
 """
 import http
+import json
 import re
 from pathlib import Path
 
@@ -177,7 +178,11 @@ def test_a_huge_file_is_refused_rather_than_read_into_memory(published, monkeypa
 # «сделай сайт» остаётся просьбой без готового порядка действий. Узнать об
 # этом голосом нельзя, поэтому проверяем здесь.
 
-SKILLS = sorted((Path(__file__).resolve().parents[1] / "skills").glob("*/SKILL.md"))
+ROOT = Path(__file__).resolve().parents[1]
+WORKSPACE = ROOT / "workspace"
+SKILLS = sorted((WORKSPACE / ".claude" / "skills").glob("*/SKILL.md"))
+AGENTS = sorted((WORKSPACE / ".claude" / "agents").glob("*.md"))
+RULES = sorted((WORKSPACE / ".claude" / "rules").glob("*.md"))
 NAME = re.compile(r"[a-z][a-z0-9-]*")
 EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 
@@ -231,3 +236,70 @@ def test_skill_does_not_promise_what_the_shell_cannot_do(path):
     if "фотограф" in body:
         assert "не можешь" in body or "нет" in body, \
             "фотография упомянута без оговорки, что сочинить её нельзя"
+
+
+# -- рабочая папка сервера -------------------------------------------------
+#
+# Claude Code читает её сам, молча. Опечатка в JSON не роняет ничего — она
+# просто означает, что настроек нет, и узнать об этом голосом невозможно:
+# сессия будет работать слабее, и всё.
+
+def test_settings_are_valid_json_with_the_keys_that_matter():
+    settings = json.loads((WORKSPACE / ".claude" / "settings.json").read_text())
+    # Ultracode — единственный ключ, который включает оркестровку воркфлоу.
+    assert settings["ultracode"] is True
+    # Часовой кэш: человек говорит урывками, между репликами проходят
+    # минуты, и на пятиминутном кэше каждая следующая реплика заново
+    # оплачивает весь разговор и ждёт его пересчёта.
+    assert settings["promptCacheTtl"] == "1h"
+    assert settings["subagentPromptCacheTtl"] == "1h"
+
+
+def test_settings_keep_secrets_out_of_reach():
+    deny = json.loads((WORKSPACE / ".claude" / "settings.json").read_text())["permissions"]["deny"]
+    for secret in ("/etc/voice-shell.env", "~/.ssh/**", "~/.claude/.credentials.json"):
+        assert any(secret in rule for rule in deny), secret
+
+
+def test_effort_is_not_pinned_anywhere_it_would_silence_ultracode():
+    """Явный уровень усилия идёт первым в порядке разрешения и подменяет
+    собой ultracode вместе с оркестровкой. Значит по умолчанию его нет."""
+    settings = json.loads((WORKSPACE / ".claude" / "settings.json").read_text())
+    assert "effortLevel" not in settings
+    assert settings.get("env", {}).get("CLAUDE_CODE_EFFORT_LEVEL") is None
+    assert capabilities.detect(WORKSPACE, {}).effort is None
+
+
+def test_ultracode_is_seen_by_the_daemon():
+    assert capabilities.detect(WORKSPACE, {}).ultracode is True
+
+
+def test_a_broken_settings_file_does_not_take_the_shell_down(tmp_path):
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.json").write_text("{ сломано")
+    assert capabilities.detect(tmp_path, {}).ultracode is False
+
+
+def test_there_is_a_standby_model():
+    """Перегруженная модель — это тишина в ухе, а не сообщение об ошибке."""
+    assert capabilities.detect("/w", {}).fallback_model == "sonnet"
+    assert capabilities.detect("/w", {"CODE_FALLBACK_MODEL": "haiku"}).fallback_model == "haiku"
+
+
+@pytest.mark.parametrize("path", AGENTS, ids=lambda p: p.stem)
+def test_subagent_file_is_shaped_the_way_claude_code_expects(path):
+    """Файл без name или description Claude Code пропускает молча, записав
+    причину в отладочный лог, которого никто не читает."""
+    meta, body = _frontmatter(path)
+    assert NAME.fullmatch(meta.get("name", "")), meta.get("name")
+    assert ":" not in meta.get("name", ""), "двоеточие зарезервировано за плагинами"
+    assert len(meta.get("description", "")) > 60, "по описанию решают, звать ли его"
+    assert meta.get("effort", "high") in EFFORTS
+    assert body.strip()
+
+
+def test_there_are_rules_and_they_are_not_empty():
+    """Правила переживают сжатие контекста, а сказанное голосом — нет."""
+    assert len(RULES) >= 3
+    for rule in RULES:
+        assert len(rule.read_text().split()) > 40, rule

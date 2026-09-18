@@ -197,8 +197,17 @@ class CodeTarget(_SdkTarget):
         }
         if caps.model:
             options["model"] = caps.model
+        if caps.fallback_model:
+            # Перегруженная модель — это тишина в ухе: человек сказал и не
+            # получил ничего. Запасная отвечает слабее, но отвечает.
+            options["fallback_model"] = caps.fallback_model
         if caps.effort:
+            # Только если задали руками: явный уровень идёт первым в порядке
+            # разрешения и подменяет собой ultracode вместе с его оркестровкой.
             options["effort"] = caps.effort
+        # Вывод сборки или прогона тестов не должен упираться в буфер: это
+        # обрыв сессии на ровном месте, а чинится одним числом.
+        options["max_buffer_size"] = 32 * 1024 * 1024
         if caps.mcp_config is not None:
             # Точка расширения: новый MCP-сервер подключается файлом на
             # сервере, без правки кода и без выкладки.
