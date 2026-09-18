@@ -235,3 +235,24 @@ def test_a_deleted_file_is_never_offered(tmp_path, monkeypatch, сервер):
 
     файлы = daemon._recently_changed(репо)
     assert [p.name for p in файлы] == ["живой.txt"]
+
+
+def test_a_test_file_does_not_go_instead_of_the_work(tmp_path, monkeypatch, сервер):
+    """Живая поломка: человек просил игру, а уехал test_snake_dom.mjs —
+    тест записался последним и оказался самым свежим."""
+    import time
+    daemon, репо = _демон(tmp_path, monkeypatch, сервер)
+    (репо / "snake.html").write_text("<html>игра</html>", encoding="utf-8")
+    time.sleep(0.01)
+    (репо / "test_snake_dom.mjs").write_text("тест", encoding="utf-8")
+
+    имена = [p.name for p in daemon._files_to_share("его", репо)]
+    assert имена[0] == "snake.html", имена
+    assert "test_snake_dom.mjs" not in имена
+
+
+def test_but_a_test_is_sent_if_that_is_all_there_is(tmp_path, monkeypatch, сервер):
+    """Если кроме теста ничего нет — лучше он, чем ничего."""
+    daemon, репо = _демон(tmp_path, monkeypatch, сервер)
+    (репо / "test_only.mjs").write_text("тест", encoding="utf-8")
+    assert [p.name for p in daemon._files_to_share("его", репо)] == ["test_only.mjs"]

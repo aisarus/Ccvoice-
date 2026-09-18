@@ -827,10 +827,12 @@ class Daemon:
         изменённые = self._recently_changed(workspace)
         if изменённые:
             return изменённые
-        # Точки отката может не быть вовсе — например, правка ещё не закрыта
-        # коммитом. Тогда «его» — это просто самое свежее в проекте.
+        # Точки отката может не быть вовсе — правка ещё не закрыта коммитом.
+        # Тогда «его» — это самое свежее, но не тест: человек просил игру, а
+        # тест к ней записывается последним и уезжал вместо неё.
         свежие = sorted(кандидаты, key=lambda p: p.stat().st_mtime, reverse=True)
-        return свежие[:1] if свежие else []
+        главные = [p for p in свежие if not self._вспомогательный(p, workspace)]
+        return (главные or свежие)[:3]
 
     def _recently_changed(self, workspace: Path) -> list[Path]:
         """Файлы последней точки отката — только те, что ещё существуют."""
@@ -842,8 +844,19 @@ class Daemon:
         except (RuntimeError, OSError):
             return []
         # В diff попадают и удалённые файлы: отправлять их нечем.
-        живые = [workspace / имя for имя in имена]
-        return [p for p in живые if p.is_file()][:5]
+        живые = [p for p in (workspace / имя for имя in имена) if p.is_file()]
+        главные = [p for p in живые if not self._вспомогательный(p, workspace)]
+        return (главные or живые)[:5]
+
+    @staticmethod
+    def _вспомогательный(path: Path, workspace: Path) -> bool:
+        """Тесты и сборочный мусор — не то, что человек просит «скинуть»."""
+        части = [p.lower() for p in path.relative_to(workspace).parts]
+        if any(p in ("test", "tests", "spec", "__tests__", "build", "dist") for p in части):
+            return True
+        имя = path.stem.lower()
+        return (имя.startswith(("test_", "test-", "spec_"))
+                or имя.endswith(("_test", "-test", ".test", "_spec", ".spec")))
 
     @staticmethod
     def _project_files(workspace: Path) -> list[Path]:
