@@ -15,13 +15,17 @@ import re
 import time
 from pathlib import Path
 
-REMEMBER_PHRASES = ("запомни что", "запомни", "имей в виду что", "имей в виду",
-                    "на будущее", "не забудь что", "не забудь")
-RECALL_PHRASES = ("что ты обо мне помнишь", "что ты помнишь", "покажи память",
-                  "что у тебя в памяти")
-FORGET_PHRASES = ("забудь про", "забудь что", "забудь")
+from . import lexicon
+from .i18n import t
 
-HEADER = "# Память Voice Shell\n\nЧто Claude знает о хозяине и его проектах.\n"
+REMEMBER_PHRASES = lexicon.every("remember")
+RECALL_PHRASES = lexicon.every("recall")
+FORGET_PHRASES = lexicon.every("forget")
+
+
+def header() -> str:
+    """Заголовок файла памяти на языке того, кто его завёл."""
+    return t("memory.header")
 
 
 class Memory:
@@ -51,7 +55,7 @@ class Memory:
         facts = self.facts()[-limit:]
         if not facts:
             return ""
-        return "[память] " + " · ".join(facts)
+        return t("memory.hint_prefix") + " · ".join(facts)
 
     # -- запись -----------------------------------------------------------
     def remember(self, fact: str) -> str:
@@ -64,7 +68,7 @@ class Memory:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             if not self.path.exists():
-                self.path.write_text(HEADER, encoding="utf-8")
+                self.path.write_text(header(), encoding="utf-8")
             stamp = time.strftime("%Y-%m-%d")
             with open(self.path, "a", encoding="utf-8") as handle:
                 handle.write(f"- {fact}  <!-- {stamp} -->\n")
@@ -90,7 +94,11 @@ class Memory:
 
 
 def _normalise(text: str) -> str:
-    return " ".join(re.sub(r"[^\w\s]", " ", text.lower()).split())
+    return lexicon.normalise(text)
+
+
+def _cjk(text: str) -> bool:
+    return bool(lexicon.CJK.search(text))
 
 
 # Русские окончания: всё, чем слово вправе отличаться от того же слова в
@@ -136,8 +144,10 @@ def _after(text: str, phrases: tuple[str, ...]) -> str | None:
     for phrase in phrases:
         if lowered == phrase:
             return ""
-        if lowered.startswith(phrase + " "):
-            return text.strip()[len(phrase):].strip(" ,.:—-").strip()
+        # Китайский пишется без пробелов: там граница слова — это сам конец
+        # фразы, а требование пробела после неё не сработало бы никогда.
+        if lowered.startswith(phrase + " ") or (_cjk(phrase) and lowered.startswith(phrase)):
+            return text.strip()[len(phrase):].strip(" ,.:—-，。、").strip()
     return None
 
 

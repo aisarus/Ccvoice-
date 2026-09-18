@@ -11,6 +11,8 @@ import os
 import re
 from pathlib import Path
 
+from .i18n import join, t
+
 SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", "build", "dist",
              ".gradle", ".idea", "venv", "target"}
 INTERESTING = {".py", ".ts", ".tsx", ".js", ".kt", ".java", ".go", ".rs", ".rb",
@@ -57,9 +59,7 @@ def extra_terms() -> list[str]:
 def hint_line(terms: list[str]) -> str:
     if not terms:
         return ""
-    return ("[глоссарий] в этом проекте встречаются: " + ", ".join(terms) +
-            ". Если в реплике что-то звучит похоже на одно из этих имён, "
-            "считай, что имелось в виду оно.")
+    return t("glossary.hint", terms=join(terms))
 
 
 def for_workspace(workspace: str | Path, limit: int = 40) -> str:

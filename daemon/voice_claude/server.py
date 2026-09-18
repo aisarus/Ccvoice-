@@ -23,8 +23,8 @@ from urllib.parse import parse_qs, urlsplit
 from websockets.datastructures import Headers
 from websockets.http11 import Response
 
-from . import (checkpoints, formatter, glossary, learning, memory, policy, state,
-               stress, tasks, telegram, watcher)
+from . import (checkpoints, formatter, glossary, i18n, learning, memory, policy,
+               state, stress, tasks, telegram, watcher)
 from .ambient import AmbientBuffer, RateLimiter, WhisperGate
 from .auth import (SetupError, SetupTokenFlow, apply_token, credential_kind,
                    credential_problem, forget_cli_probe, github_ready, persist_token,
@@ -54,6 +54,8 @@ class Settings:
     workspace_repo: str | None = None
     # auto — спрашивать модель, когда словарь не уверен; off — только словарь.
     router_model: str = "auto"
+    # Язык ответа по умолчанию. Телефон и сам говорящий его перебивают.
+    language: str = ""
     # Долгая работа не должна молчать: первое «работаю» и повторы.
     first_ack_s: float = 0.0
     progress_gap_s: float = 0.0
@@ -70,6 +72,7 @@ class Settings:
             ambient_submode=os.environ.get("AMBIENT_SUBMODE", "off"),
             workspace_repo=os.environ.get("WORKSPACE_REPO") or None,
             router_model=os.environ.get("ROUTER_MODEL", "auto"),
+            language=os.environ.get("VOICE_LANG", ""),
         )
 
 
@@ -146,7 +149,7 @@ class Daemon:
                     continue
                 if websocket not in self.clients:
                     await self._send(websocket, {"id": "error", "code": "unauthorized",
-                                                 "message": "сначала hello", "recoverable": False})
+                                                 "message": "hello first", "recoverable": False})
                     continue
                 task = asyncio.create_task(self._guarded(websocket, message))
                 working.add(task)
@@ -171,10 +174,10 @@ class Daemon:
         except asyncio.CancelledError:
             raise
         except Exception as exc:                  # noqa: BLE001 - причин много
-            log.exception("не смог обработать %s", msg.get("id"))
+            log.exception("could not handle %s", msg.get("id"))
             self.machine.to(state.SPEAKING)
             self.machine.open_window()
-            await self._say(f"Сбой в оболочке. {formatter.reason_for_voice(exc)}")
+            await self._say(i18n.t("shell.failure", reason=formatter.reason_for_voice(exc)))
             await self._send(ws, {"id": "error", "code": "internal",
                                   "message": str(exc)[:400], "recoverable": True})
             await self._broadcast_state()
@@ -191,13 +194,16 @@ class Daemon:
             # сна, при перезапуске службы. Прежнее соединение того же
             # устройства может ещё не отвалиться по таймауту, и тогда каждый
             # ответ уходит дважды и трижды — человек слышит его хором.
+            # Язык телефона — это то, на чём человек собирается говорить.
+            # Услышанное всё равно перебивает: одна оболочка на две головы.
+            i18n.use(msg.get("language"))
             device = str(msg.get("device_id") or "")
             if device:
-                for прежний in [c for c in self.clients
-                                if self._device_of.get(c) == device and c is not ws]:
-                    self.clients.discard(прежний)
-                    self._device_of.pop(прежний, None)
-                    asyncio.create_task(self._close_quietly(прежний))
+                for previous in [c for c in self.clients
+                                 if self._device_of.get(c) == device and c is not ws]:
+                    self.clients.discard(previous)
+                    self._device_of.pop(previous, None)
+                    asyncio.create_task(self._close_quietly(previous))
                 self._device_of[ws] = device
             self.clients.add(ws)
             # Пока никто не слушал, новости копились — отдаём их первым делом.
@@ -215,6 +221,7 @@ class Daemon:
                 "credential": credential_kind(),
                 "credential_problem": credential_problem(),
                 "permission_mode": policy.mode(),
+                "language": i18n.current(),
                 "github": github_ready(),
             })
         elif kind == "speech_segment":
@@ -257,6 +264,9 @@ class Daemon:
     # -- the voice loop --------------------------------------------------
     async def _on_segment(self, ws: Any, msg: dict[str, Any]) -> None:
         text = (msg.get("transcript") or "").strip()
+        # Отвечаем на языке реплики, а не настройки: человек, перешедший на
+        # английский посреди разговора, не должен лезть в настройки телефона.
+        i18n.use(i18n.detect(text))
         decision = self._classify(msg)
         device = msg.get("device", "phone_mic")
 
@@ -271,7 +281,7 @@ class Daemon:
         if not self.classifier.may("execute", decision):
             await self._send(ws, {"id": "route", "target": None, "reason": "role_gate",
                                   "role": decision.role, "confidence": round(decision.confidence, 3),
-                                  "label": decision.label_ru})
+                                  "label": decision.label})
             return
 
         if await self._handle_spoken_command(ws, text):
@@ -298,7 +308,7 @@ class Daemon:
         await self._send(ws, {"id": "route", "target": route.target, "reason": route.reason,
                               "confidence": round(route.confidence, 3),
                               "earcon": self.router.earcon_for(route.target),
-                              "role": decision.role, "label": decision.label_ru})
+                              "role": decision.role, "label": decision.label})
 
         self.machine.to(state.THINKING)
         await self._broadcast_state()
@@ -309,7 +319,7 @@ class Daemon:
         if alternatives:
             role_line += "\n" + alternatives
         if route.target == "chat" and AmbientBuffer.is_recall(text) and self.ambient.enabled:
-            role_line += "\n[ambient] последние реплики:\n" + self.ambient.transcript()
+            role_line += "\n" + i18n.t("ambient.transcript_header") + "\n" + self.ambient.transcript()
 
         await self._speak_turn(ws, route, preamble, role_line)
 
@@ -356,18 +366,18 @@ class Daemon:
         source = self.router.other_target(target)
         context = self._last_output.get(source, "")
         if not context:
-            await self._say("Пока нечего перекидывать.", "chat")
+            await self._say(i18n.t("handoff.nothing"), "chat")
             return
-        lines = [f"[передача из цели «{source}»]"]
+        lines = [i18n.t("handoff.header", source=source)]
         if self._last_utterance and self._last_utterance[1] == source:
-            lines.append(f"спрашивали: {self._last_utterance[0]}")
-        lines.append(f"ответ был: {context}")
+            lines.append(i18n.t("handoff.asked", text=self._last_utterance[0]))
+        lines.append(i18n.t("handoff.answer", text=context))
         route = Route(target, "handoff", 1.0, "\n".join(lines) + "\n\n" + text)
 
         await self._send(ws, {"id": "route", "target": target, "reason": "handoff",
                               "confidence": 1.0, "from": source,
                               "earcon": self.router.earcon_for(target),
-                              "role": decision.role, "label": decision.label_ru})
+                              "role": decision.role, "label": decision.label})
         self.machine.to(state.THINKING)
         await self._broadcast_state()
         await self._speak_turn(ws, route, self._preamble(),
@@ -386,7 +396,7 @@ class Daemon:
             # Сессия Claude могла не подняться или упасть посреди работы.
             # Молча уронить связь нельзя: в ухе это тишина, а на телефоне —
             # переподключение без единого слова о том, что случилось.
-            log.exception("цель %s не ответила", route.target)
+            log.exception("target %s did not answer", route.target)
             await self._recover_from(ws, route.target, exc)
             return None
 
@@ -398,25 +408,25 @@ class Daemon:
         """Изменения закрываем коммитом: без этого «откати последнее» не на что опереть."""
         if tracked and before:
             try:
-                after = checkpoints.commit_all(workspace, f"голосом: {said[:60]}")
+                after = checkpoints.commit_all(workspace, i18n.t("checkpoint.commit", said=said[:60]))
                 if after:
                     self.journal.add(before, after, said)
                 return
             except (RuntimeError, OSError) as exc:
-                log.warning("не удалось записать точку отката: %s", exc)
+                log.warning("could not record a checkpoint: %s", exc)
         elif tracked:
             # Репозиторий без единого коммита: возвращаться некуда, но сам
             # коммит сделать надо — со следующей реплики откат заработает.
             try:
-                checkpoints.commit_all(workspace, f"голосом: {said[:60]}")
+                checkpoints.commit_all(workspace, i18n.t("checkpoint.commit", said=said[:60]))
                 return
             except (RuntimeError, OSError) as exc:
-                log.warning("не удалось сделать первый коммит: %s", exc)
+                log.warning("could not make the first commit: %s", exc)
         # Человек должен знать, что откатывать будет нечем, — но узнать об этом
         # один раз, а не после каждой правки.
         if not self._warned_no_undo:
             self._warned_no_undo = True
-            await self._say("Точку отката записать не вышло: «откати последнее» здесь не сработает.")
+            await self._say(i18n.t("undo.no_checkpoint"))
 
     async def _finish_turn(self) -> None:
         """Закрыть реплику: окно диалога открыто, состояние — честное.
@@ -430,7 +440,7 @@ class Daemon:
 
     async def _recover_from(self, ws: Any, target: str, exc: Exception) -> None:
         """Сказать вслух, что не вышло, и вернуться в исходное состояние."""
-        spoken = f"{target}: не смог выполнить. {formatter.reason_for_voice(exc)}"
+        spoken = i18n.t("target.failed", target=target, reason=formatter.reason_for_voice(exc))
         # Пересоздаём только ту сессию, которая сломалась. Общий сброс ронял
         # долгую Claude Code-сессию из-за того, что не записался инбокс или
         # икнула разговорная цель, — и работа начиналась с чистого листа.
@@ -461,7 +471,8 @@ class Daemon:
                 if said == 1:
                     self.machine.to(state.WORKING)
                     await self._broadcast_state()
-                await self._progress(target, "Работаю." if said == 1 else "Ещё работаю.")
+                await self._progress(target, i18n.t("shell.working") if said == 1
+                                     else i18n.t("shell.still_working"))
 
     async def _progress(self, target: str, text: str) -> None:
         """«Работаю» — про весь демон, а не про каждую реплику.
@@ -483,14 +494,14 @@ class Daemon:
             try:
                 events = await asyncio.to_thread(self.watcher.check)
                 for event in events:
-                    log.info("проактивно: %s", event.text)
+                    log.info("proactive: %s", event.text)
                     await self._announce(event.text)
                     if watcher.mode() == "fix" and event.fix_prompt:
                         await self._fix_it(event)
             except Exception as exc:            # наблюдатель не должен ронять демон
                 # Починка внутри цикла тоже: упавший «fix» уносил с собой весь
                 # цикл, и проактивность молча выключалась до перезапуска.
-                log.warning("наблюдатель: %s", exc)
+                log.warning("watcher: %s", exc)
                 continue
 
     async def _announce(self, text: str) -> None:
@@ -520,7 +531,9 @@ class Daemon:
         синтез без неё ошибается в технических словах, а со знаками на экране
         читать невозможно. Поэтому два поля.
         """
-        marked = stress.mark(text)
+        # Знаки ударения понимает только русский синтез: в английской или
+        # китайской реплике «+» — это просто плюс, который прочтут вслух.
+        marked = stress.mark(text) if i18n.uses_stress_marks() else text
         payload: dict[str, Any] = {"id": "voice_summary", "text": stress.clean(text),
                                    "is_question": False, "stubbed": False,
                                    "full_output": text, "target": "code"}
@@ -551,12 +564,14 @@ class Daemon:
         alts = [a.strip() for a in raw if isinstance(a, str) and a.strip()][:3]
         if not alts:
             return ""
-        return "[распознавание] другие варианты того же: " + " · ".join(alts)
+        return i18n.t("asr.alternatives") + " · ".join(alts)
 
     def _preamble(self) -> str:
         """Служебная приписка: голосовой ввод, имена проекта, память о человеке."""
-        parts = ["\n".join(load_spec()["command_passthrough"]["allowed_additions"]
-                            ["system_preamble"].splitlines())]
+        additions = load_spec()["command_passthrough"]["allowed_additions"]
+        preamble = (additions.get("system_preamble_by_language", {}).get(i18n.current())
+                    or additions["system_preamble"])
+        parts = ["\n".join(preamble.splitlines())]
         for extra in (self._glossary_hint(), self.memory.hint()):
             if extra:
                 parts.append(extra)
@@ -635,7 +650,7 @@ class Daemon:
         """Проводит `claude setup-token` через телефон: ссылка -> код -> токен."""
         if ws not in self.clients:
             await self._send(ws, {"id": "error", "code": "unauthorized",
-                                  "message": "нужен токен доступа", "recoverable": False})
+                                  "message": "an access token is required", "recoverable": False})
             return
         try:
             # Токен уже на руках — вставили его прямо в приложении.
@@ -643,7 +658,7 @@ class Daemon:
                 token = str(msg.get("token", "")).strip()
                 problem = token_problem(token)
                 if problem:
-                    raise SetupError(f"токен не подошёл: {problem}")
+                    raise SetupError(i18n.t("auth.token_mismatch", problem=problem))
                 await self._accept_token(token)
                 return
 
@@ -657,7 +672,7 @@ class Daemon:
                 return
 
             if self._setup is None:
-                raise SetupError("флоу не запущен")
+                raise SetupError(i18n.t("auth.flow_not_started"))
             token = await self._setup.submit(msg.get("code", ""))
             self._setup = None
             await self._accept_token(token)
@@ -672,7 +687,7 @@ class Daemon:
         raw = f"{tool_name} {json.dumps(input_data, ensure_ascii=False)[:200]}"
         # Безопасное делаем молча: спрашивать про каждый git status — издевательство.
         if policy.decide_in_mode(tool_name, input_data) == "allow":
-            log.info("разрешено политикой: %s", tool_name)
+            log.info("allowed by policy: %s", tool_name)
             return True
         if tool_name in self.preapproved and policy.may_remember(tool_name, input_data):
             return True
@@ -713,18 +728,21 @@ class Daemon:
         fact = memory.remember_intent(text)
         if fact is not None:
             saved = self.memory.remember(fact)
-            await self._say("Запомнил." if saved else "Нечего запоминать.", "chat")
+            await self._say(i18n.t("memory.saved") if saved
+                            else i18n.t("memory.nothing_to_save"), "chat")
             return True
 
         forgotten = memory.forget_intent(text)
         if forgotten:
             count = self.memory.forget(forgotten)
-            await self._say("Забыл." if count else "Такого не помню.", "chat")
+            await self._say(i18n.t("memory.forgot") if count
+                            else i18n.t("memory.not_remembered"), "chat")
             return True
 
         if memory.recall_intent(text):
             facts = self.memory.facts()
-            spoken = ("Помню: " + "; ".join(facts[-5:]) + ".") if facts else "Пока ничего не помню."
+            spoken = (i18n.t("memory.recall", facts="; ".join(facts[-5:]))
+                      if facts else i18n.t("memory.empty"))
             await self._say(spoken, "chat")
             return True
         return False
@@ -733,14 +751,14 @@ class Daemon:
         """«Не туда»: переслать прошлую реплику в другую цель и запомнить урок."""
         self.router.force(None)
         if self._last_utterance is None:
-            await self._say("Нечего перенаправлять.", "chat")
+            await self._say(i18n.t("reroute.nothing"), "chat")
             return
         said, was = self._last_utterance
         # «не туда, в чат» — цель названа прямо; иначе берём противоположную.
         named = self.router.route(text.lower(), ms_since_last=0)
         target = named.target if named.reason == "explicit_prefix" else self.router.other_target(was)
         self.examples.remember(said, target)
-        log.info("поправка: «%s» -> %s (было %s)", said[:40], target, was)
+        log.info("correction: %r -> %s (was %s)", said[:40], target, was)
 
         await self._send(ws, {"id": "route", "target": target, "reason": "corrected",
                               "confidence": 1.0, "learned_from": was})
@@ -762,8 +780,8 @@ class Daemon:
         """
         bridge = telegram.Bridge()
         if not bridge.ready:
-            await self._say("Телеграм не настроен. На сервере: "
-                            "bash scripts/setup-telegram.sh")
+            await self._say(i18n.t("telegram.not_configured",
+                                   command="bash scripts/setup-telegram.sh"))
             return
 
         workspace = Path(self.targets.code.workspace)
@@ -774,33 +792,37 @@ class Daemon:
             # и человек чаще всего хочет именно его.
             text = self._last_output.get("code") or self._last_output.get("chat") or ""
             if not text:
-                await self._say("Не понял, что отправить.")
+                await self._say(i18n.t("telegram.unclear"))
                 return
             problem = await asyncio.to_thread(bridge.send_text, text)
-            await self._say("Отправил в телеграм." if problem is None
-                            else f"Не отправил: {problem}")
+            await self._say(i18n.t("telegram.sent_one") if problem is None
+                            else i18n.t("telegram.not_sent", problem=problem))
             return
 
-        ушли, отказы = [], []
+        sent, refused = [], []
         for path in files:
-            причина = telegram.refuse_reason(path, workspace)
-            if причина:
-                отказы.append(f"{path.name}: {причина}")
+            reason = telegram.refuse_reason(path, workspace)
+            if reason:
+                refused.append(f"{path.name}: {reason}")
                 continue
             problem = await asyncio.to_thread(bridge.send_document, path, path.name)
-            (ушли if problem is None else отказы).append(
+            (sent if problem is None else refused).append(
                 path.name if problem is None else f"{path.name}: {problem}")
 
-        сказать = []
-        if ушли:
-            сказать.append("Отправил: " + ", ".join(ушли[:3])
-                           + (f" и ещё {len(ушли) - 3}" if len(ушли) > 3 else ""))
-        if отказы:
-            сказать.append("Не отправил — " + "; ".join(отказы[:2]))
-        await self._say(". ".join(сказать) or "Нечего отправлять.")
+        spoken = []
+        if sent:
+            spoken.append(i18n.t("telegram.sent_list", names=i18n.join(sent[:3]))
+                          + (i18n.t("telegram.and_more", rest=len(sent) - 3)
+                             if len(sent) > 3 else ""))
+        if refused:
+            spoken.append(i18n.t("telegram.refused_list", reasons="; ".join(refused[:2])))
+        await self._say(". ".join(spoken) or i18n.t("telegram.nothing"))
 
     # «Скинь мне ЕГО в телегу» — это не имя файла, а «то, что мы сейчас делали».
-    МЕСТОИМЕНИЯ = {"его", "это", "этот", "её", "ее", "их", "то", "тот", "файл", "их же"}
+    PRONOUNS = {"его", "это", "этот", "её", "ее", "их", "то", "тот", "файл", "их же",
+                "it", "this", "that", "the file", "them", "those",
+                "lo", "eso", "esto", "el archivo", "ese",
+                "它", "这个", "那个", "文件"}
 
     def _files_to_share(self, wanted: str, workspace: Path) -> list[Path]:
         """Что именно человек просит отправить.
@@ -809,30 +831,30 @@ class Daemon:
         потом просто самое свежее в проекте. Несуществующее не предлагаем
         никогда: «такого файла нет» — плохой ответ на «скинь мне его».
         """
-        корень = wanted.lower().strip(" .,")
-        if корень in self.МЕСТОИМЕНИЯ:
-            корень = ""
+        stem = wanted.lower().strip(" .,")
+        if stem in self.PRONOUNS:
+            stem = ""
 
-        кандидаты = self._project_files(workspace)
-        if корень:
-            точные = [p for p in кандидаты
-                      if корень in p.name.lower() or корень in p.stem.lower()]
-            if точные:
-                return точные[:5]
+        candidates = self._project_files(workspace)
+        if stem:
+            exact = [p for p in candidates
+                     if stem in p.name.lower() or stem in p.stem.lower()]
+            if exact:
+                return exact[:5]
             # Он говорит «конфиг», а файл называется config.json.
-            похожее = telegram.best_match(корень, [p.name for p in кандидаты])
-            if похожее:
-                return [p for p in кандидаты if p.name == похожее][:1]
+            similar = telegram.best_match(stem, [p.name for p in candidates])
+            if similar:
+                return [p for p in candidates if p.name == similar][:1]
 
-        изменённые = self._recently_changed(workspace)
-        if изменённые:
-            return изменённые
+        changed = self._recently_changed(workspace)
+        if changed:
+            return changed
         # Точки отката может не быть вовсе — правка ещё не закрыта коммитом.
         # Тогда «его» — это самое свежее, но не тест: человек просил игру, а
         # тест к ней записывается последним и уезжал вместо неё.
-        свежие = sorted(кандидаты, key=lambda p: p.stat().st_mtime, reverse=True)
-        главные = [p for p in свежие if not self._вспомогательный(p, workspace)]
-        return (главные or свежие)[:3]
+        newest = sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)
+        main = [p for p in newest if not self._is_auxiliary(p, workspace)]
+        return (main or newest)[:3]
 
     def _recently_changed(self, workspace: Path) -> list[Path]:
         """Файлы последней точки отката — только те, что ещё существуют."""
@@ -840,38 +862,38 @@ class Daemon:
         if point is None or not checkpoints.is_repo(workspace):
             return []
         try:
-            имена = checkpoints.changed_files(workspace, point.before, point.after)
+            names = checkpoints.changed_files(workspace, point.before, point.after)
         except (RuntimeError, OSError):
             return []
         # В diff попадают и удалённые файлы: отправлять их нечем.
-        живые = [p for p in (workspace / имя for имя in имена) if p.is_file()]
-        главные = [p for p in живые if not self._вспомогательный(p, workspace)]
-        return (главные or живые)[:5]
+        alive = [p for p in (workspace / name for name in names) if p.is_file()]
+        main = [p for p in alive if not self._is_auxiliary(p, workspace)]
+        return (main or alive)[:5]
 
     @staticmethod
-    def _вспомогательный(path: Path, workspace: Path) -> bool:
+    def _is_auxiliary(path: Path, workspace: Path) -> bool:
         """Тесты и сборочный мусор — не то, что человек просит «скинуть»."""
-        части = [p.lower() for p in path.relative_to(workspace).parts]
-        if any(p in ("test", "tests", "spec", "__tests__", "build", "dist") for p in части):
+        parts = [p.lower() for p in path.relative_to(workspace).parts]
+        if any(p in ("test", "tests", "spec", "__tests__", "build", "dist") for p in parts):
             return True
-        имя = path.stem.lower()
-        return (имя.startswith(("test_", "test-", "spec_"))
-                or имя.endswith(("_test", "-test", ".test", "_spec", ".spec")))
+        name = path.stem.lower()
+        return (name.startswith(("test_", "test-", "spec_"))
+                or name.endswith(("_test", "-test", ".test", "_spec", ".spec")))
 
     @staticmethod
     def _project_files(workspace: Path) -> list[Path]:
-        найдено: list[Path] = []
+        found: list[Path] = []
         for path in workspace.rglob("*"):
             if not path.is_file():
                 continue
-            части = path.relative_to(workspace).parts
+            parts = path.relative_to(workspace).parts
             if any(p.startswith(".") or p in ("node_modules", "__pycache__")
-                   for p in части):
+                   for p in parts):
                 continue
-            найдено.append(path)
-            if len(найдено) >= 500:        # большой проект целиком не нужен
+            found.append(path)
+            if len(found) >= 500:          # большой проект целиком не нужен
                 break
-        return найдено
+        return found
 
     # -- очередь фоновых задач -------------------------------------------
     async def _handle_queue_command(self, ws: Any, text: str) -> bool:
@@ -883,10 +905,10 @@ class Daemon:
         wanted = tasks.background_request(text)
         if wanted:
             if not checkpoints.is_repo(self.targets.code.workspace):
-                await self._say("Фоновые задачи работают только в репозитории.")
+                await self._say(i18n.t("tasks.repo_only"))
                 return True
             task = self.queue.add(wanted)
-            await self._say(f"Взял в работу: {task.title}. Скажу, когда будет.")
+            await self._say(i18n.t("tasks.accepted", title=task.title))
             return True
 
         if tasks.is_status_question(text):
@@ -894,23 +916,23 @@ class Daemon:
             return True
 
         if tasks.is_ready_question(text):
-            готовые = self.queue.by_state(tasks.DONE)
-            if not готовые:
-                await self._say("Готовых задач нет.")
+            ready = self.queue.by_state(tasks.DONE)
+            if not ready:
+                await self._say(i18n.t("tasks.none_ready"))
             else:
-                последняя = готовые[-1]
-                await self._say(f"Готово {len(готовые)}. Последняя: {последняя.title}. "
-                                f"{последняя.summary}")
+                last = ready[-1]
+                await self._say(i18n.t("tasks.ready_report", count=len(ready),
+                                       title=last.title, summary=last.summary))
             return True
 
         words = tasks.cancel_request(text)
         if words:
             task = self.queue.find(words)
             if task is None:
-                await self._say("Не нашёл такой задачи.")
+                await self._say(i18n.t("tasks.not_found"))
             else:
                 self.queue.cancel(task)
-                await self._say(f"Отменил: {task.title}.")
+                await self._say(i18n.t("tasks.cancelled", title=task.title))
             return True
         return False
 
@@ -923,7 +945,7 @@ class Daemon:
                 await self._start_next_task()
                 await self._deliver_finished()
             except Exception as exc:            # очередь не должна ронять демон
-                log.warning("очередь: %s", exc)
+                log.warning("queue: %s", exc)
 
     async def _settle(self) -> None:
         """Окно диалога закрылось и работы нет — значит снова тишина.
@@ -946,9 +968,9 @@ class Daemon:
         try:
             self.queue.start(task)
         except (RuntimeError, OSError) as exc:
-            self.queue.finish(task, f"не завелась: {exc}", stuck=True)
+            self.queue.finish(task, i18n.t("tasks.did_not_start", reason=exc), stuck=True)
             return
-        log.info("задача %s: %s", task.id, task.title)
+        log.info("task %s: %s", task.id, task.title)
         asyncio.create_task(self._run_task(task))
 
     async def _run_task(self, task: tasks.Task) -> None:
@@ -958,10 +980,10 @@ class Daemon:
             reply = await target.send(task.text, self._preamble(), "")
             summary = await self._voice_summary(reply, "code")
             await asyncio.to_thread(checkpoints.commit_all, task.worktree,
-                                    f"фоном: {task.text[:60]}")
+                                    i18n.t("tasks.commit", said=task.text[:60]))
             self.queue.finish(task, summary.text, stuck=reply.stubbed)
         except Exception as exc:                # noqa: BLE001 - причин много
-            log.exception("задача %s сорвалась", task.id)
+            log.exception("task %s fell over", task.id)
             self.queue.finish(task, formatter.reason_for_voice(exc), stuck=True)
         finally:
             await target.reset()
@@ -976,15 +998,15 @@ class Daemon:
         for task in ready:
             # Пересказ обычно уже начинается с «готово» — своё слово добавляем
             # только к сорвавшейся задаче, иначе в ухе звучит заедание.
-            начало = "" if task.state == tasks.DONE else "Встала задача. "
-            await self._announce(f"{начало}{task.title}: {task.summary}")
+            prefix = "" if task.state == tasks.DONE else i18n.t("tasks.stalled_prefix")
+            await self._announce(f"{prefix}{task.title}: {task.summary}")
         self.queue.mark_delivered(ready)
 
     async def _undo(self) -> None:
         workspace = self.targets.code.workspace
         point = self.journal.last()
         if point is None or not checkpoints.is_repo(workspace):
-            await self._say("Откатывать нечего.")
+            await self._say(i18n.t("undo.nothing"))
             return
         # `git reset --hard` посреди работы — это откат под руками у Claude:
         # часть правок уже на диске, часть ещё нет, и вернётся мешанина.
@@ -994,34 +1016,34 @@ class Daemon:
         try:
             await asyncio.wait_for(self._code_turn.acquire(), timeout=self._undo_wait_s)
         except asyncio.TimeoutError:
-            await self._say("Работа ещё идёт, откатывать сейчас опасно. Скажи «останови работу».")
+            await self._say(i18n.t("undo.busy"))
             return
         try:
             try:
                 changed = checkpoints.summary(workspace, point.before, point.after)
                 checkpoints.reset_to(workspace, point.before)
             except (RuntimeError, OSError) as exc:
-                await self._say(f"Откатить не вышло: {formatter.reason_for_voice(exc)}")
+                await self._say(i18n.t("undo.failed", reason=formatter.reason_for_voice(exc)))
                 return
             self.journal.pop()
             await self.targets.code.reset()  # сессия должна увидеть новое состояние
-            await self._say(f"Откатил {changed}. Сказано было: {point.title}")
+            await self._say(i18n.t("undo.done", changed=changed, title=point.title))
         finally:
             self._code_turn.release()
 
     async def _recent_changes(self) -> None:
         points = self.journal.recent(3)
         if not points:
-            await self._say("Я пока ничего не менял.")
+            await self._say(i18n.t("history.empty"))
             return
-        await self._say("Последнее: " + "; ".join(p.title for p in points) + ".")
+        await self._say(i18n.t("history.last", items="; ".join(p.title for p in points)))
 
     async def _answer_permission_by_voice(self, ws: Any, text: str, decision: Decision) -> None:
         """Пока висит запрос разрешения, реплика — это ответ на него, а не команда."""
         action = formatter.parse_approval(text)
         if action is None:
             await self._send(ws, {"id": "route", "target": None, "reason": "awaiting_permission",
-                                  "role": decision.role, "label": decision.label_ru})
+                                  "role": decision.role, "label": decision.label})
             return
         if action == "speak_details":
             await self._broadcast(self._voice(self._pending_detail(), is_question=True,
@@ -1030,7 +1052,7 @@ class Daemon:
         if not self.classifier.may("approve", decision):
             await self._send(ws, {"id": "route", "target": None, "reason": "approval_role_gate",
                                   "role": decision.role, "confidence": round(decision.confidence, 3),
-                                  "label": decision.label_ru})
+                                  "label": decision.label})
             return
 
         request_id = next(iter(self._pending))
@@ -1043,7 +1065,7 @@ class Daemon:
                 self.preapproved.add(raw)
             else:
                 await self._broadcast(self._voice(
-                    "Разрешил один раз. Это я запоминать не буду.", full_output=raw))
+                    i18n.t("shell.allowed_once"), full_output=raw))
         await self._broadcast({"id": "permission_result", "request_id": request_id,
                                "approved": approved, "remembered": action.endswith("rule"),
                                "earcon": "accepted" if approved else "error"})
@@ -1063,7 +1085,7 @@ class Daemon:
 
     def _pending_detail(self) -> str:
         request_id = next(iter(self._pending), "")
-        return self._pending_tools.get(request_id, "Нечего уточнять.")
+        return self._pending_tools.get(request_id, i18n.t("shell.nothing_to_clarify"))
 
     def _resolve_permission(self, msg: dict[str, Any]) -> None:
         future = self._pending.get(msg.get("request_id", ""))
@@ -1086,7 +1108,7 @@ class Daemon:
         scope = msg.get("scope", "voice")
         if scope == "work":
             await self.targets.code.interrupt()
-            await self._broadcast(self._voice("Остановил.", full_output="interrupt"))
+            await self._broadcast(self._voice(i18n.t("shell.stopped"), full_output="interrupt"))
         self.machine.to(state.LISTENING)
         self.machine.open_window()
         await self._broadcast_state()
@@ -1102,7 +1124,7 @@ class Daemon:
     async def _close_quietly(self, ws: Any) -> None:
         """Закрыть прежнее соединение того же телефона, не поднимая шума."""
         try:
-            await ws.close(1000, "заменено новым подключением")
+            await ws.close(1000, "replaced by a newer connection")
         except Exception:                        # оно могло уже умереть
             pass
 
@@ -1185,6 +1207,7 @@ def make_process_request(directory: Path = CLIENT_DIR,
 async def run(settings: Settings) -> None:
     from websockets.asyncio.server import serve
 
+    i18n.use(settings.language or i18n.default_language())
     await bootstrap_workspace(settings)
     daemon = Daemon(settings)
     process_request = make_process_request(daemon=daemon)
@@ -1204,10 +1227,11 @@ async def run(settings: Settings) -> None:
 
     print(f"voice-claude-daemon\n"
           f"  workspace : {Path(settings.workspace).expanduser()}\n"
-          f"  listening : {settings.host}:{settings.port} (клиент и WebSocket на одном порту)\n"
+          f"  listening : {settings.host}:{settings.port} (client and WebSocket on one port)\n"
+          f"  language  : {i18n.current()} (the client and the speaker override it)\n"
           f"  token     : {settings.token}\n"
-          f"  code      : {'ready' if daemon.targets.code.available else 'stub (нет SDK/ключа)'}\n"
-          f"  chat      : {'ready' if daemon.targets.chat.available else 'stub (нет SDK/ключа)'}",
+          f"  code      : {'ready' if daemon.targets.code.available else 'stub (no SDK/key)'}\n"
+          f"  chat      : {'ready' if daemon.targets.chat.available else 'stub (no SDK/key)'}",
           flush=True)
     # Циклы надо запустить: наблюдатель был написан и покрыт тестами, но его
     # никто никогда не вызывал — проактивность молчала с самого начала.
@@ -1238,9 +1262,9 @@ def refuse_own_checkout(workspace: Path) -> None:
     if not is_own_checkout(workspace):
         return
     raise SystemExit(
-        f"рабочий каталог {workspace} — это сам voice-shell.\n"
-        "Демон коммитит всё, что найдёт в рабочем каталоге, и закоммитил бы\n"
-        "незаконченную работу от чужого имени. Укажи --workspace на проект."
+        f"the working directory {workspace} is voice-shell itself.\n"
+        "The daemon commits everything it finds in the working directory, and would\n"
+        "commit unfinished work under someone else's name. Point --workspace at a project."
     )
 
 

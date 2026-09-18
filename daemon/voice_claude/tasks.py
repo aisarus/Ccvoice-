@@ -20,6 +20,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
+from . import lexicon
+from .i18n import join, t
+
 STATE_DIR = ".voice-shell"
 WORK_DIR = "work"
 FILE = "tasks.json"
@@ -33,12 +36,12 @@ CANCELLED = "cancelled"
 # Больше двух сразу — это чужая машина, чужие деньги и общий git.
 DEFAULT_PARALLEL = 2
 
-RU = {
-    QUEUED: "ждёт",
-    RUNNING: "в работе",
-    DONE: "готова",
-    STUCK: "встала",
-    CANCELLED: "отменена",
+STATE_KEYS = {
+    QUEUED: "tasks.state.queued",
+    RUNNING: "tasks.state.running",
+    DONE: "tasks.state.done",
+    STUCK: "tasks.state.stuck",
+    CANCELLED: "tasks.state.cancelled",
 }
 
 
@@ -62,7 +65,8 @@ class Task:
 
     @property
     def spoken_state(self) -> str:
-        return RU.get(self.state, self.state)
+        key = STATE_KEYS.get(self.state)
+        return t(key) if key else self.state
 
     def minutes(self) -> int:
         end = self.finished or time.time()
@@ -81,7 +85,7 @@ def _slug(text: str) -> str:
     """Кусок реплики в имя ветки: человеку потом читать этот список."""
     bare = re.sub(r"[^\w\s-]", "", text.lower(), flags=re.U)
     words = [w for w in bare.split() if len(w) > 2][:3]
-    slug = "-".join(words) or "задача"
+    slug = "-".join(words) or t("tasks.slug_fallback")
     return slug[:40]
 
 
@@ -110,7 +114,7 @@ class TaskQueue:
         for task in self.tasks:
             if task.state == RUNNING:
                 task.state = STUCK
-                task.summary = task.summary or "прервалась при перезапуске службы"
+                task.summary = task.summary or t("tasks.interrupted_by_restart")
 
     def save(self) -> None:
         try:
@@ -210,16 +214,16 @@ class TaskQueue:
         running, queued = self.running, self.by_state(QUEUED)
         if not running and not queued:
             ready = self.by_state(DONE)
-            return "Ничего не делаю." if not ready else f"Всё сделано, готовых задач {len(ready)}."
+            return t("tasks.idle") if not ready else t("tasks.all_done", count=len(ready))
         parts = []
         if running:
             first = running[0]
-            parts.append(f"Делаю: {first.title}, уже {first.minutes()} минут")
+            parts.append(t("tasks.doing", title=first.title, minutes=first.minutes()))
             if len(running) > 1:
-                parts.append(f"и ещё {len(running) - 1}")
+                parts.append(t("tasks.and_more", rest=len(running) - 1))
         if queued:
-            parts.append(f"в очереди {len(queued)}")
-        return ", ".join(parts) + "."
+            parts.append(t("tasks.queued", count=len(queued)))
+        return join(parts) + "."
 
 
 def state_dir_of(workspace: str | Path) -> Path:
@@ -230,16 +234,12 @@ def state_dir_of(workspace: str | Path) -> Path:
 # Фразы разбираются здесь, а не в демоне: тогда их видно рядом с самой
 # очередью и можно проверить тестом, не поднимая ни сокета, ни Claude.
 
-_BACKGROUND = (
-    "в фоне", "фоном", "займись", "потом сделай", "сделай потом",
-    "поставь в очередь", "добавь задачу", "на потом",
-)
-_STATUS = (
-    "чем занят", "чем занимаешься", "что в работе", "что делаешь сейчас",
-    "какие задачи", "что в очереди", "статус задач",
-)
-_READY = ("что готово", "покажи готовое", "что доделал", "какие задачи готовы")
-_CANCEL = ("отмени задачу", "брось задачу", "убери задачу", "не делай задачу")
+_BACKGROUND = lexicon.every("background")
+_STATUS = lexicon.every("status")
+_READY = lexicon.every("ready")
+_CANCEL = lexicon.every("cancel")
+# «про», «about», «sobre», «关于» — предлог перед тем, по чему ищем задачу.
+_ABOUT = re.compile(r"^[\s,.:—-]*(?:про|о|об|about|on|sobre|de|关于)[\s]+", re.I)
 
 
 def _has(text: str, phrases: Iterable[str]) -> str | None:
@@ -280,4 +280,4 @@ def cancel_request(text: str) -> str | None:
         return None
     lowered = " ".join(text.lower().split())
     rest = lowered.split(phrase, 1)[1]
-    return re.sub(r"^[\s,.:—-]*(про|о|об)\s+", "", rest).strip() or None
+    return _ABOUT.sub("", rest).strip() or None

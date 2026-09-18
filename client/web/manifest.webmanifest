@@ -1,7 +1,8 @@
 {
   "name": "Voice Shell",
   "short_name": "Voice",
-  "description": "Голосовая оболочка над Claude Code",
+  "description": "A voice shell over Claude Code",
+  "lang": "en",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

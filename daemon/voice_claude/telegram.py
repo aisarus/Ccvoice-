@@ -18,6 +18,8 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+from .i18n import t
+
 API = "https://api.telegram.org"
 # У ботов потолок 50 МБ; берём с запасом, чтобы ошибка была наша и понятная.
 MAX_BYTES = 45 * 1024 * 1024
@@ -36,12 +38,22 @@ TOKEN_SHAPE = re.compile(r"^\d{6,}:[A-Za-z0-9_-]{30,}$")
 # Список точных фраз не работает: человек говорит «скинь мне в телеграмм»,
 # «перешли в тг», «в телегу кинь конфиг» — порядок и окончания гуляют.
 # Поэтому ищем два слова: действие и адресат, в любом порядке.
-ОТПРАВИТЬ = r"скин(?:ь|и|уть)|отправ(?:ь|и|ить)|пришл(?:и|ите)|кин(?:ь|и)|перешл(?:и|ите)|шли"
-КУДА = r"телег\w*|телеграмм?\w*|тг|telegram"
-ЗАПРОС = re.compile(rf"\b(?:{ОТПРАВИТЬ})\b", re.I)
-АДРЕСАТ = re.compile(rf"\b(?:{КУДА})\b", re.I)
+SEND_VERBS = (r"скин(?:ь|и|уть)|отправ(?:ь|и|ить)|пришл(?:и|ите)|кин(?:ь|и)|"
+              r"перешл(?:и|ите)|шли|"
+              r"send|share|drop|forward|push|"
+              r"env(?:ía|ia|íame|iame)|mánda(?:me)?|manda(?:me)?|pasa(?:me)?|comparte")
+DESTINATION = r"телег\w*|телеграмм?\w*|тг|telegram|telegramm?\w*|电报|电报"
+# Китайский пишется без пробелов, поэтому граница слова там не ставится.
+SEND_RE = re.compile(rf"(?:\b(?:{SEND_VERBS})\b|发给我|发到|发过来)", re.I)
+DESTINATION_RE = re.compile(rf"(?:\b(?:{DESTINATION})\b|电报|Telegram)", re.I)
 # Служебное, что остаётся в остатке и мешает искать файл.
-ЛИШНЕЕ = re.compile(r"\b(мне|себе|в|во|на|это|пожалуйста|давай|клод)\b", re.I)
+FILLER_RE = re.compile(
+    r"(?:\b(?:мне|себе|в|во|на|это|пожалуйста|давай|клод|"
+    r"me|to|my|the|a|an|please|it|that|this|over|on|in|into|claude|"
+    r"al|el|la|lo|los|las|un|una|por favor|por|en|para|eso|esto)\b"
+    r"|把|给我|到|一下|的)", re.I)
+# Совместимость с прежними именами: их могли импортировать снаружи.
+ЗАПРОС, АДРЕСАТ, ЛИШНЕЕ = SEND_RE, DESTINATION_RE, FILLER_RE
 
 
 def configured() -> bool:
@@ -55,11 +67,11 @@ def share_request(text: str) -> str | None:
     не про отправку.
     """
     lowered = " ".join(text.lower().split())
-    if not (ЗАПРОС.search(lowered) and АДРЕСАТ.search(lowered)):
+    if not (SEND_RE.search(lowered) and DESTINATION_RE.search(lowered)):
         return None
-    остаток = АДРЕСАТ.sub(" ", ЗАПРОС.sub(" ", lowered))
-    остаток = ЛИШНЕЕ.sub(" ", остаток)
-    return re.sub(r"[\s,.:—-]+", " ", остаток).strip()
+    rest = DESTINATION_RE.sub(" ", SEND_RE.sub(" ", lowered))
+    rest = FILLER_RE.sub(" ", rest)
+    return re.sub(r"[\s,.:—-]+", " ", rest).strip()
 
 
 def refuse_reason(path: Path, workspace: Path) -> str | None:
@@ -68,18 +80,18 @@ def refuse_reason(path: Path, workspace: Path) -> str | None:
         real = path.resolve()
         root = workspace.resolve()
     except OSError:
-        return "файл не читается"
+        return t("telegram.unreadable")
     if not real.is_file():
-        return "такого файла нет"
+        return t("telegram.missing")
     if root not in real.parents and real != root:
-        return "файл вне рабочего каталога"
+        return t("telegram.outside")
     if SECRET_NAMES.search(str(real)):
-        return "похоже на секрет — такое наружу не отправляю"
+        return t("telegram.secret")
     size = real.stat().st_size
     if size > MAX_BYTES:
-        return f"слишком большой: {size // (1024 * 1024)} МБ"
+        return t("telegram.too_big", size=size // (1024 * 1024))
     if size == 0:
-        return "файл пустой"
+        return t("telegram.empty")
     return None
 
 
@@ -100,11 +112,11 @@ class Bridge:
 
     def token_problem(self) -> str | None:
         if not self.token:
-            return "телеграм не настроен"
+            return t("telegram.not_set_up")
         if not TOKEN_SHAPE.match(self.token):
-            return "токен бота не похож на настоящий — он вида 1234567890:ABC…"
+            return t("telegram.bad_token_shape")
         if not str(self.chat_id).lstrip("-").isdigit():
-            return "номер чата должен быть числом"
+            return t("telegram.bad_chat")
         return None
 
     def _url(self, method: str) -> str:
@@ -160,15 +172,16 @@ class Bridge:
             except Exception:                       # ответ мог быть и не json
                 pass
             if exc.code == 401:
-                return "телеграм не принял токен бота"
+                return t("telegram.token_rejected")
             if exc.code == 400 and "chat not found" in detail.lower():
-                return "телеграм не знает такого чата — напиши боту первым"
-            return f"телеграм отказал: {detail or exc.code}"
+                return t("telegram.unknown_chat")
+            return t("telegram.refused", detail=detail or exc.code)
         except (urllib.error.URLError, OSError, TimeoutError):
-            return "до телеграма не достучаться"
+            return t("telegram.unreachable")
         except ValueError:
-            return "телеграм ответил непонятным"
-        return None if answer.get("ok") else f"телеграм отказал: {answer.get('description', '')}"
+            return t("telegram.garbled")
+        return None if answer.get("ok") else t("telegram.refused",
+                                               detail=answer.get("description", ""))
 
 # -- «конфиг» против config.json -------------------------------------------
 #

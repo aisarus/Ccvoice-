@@ -12,6 +12,7 @@ import time
 from dataclasses import dataclass, field, asdict
 from typing import Any, Iterable
 
+from .i18n import t
 from .spec import section
 
 ACOUSTIC_FEATURES = (
@@ -77,13 +78,13 @@ class Decision:
     features_z: dict[str, float] = field(default_factory=dict)
 
     @property
-    def label_ru(self) -> str:
-        return {
-            "master": "говорит мастер",
-            "bystander": "говорит собеседник",
-            "unknown": "неопределённый говорящий",
-            "self_echo": "эхо собственного TTS",
-        }[self.role]
+    def label(self) -> str:
+        """Кто, по мнению классификатора, говорил — словами, на экран."""
+        return t(f"speaker.{self.role}")
+
+    @property
+    def label_ru(self) -> str:                  # прежнее имя поля протокола
+        return self.label
 
 
 @dataclass

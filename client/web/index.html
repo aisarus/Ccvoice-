@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -48,60 +48,52 @@
 <body>
 <h1>Voice Shell</h1>
 
-<div id="state"><span id="dot"></span><span id="statetext">не подключено</span></div>
+<div id="state"><span id="dot"></span><span id="statetext"></span></div>
 
 <div class="row" id="tokenrow" hidden>
-  <input id="tokeninput" placeholder="токен доступа" autocomplete="off">
-  <button class="chip" id="tokensave" type="button">сохранить</button>
+  <input id="tokeninput" autocomplete="off">
+  <button class="chip" id="tokensave" type="button"></button>
 </div>
 
 <div class="row">
-  <button class="chip" id="t-auto" aria-pressed="true" type="button">авто</button>
-  <button class="chip" id="t-code" aria-pressed="false" type="button">код</button>
-  <button class="chip" id="t-chat" aria-pressed="false" type="button">чат</button>
-  <button class="chip" id="t-note" aria-pressed="false" type="button">заметка</button>
+  <button class="chip" id="t-auto" aria-pressed="true" type="button"></button>
+  <button class="chip" id="t-code" aria-pressed="false" type="button"></button>
+  <button class="chip" id="t-chat" aria-pressed="false" type="button"></button>
+  <button class="chip" id="t-note" aria-pressed="false" type="button"></button>
 </div>
 
 <div class="row">
-  <button class="chip" id="follow" aria-pressed="true" type="button">разговор: вкл</button>
-  <button class="chip" id="always" aria-pressed="false" type="button">слушать всегда: выкл</button>
-  <button class="chip" id="lang" type="button">язык: русский</button>
+  <button class="chip" id="follow" aria-pressed="true" type="button"></button>
+  <button class="chip" id="always" aria-pressed="false" type="button"></button>
+  <button class="chip" id="lang" type="button"></button>
   <button class="chip" id="ambient" aria-pressed="false" type="button">ambient: off</button>
-  <button class="chip" id="bystander" hidden aria-pressed="false" type="button">чужие реплики: выкл</button>
+  <button class="chip" id="bystander" hidden aria-pressed="false" type="button"></button>
 </div>
-<p class="hint" id="bystanderhint" hidden>
-  Запись чужой речи требует согласия собеседников — во многих юрисдикциях это обязательно.
-  Буфер живёт 10 минут и стирается при выключении ambient.
-</p>
+<p class="hint" id="bystanderhint" hidden></p>
 
 <div class="box" id="authbox" hidden>
-  <div class="hint" id="authtext" style="margin:0 0 8px">
-    Claude не подключён. Можно подключить подписку — API-ключ не нужен.
-  </div>
+  <div class="hint" id="authtext" style="margin:0 0 8px"></div>
   <div class="row" style="margin:0">
-    <button class="chip" id="authstart" type="button">подключить подписку</button>
-    <a class="chip" id="authlink" hidden target="_blank" rel="noopener">открыть авторизацию ↗</a>
+    <button class="chip" id="authstart" type="button"></button>
+    <a class="chip" id="authlink" hidden target="_blank" rel="noopener"></a>
   </div>
   <div class="row" id="authcoderow" hidden style="margin:8px 0 0">
-    <input id="authcode" placeholder="вставь код со страницы" autocomplete="off">
-    <button class="chip" id="authsend" type="button">готово</button>
+    <input id="authcode" autocomplete="off">
+    <button class="chip" id="authsend" type="button"></button>
   </div>
   <div id="authtoken" hidden style="margin-top:8px">
-    <div class="hint" style="margin:0 0 6px">
-      Работает сразу. Чтобы пережило перезапуск — вставь в Render → Environment →
-      <code>CLAUDE_CODE_OAUTH_TOKEN</code>.
-    </div>
+    <div class="hint" id="authtokenhint" style="margin:0 0 6px"></div>
     <div class="row" style="margin:0">
       <input id="authtokenvalue" readonly>
-      <button class="chip" id="authcopy" type="button">копировать</button>
+      <button class="chip" id="authcopy" type="button"></button>
     </div>
   </div>
 </div>
 
-<button id="ptt" type="button">нажми и говори</button>
+<button id="ptt" type="button"></button>
 <div id="meter"><div id="meterfill"></div></div>
-<p class="hint" id="hint">подключаюсь…</p>
-<p class="hint" id="mediahint">кнопка наушников: не активна — нажми большую кнопку один раз</p>
+<p class="hint" id="hint"></p>
+<p class="hint" id="mediahint"></p>
 <div id="log"></div>
 
 <script>
@@ -115,12 +107,161 @@ if (qs.get("token")) {
 }
 
 const el = id => document.getElementById(id);
-const WAKE_WORDS = ["клод", "клода", "клоуд", "cloud", "claude", "код"];
-const STOP_WORK = ["стоп работу", "стоп работа", "останови работу", "останови", "прекрати", "отмени", "отмена"];
-const STOP_VOICE = ["стоп", "тихо", "хватит", "замолчи"];
+/* Обращение и «стоп» слушаются на всех языках сразу: какой прозвучит
+   следующим, оболочка заранее не знает. */
+const WAKE_WORDS = ["клод", "клода", "клоуд", "cloud", "claude", "код",
+                    "clod", "claudio", "克劳德"];
+const STOP_WORK = ["стоп работу", "стоп работа", "останови работу", "останови",
+                   "прекрати", "отмени", "отмена",
+                   "stop the work", "stop working", "stop work", "cancel that", "abort",
+                   "detén el trabajo", "deten el trabajo", "para el trabajo", "cancela",
+                   "停止工作", "别做了", "取消"];
+const STOP_VOICE = ["стоп", "тихо", "хватит", "замолчи",
+                    "stop", "quiet", "enough", "be quiet", "shut up",
+                    "para", "silencio", "basta", "cállate",
+                    "停", "安静", "够了"];
 const FOLLOW_MS = 15000;
-const LANGS = [{code:"ru-RU", name:"русский"}, {code:"en-US", name:"English"}, {code:"he-IL", name:"עברית"}];
-let lang = localStorage.getItem("vs_lang") || "ru-RU";
+/* ---------- язык интерфейса ----------
+   Оболочка слышит четыре языка сразу, поэтому фразы команд ниже сложены
+   вместе. А вот показывать и произносить надо на одном — том, который человек
+   выбрал чипом «language», или, пока он его не трогал, языком браузера. */
+const LANGS = [{code:"en-US", name:"English"}, {code:"ru-RU", name:"русский"},
+               {code:"es-ES", name:"español"}, {code:"zh-CN", name:"中文"},
+               {code:"he-IL", name:"עברית"}];
+const UI = {
+  en: {
+    notConnected:"not connected", noLink:"no link", token:"access token", save:"save",
+    auto:"auto", code:"code", chat:"chat", note:"note",
+    follow:"conversation: ", always:"always listening: ", on:"on", off:"off",
+    language:"language: ", bystander:"other voices: ",
+    bystanderHint:"Recording other people needs their consent — in many places that is the law. "
+                  + "The buffer lives 10 minutes and is wiped when ambient goes off.",
+    authIntro:"Claude is not connected. You can connect a subscription — no API key needed.",
+    authStart:"connect a subscription", authRestart:"connect a subscription again",
+    authLink:"open the authorisation ↗", authCode:"paste the code from the page",
+    authSend:"done", askingLink:"asking for a link…", checkingCode:"checking the code…",
+    authOpen:"Open the authorisation, sign in to your Claude account and paste the code here. "
+             + "The code is short-lived — paste it right away.",
+    authDone:"Subscription connected.", authFailed:"Didn't work: ",
+    tokenHint:"Works right away. To survive a restart, put it in Render → Environment → ",
+    copy:"copy", copied:"copied",
+    ptt:"press and talk", pttListening:"listening… press to finish",
+    pttAlways:"always listening — say «Claude…»",
+    connecting:"connecting…", needToken:"an access token is needed",
+    headsetOff:"headset button: off — press the big button once",
+    headsetOn:"headset button: on — a press starts and ends an utterance",
+    headsetFail:"headset button: didn't engage (",
+    needChrome:"Chrome is needed: this browser has no speech recognition",
+    micDenied:"the microphone is blocked — allow it in the site settings",
+    needHttps:"https is needed: a browser won't give the microphone over http",
+    noMic:"no access to the microphone — allow it in Chrome",
+    me:"me", past:"not for me", permission:"permission", error:"error", whisper:"whisper",
+    stoppingWork:"stopping the work", quiet:"quiet", notRun:"not executed: ",
+    allowed:"allowed", allowedKept:"allowed and remembered", rejected:"rejected",
+    subscription:"subscription", apiKey:"api key", noAccess:"no access",
+  },
+  ru: {
+    notConnected:"не подключено", noLink:"нет связи", token:"токен доступа", save:"сохранить",
+    auto:"авто", code:"код", chat:"чат", note:"заметка",
+    follow:"разговор: ", always:"слушать всегда: ", on:"вкл", off:"выкл",
+    language:"язык: ", bystander:"чужие реплики: ",
+    bystanderHint:"Запись чужой речи требует согласия собеседников — во многих юрисдикциях "
+                  + "это обязательно. Буфер живёт 10 минут и стирается при выключении ambient.",
+    authIntro:"Claude не подключён. Можно подключить подписку — API-ключ не нужен.",
+    authStart:"подключить подписку", authRestart:"подключить подписку заново",
+    authLink:"открыть авторизацию ↗", authCode:"вставь код со страницы",
+    authSend:"готово", askingLink:"запрашиваю ссылку…", checkingCode:"проверяю код…",
+    authOpen:"Открой авторизацию, войди в аккаунт Claude и вставь код сюда. "
+             + "Код живёт недолго — вставляй сразу.",
+    authDone:"Подписка подключена.", authFailed:"Не вышло: ",
+    tokenHint:"Работает сразу. Чтобы пережило перезапуск — вставь в Render → Environment → ",
+    copy:"копировать", copied:"скопировано",
+    ptt:"нажми и говори", pttListening:"слушаю… нажми, чтобы закончить",
+    pttAlways:"слушаю всегда — скажи «Клод…»",
+    connecting:"подключаюсь…", needToken:"нужен токен доступа",
+    headsetOff:"кнопка наушников: не активна — нажми большую кнопку один раз",
+    headsetOn:"кнопка наушников: активна — нажатие начинает и заканчивает реплику",
+    headsetFail:"кнопка наушников: не включилась (",
+    needChrome:"нужен Chrome: этот браузер не умеет распознавание речи",
+    micDenied:"микрофон запрещён — разреши в настройках сайта",
+    needHttps:"нужен https: браузер не даст микрофон на http",
+    noMic:"нет доступа к микрофону — разреши его в Chrome",
+    me:"я", past:"мимо", permission:"разрешение", error:"ошибка", whisper:"шёпот",
+    stoppingWork:"останавливаю работу", quiet:"тихо", notRun:"не исполнено: ",
+    allowed:"разрешил", allowedKept:"разрешил и запомнил", rejected:"отклонил",
+    subscription:"подписка", apiKey:"api-ключ", noAccess:"нет доступа",
+  },
+  es: {
+    notConnected:"sin conectar", noLink:"sin conexión", token:"token de acceso", save:"guardar",
+    auto:"auto", code:"código", chat:"charla", note:"nota",
+    follow:"conversación: ", always:"escucha continua: ", on:"sí", off:"no",
+    language:"idioma: ", bystander:"voces ajenas: ",
+    bystanderHint:"Grabar a otras personas necesita su consentimiento — en muchos sitios es "
+                  + "obligatorio. El búfer dura 10 minutos y se borra al apagar ambient.",
+    authIntro:"Claude no está conectado. Puedes conectar una suscripción — no hace falta clave API.",
+    authStart:"conectar una suscripción", authRestart:"conectar la suscripción de nuevo",
+    authLink:"abrir la autorización ↗", authCode:"pega el código de la página",
+    authSend:"listo", askingLink:"pidiendo el enlace…", checkingCode:"comprobando el código…",
+    authOpen:"Abre la autorización, entra en tu cuenta de Claude y pega el código aquí. "
+             + "El código dura poco — pégalo enseguida.",
+    authDone:"Suscripción conectada.", authFailed:"No salió: ",
+    tokenHint:"Funciona al momento. Para que sobreviva a un reinicio, ponlo en Render → Environment → ",
+    copy:"copiar", copied:"copiado",
+    ptt:"pulsa y habla", pttListening:"escuchando… pulsa para terminar",
+    pttAlways:"escuchando siempre — di «Claude…»",
+    connecting:"conectando…", needToken:"hace falta un token de acceso",
+    headsetOff:"botón del auricular: apagado — pulsa el botón grande una vez",
+    headsetOn:"botón del auricular: activo — una pulsación empieza y termina la frase",
+    headsetFail:"botón del auricular: no se activó (",
+    needChrome:"hace falta Chrome: este navegador no reconoce voz",
+    micDenied:"micrófono bloqueado — permítelo en los ajustes del sitio",
+    needHttps:"hace falta https: el navegador no da el micrófono por http",
+    noMic:"sin acceso al micrófono — permítelo en Chrome",
+    me:"yo", past:"no era para mí", permission:"permiso", error:"error", whisper:"susurro",
+    stoppingWork:"deteniendo el trabajo", quiet:"silencio", notRun:"no ejecutado: ",
+    allowed:"permitido", allowedKept:"permitido y recordado", rejected:"rechazado",
+    subscription:"suscripción", apiKey:"clave api", noAccess:"sin acceso",
+  },
+  zh: {
+    notConnected:"未连接", noLink:"连接断开", token:"访问令牌", save:"保存",
+    auto:"自动", code:"代码", chat:"聊天", note:"笔记",
+    follow:"对话：", always:"一直听：", on:"开", off:"关",
+    language:"语言：", bystander:"旁人的话：",
+    bystanderHint:"录下别人说的话需要对方同意——在很多地方这是法律要求。缓冲区只保留 10 分钟，"
+                  + "关掉 ambient 时会清空。",
+    authIntro:"Claude 还没有连接。可以连接订阅——不需要 API 密钥。",
+    authStart:"连接订阅", authRestart:"重新连接订阅",
+    authLink:"打开授权页 ↗", authCode:"把页面上的验证码粘进来",
+    authSend:"好了", askingLink:"正在获取链接…", checkingCode:"正在检查验证码…",
+    authOpen:"打开授权页，登录 Claude 账号，把验证码粘到这里。验证码有效期很短，马上粘贴。",
+    authDone:"订阅已连接。", authFailed:"没成功：",
+    tokenHint:"立刻生效。想让它在重启后还在，就填到 Render → Environment → ",
+    copy:"复制", copied:"已复制",
+    ptt:"按住说话", pttListening:"正在听… 按一下结束",
+    pttAlways:"一直在听——说「克劳德…」",
+    connecting:"正在连接…", needToken:"需要访问令牌",
+    headsetOff:"耳机按键：未启用——先按一下大按钮",
+    headsetOn:"耳机按键：已启用——按一下开始和结束一句话",
+    headsetFail:"耳机按键：没能启用（",
+    needChrome:"需要 Chrome：这个浏览器不支持语音识别",
+    micDenied:"麦克风被禁止——请在网站设置里允许",
+    needHttps:"需要 https：浏览器不会在 http 下给麦克风",
+    noMic:"拿不到麦克风——请在 Chrome 里允许",
+    me:"我", past:"不是对我说的", permission:"权限", error:"错误", whisper:"耳语",
+    stoppingWork:"正在停止工作", quiet:"安静", notRun:"没有执行：",
+    allowed:"已允许", allowedKept:"已允许并记住", rejected:"已拒绝",
+    subscription:"订阅", apiKey:"api 密钥", noAccess:"没有访问权限",
+  },
+};
+let lang = localStorage.getItem("vs_lang") || matchBrowser();
+function matchBrowser(){
+  const want = (navigator.language || "en").toLowerCase();
+  const hit = LANGS.find(l => want.startsWith(l.code.slice(0, 2)));
+  return hit ? hit.code : "en-US";
+}
+/* Иврит оболочка пока не переводит — интерфейс на нём остаётся английским. */
+function ui(){ return UI[lang.slice(0, 2)] || UI.en; }
+function T(key){ return ui()[key] !== undefined ? ui()[key] : UI.en[key]; }
 
 let ws = null, recog = null, audioCtx = null, analyser = null;
 let listening = false, speaking = false, connected = false;
@@ -168,16 +309,16 @@ async function armHeadsetButton(){
     mediaAudio.loop = true; mediaAudio.volume = 0.0001;
     await mediaAudio.play();
     navigator.mediaSession.metadata = new MediaMetadata({
-      title: "Voice Shell", artist: "Claude", album: "голосовая оболочка"
+      title: "Voice Shell", artist: "Claude", album: "voice shell"
     });
     navigator.mediaSession.playbackState = "playing";
     for (const action of ["play", "pause", "stop", "nexttrack", "previoustrack"]){
       try { navigator.mediaSession.setActionHandler(action, () => { toggleListen(); }); } catch (e) {}
     }
-    el("mediahint").textContent = "кнопка наушников: активна — нажатие начинает и заканчивает реплику";
+    el("mediahint").textContent = T("headsetOn");
   } catch (e) {
     mediaAudio = null;
-    el("mediahint").textContent = "кнопка наушников: не включилась (" + (e.name || e) + ")";
+    el("mediahint").textContent = T("headsetFail") + (e.name || e) + ")";
   }
 }
 
@@ -217,7 +358,7 @@ function features(){
 /* ---------- слушание ---------- */
 function ensureRecognition(){
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR){ el("hint").textContent = "нужен Chrome: этот браузер не умеет распознавание речи"; return null; }
+  if (!SR){ el("hint").textContent = T("needChrome"); return null; }
   if (recog) return recog;
   recog = new SR();
   recog.lang = lang; recog.interimResults = false; recog.continuous = false;
@@ -228,13 +369,13 @@ function ensureRecognition(){
     if (stop){
       speechSynthesis.cancel(); speaking = false;
       send({id:"interrupt", scope:stop});
-      addMsg("я", stop === "work" ? "останавливаю работу" : "тихо", "master");
+      addMsg(T("me"), stop === "work" ? T("stoppingWork") : T("quiet"), "master");
       earcon("accepted");
       return;
     }
-    if (always && !wakeMatched(text)) { addMsg("мимо", text, "bystander"); return; }
+    if (always && !wakeMatched(text)) { addMsg(T("past"), text, "bystander"); return; }
     const payload = stripWake(text);
-    addMsg("я", payload, "master");
+    addMsg(T("me"), payload, "master");
     earcon("accepted");
     const s = seg || {frames:20, start:Date.now()};
     send({id:"speech_segment", segment_id:String(Date.now()), transcript:payload,
@@ -242,7 +383,7 @@ function ensureRecognition(){
           voiced_frames:Math.max(12, s.frames || 20), features:features()});
   };
   recog.onerror = ev => {
-    if (ev.error === "not-allowed"){ el("hint").textContent = "микрофон запрещён — разреши в настройках сайта"; }
+    if (ev.error === "not-allowed"){ el("hint").textContent = T("micDenied"); }
     else if (ev.error !== "no-speech" && ev.error !== "aborted"){ earcon("error"); }
   };
   recog.onend = () => {
@@ -255,15 +396,19 @@ function ensureRecognition(){
 
 /* «Стоп» работает всегда — до обращения и без него. */
 function stopIntent(text){
-  const t = text.toLowerCase().replace(/[^\wа-яё\s]/gi, " ").replace(/\s+/g, " ").trim();
+  const t = text.toLowerCase().replace(/[^\wа-яё\u4e00-\u9fff\s']/gi, " ").replace(/\s+/g, " ").trim();
   const bare = t.replace(new RegExp("^(" + WAKE_WORDS.join("|") + ")\\s+"), "");
-  for (const phrase of STOP_WORK) if (bare === phrase || bare.startsWith(phrase + " ")) return "work";
-  for (const phrase of STOP_VOICE) if (bare === phrase || bare.startsWith(phrase + " ")) return "voice";
+  const hit = (phrase) => bare === phrase || bare.startsWith(phrase + " ")
+                          || (/[\u4e00-\u9fff]/.test(phrase) && bare.startsWith(phrase));
+  for (const phrase of STOP_WORK) if (hit(phrase)) return "work";
+  for (const phrase of STOP_VOICE) if (hit(phrase)) return "voice";
   return null;
 }
 
 function wakeMatched(text){
-  const first = text.toLowerCase().replace(/[^\wа-яё\s]/gi, " ").trim().split(/\s+/)[0] || "";
+  const lowered = text.toLowerCase();
+  if (/^\s*克劳德/.test(lowered)) return true;
+  const first = lowered.replace(/[^\wа-яё\s]/gi, " ").trim().split(/\s+/)[0] || "";
   return WAKE_WORDS.includes(first);
 }
 function stripWake(text){
@@ -284,9 +429,9 @@ function toggleListen(){ armHeadsetButton(); listening ? stopListen() : startLis
 
 function paintButton(){
   el("ptt").classList.toggle("on", listening);
-  el("ptt").textContent = listening ? "слушаю… нажми, чтобы закончить"
-                        : always ? "слушаю всегда — скажи «Клод…»"
-                        : "нажми и говори";
+  el("ptt").textContent = listening ? T("pttListening")
+                        : always ? T("pttAlways")
+                        : T("ptt");
 }
 
 el("ptt").addEventListener("click", toggleListen);
@@ -303,52 +448,91 @@ for (const id of ["auto","code","chat","note"]){
 }
 el("follow").onclick = () => {
   follow = !follow;
-  el("follow").textContent = "разговор: " + (follow ? "вкл" : "выкл");
-  el("follow").setAttribute("aria-pressed", String(follow));
+  paintUI();
 };
 el("always").onclick = () => {
   always = !always;
-  el("always").textContent = "слушать всегда: " + (always ? "вкл" : "выкл");
-  el("always").setAttribute("aria-pressed", String(always));
+  paintUI();
   armHeadsetButton();
   always ? startListen() : stopListen();
-  paintButton();
 };
-function paintLang(){ el("lang").textContent = "язык: " + (LANGS.find(l => l.code === lang) || LANGS[0]).name; }
 el("lang").onclick = () => {
   const next = (LANGS.findIndex(l => l.code === lang) + 1) % LANGS.length;
   lang = LANGS[next].code;
   try { localStorage.setItem("vs_lang", lang); } catch (e) {}
   if (recog) { try { recog.abort(); } catch (e) {} recog = null; }
-  paintLang();
+  document.documentElement.lang = lang.slice(0, 2);
+  paintUI();
+  /* Демон отвечает на языке телефона, пока не услышит другой. */
+  send({id:"hello", v:1, token:TOKEN, device_id:"web", app_version:"0.3.0", language:lang});
 };
 
+/* Один проход по всем надписям: язык меняется чипом, и половина интерфейса,
+   нарисованная один раз при загрузке, иначе осталась бы на прежнем. */
+function paintUI(){
+  const set = (id, text) => { const node = el(id); if (node) node.textContent = text; };
+  const place = (id, text) => { const node = el(id); if (node) node.placeholder = text; };
+  if (!connected) set("statetext", T("notConnected"));
+  place("tokeninput", T("token"));
+  set("tokensave", T("save"));
+  set("t-auto", T("auto")); set("t-code", T("code"));
+  set("t-chat", T("chat")); set("t-note", T("note"));
+  set("follow", T("follow") + (follow ? T("on") : T("off")));
+  el("follow").setAttribute("aria-pressed", String(follow));
+  set("always", T("always") + (always ? T("on") : T("off")));
+  el("always").setAttribute("aria-pressed", String(always));
+  set("lang", T("language") + (LANGS.find(l => l.code === lang) || LANGS[0]).name);
+  set("bystander", T("bystander") + (bystander ? T("on") : T("off")));
+  set("bystanderhint", T("bystanderHint"));
+  if (!authStarted) set("authtext", T("authIntro"));
+  set("authstart", T("authStart"));
+  set("authlink", T("authLink"));
+  place("authcode", T("authCode"));
+  set("authsend", T("authSend"));
+  set("authcopy", T("copy"));
+  const hint = el("authtokenhint");
+  if (hint) hint.innerHTML = String(T("tokenHint")).replace(/</g, "&lt;")
+                             + "<code>CLAUDE_CODE_OAUTH_TOKEN</code>.";
+  if (!hintOwned) set("hint", connected ? "" : T("connecting"));
+  set("mediahint", mediaAudio ? T("headsetOn") : T("headsetOff"));
+  paintButton();
+}
+
 let ambient = "off", bystander = false;
+/* Две надписи живут своей жизнью: их занимают сообщения от демона, и
+   перерисовка по смене языка не должна их затирать. */
+let authStarted = false, hintOwned = false;
 el("ambient").onclick = () => {
   ambient = {off:"passive", passive:"assist", assist:"off"}[ambient];
   el("ambient").textContent = "ambient: " + ambient;
   el("ambient").setAttribute("aria-pressed", String(ambient !== "off"));
   el("bystander").hidden = ambient === "off";
-  if (ambient === "off"){ bystander = false; el("bystander").textContent = "чужие реплики: выкл";
-                          el("bystander").setAttribute("aria-pressed","false"); el("bystanderhint").hidden = true; }
+  if (ambient === "off"){ bystander = false;
+                          el("bystander").setAttribute("aria-pressed","false");
+                          el("bystanderhint").hidden = true; paintUI(); }
   send({id:"ambient_control", submode:ambient, bystander_transcript:bystander, wipe:ambient === "off"});
 };
 el("bystander").onclick = () => {
   bystander = !bystander;
-  el("bystander").textContent = "чужие реплики: " + (bystander ? "вкл" : "выкл");
+  paintUI();
   el("bystander").setAttribute("aria-pressed", String(bystander));
   el("bystanderhint").hidden = !bystander;
   send({id:"ambient_control", bystander_transcript:bystander});
 };
 
 /* ---------- подписка ---------- */
-el("authstart").onclick = () => { el("authstart").textContent = "запрашиваю ссылку…"; send({id:"auth_start"}); };
+el("authstart").onclick = () => {
+  authStarted = true;
+  el("authstart").textContent = T("askingLink");
+  send({id:"auth_start"});
+};
 el("authsend").onclick = () => {
   const code = el("authcode").value.trim();
-  if (code) { el("authtext").textContent = "проверяю код…"; send({id:"auth_code", code}); }
+  if (code) { authStarted = true; el("authtext").textContent = T("checkingCode");
+              send({id:"auth_code", code}); }
 };
 el("authcopy").onclick = async () => {
-  try { await navigator.clipboard.writeText(el("authtokenvalue").value); el("authcopy").textContent = "скопировано"; }
+  try { await navigator.clipboard.writeText(el("authtokenvalue").value); el("authcopy").textContent = T("copied"); }
   catch (e) { el("authtokenvalue").select(); }
 };
 el("tokensave").onclick = () => {
@@ -373,8 +557,9 @@ function addMsg(who, text, cls){
 /* Язык ответа — по письменности самого ответа, а не по переключателю. */
 function scriptLang(text){
   if (/[\u0590-\u05FF]/.test(text)) return "he-IL";
+  if (/[\u4e00-\u9fff]/.test(text)) return "zh-CN";
   if (/[\u0400-\u04FF]/.test(text)) return "ru-RU";
-  if (/[A-Za-z]/.test(text)) return "en-US";
+  if (/[A-Za-z]/.test(text)) return lang.startsWith("es") ? "es-ES" : "en-US";
   return lang;
 }
 function speak(text){
@@ -393,48 +578,54 @@ function connect(){
   ws = new WebSocket(WS_URL);
   ws.onopen = () => {
     connected = true; setState("IDLE");
-    if (!TOKEN){ el("tokenrow").hidden = false; el("hint").textContent = "нужен токен доступа"; return; }
-    send({id:"hello", v:1, token:TOKEN, device_id:"web", app_version:"0.3.0"});
+    if (!TOKEN){ el("tokenrow").hidden = false; hintOwned = true;
+                 el("hint").textContent = T("needToken"); return; }
+    hintOwned = false;
+    send({id:"hello", v:1, token:TOKEN, device_id:"web", app_version:"0.3.0", language:lang});
   };
-  ws.onclose = () => { connected = false; setState("нет связи"); setTimeout(connect, 2000); };
+  ws.onclose = () => { connected = false; setState(T("noLink")); setTimeout(connect, 2000); };
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
     if (m.id === "welcome"){
-      const cred = {subscription:"подписка", api_key:"api-ключ", none:"нет доступа"}[m.credential] || m.credential;
+      const cred = {subscription:T("subscription"), api_key:T("apiKey"),
+                    none:T("noAccess")}[m.credential] || m.credential;
+      hintOwned = true;
       el("hint").textContent = `code: ${m.code_available?"ready":"stub"} · chat: ${m.chat_available?"ready":"stub"} · ${cred}`;
       el("authbox").hidden = m.credential !== "none";
       el("tokenrow").hidden = true;
     } else if (m.id === "state"){ setState(m.state);
     } else if (m.id === "route"){
       if (m.earcon) earcon(m.earcon);
-      if (!m.target && m.reason !== "auto") addMsg(m.label || m.reason, "не исполнено: " + m.reason, "bystander");
+      if (!m.target && m.reason !== "auto") addMsg(m.label || m.reason, T("notRun") + m.reason, "bystander");
     } else if (m.id === "voice_summary"){
       addMsg(m.target, m.text, m.target); speak(m.text);
       earcon(m.is_question ? "needs_approval" : "finished");
     } else if (m.id === "permission_request"){
-      earcon("needs_approval"); addMsg("разрешение", m.spoken, "code"); speak(m.spoken);
+      earcon("needs_approval"); addMsg(T("permission"), m.spoken, "code"); speak(m.spoken);
     } else if (m.id === "permission_result"){
       earcon(m.earcon || "accepted");
-      addMsg("разрешение", m.approved ? (m.remembered ? "разрешил и запомнил" : "разрешил") : "отклонил", "code");
+      addMsg(T("permission"), m.approved ? (m.remembered ? T("allowedKept") : T("allowed"))
+                                        : T("rejected"), "code");
     } else if (m.id === "auth_url"){
       el("authstart").hidden = true;
       el("authlink").hidden = false; el("authlink").href = m.url;
       el("authcoderow").hidden = false;
-      el("authtext").textContent = "Открой авторизацию, войди в аккаунт Claude и вставь код сюда. Код живёт недолго — вставляй сразу.";
+      el("authtext").textContent = T("authOpen");
     } else if (m.id === "auth_token"){
       el("authcoderow").hidden = true; el("authlink").hidden = true;
       el("authtoken").hidden = false; el("authtokenvalue").value = m.token;
-      el("authtext").textContent = "Подписка подключена.";
-      el("hint").textContent = `code: ${m.code_available?"ready":"stub"} · chat: ${m.chat_available?"ready":"stub"} · подписка`;
+      el("authtext").textContent = T("authDone");
+      hintOwned = true;
+      el("hint").textContent = `code: ${m.code_available?"ready":"stub"} · chat: ${m.chat_available?"ready":"stub"} · ${T("subscription")}`;
       earcon("finished");
     } else if (m.id === "auth_error"){
       earcon("error");
-      el("authtext").textContent = "Не вышло: " + m.message;
-      el("authstart").hidden = false; el("authstart").textContent = "подключить подписку заново";
+      el("authtext").textContent = T("authFailed") + m.message;
+      el("authstart").hidden = false; el("authstart").textContent = T("authRestart");
       el("authcoderow").hidden = true; el("authlink").hidden = true;
-    } else if (m.id === "whisper"){ addMsg("шёпот", m.text, "chat"); speak(m.text);
+    } else if (m.id === "whisper"){ addMsg(T("whisper"), m.text, "chat"); speak(m.text);
     } else if (m.id === "error"){
-      earcon("error"); addMsg("ошибка", m.message, "error");
+      earcon("error"); addMsg(T("error"), m.message, "error");
       if (m.code === "unauthorized"){
         try { localStorage.removeItem("vs_token"); } catch (e) {}
         TOKEN = ""; el("tokenrow").hidden = false;
@@ -443,11 +634,12 @@ function connect(){
   };
 }
 
-if (!window.isSecureContext && location.hostname !== "localhost")
-  el("hint").textContent = "нужен https: браузер не даст микрофон на http";
-startMeter().catch(() => el("hint").textContent = "нет доступа к микрофону — разреши его в Chrome");
-paintLang();
-paintButton();
+document.documentElement.lang = lang.slice(0, 2);
+paintUI();
+if (!window.isSecureContext && location.hostname !== "localhost"){
+  hintOwned = true; el("hint").textContent = T("needHttps");
+}
+startMeter().catch(() => { hintOwned = true; el("hint").textContent = T("noMic"); });
 connect();
 </script>
 </body>

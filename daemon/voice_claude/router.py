@@ -10,42 +10,19 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from . import lexicon
 from .spec import defaults, section
 
 FILE_RE = re.compile(r"\b[\w./-]+\.(ts|tsx|js|jsx|py|json|md|yml|yaml|toml|rs|go|sh)\b", re.I)
-# Основы слов: ищем их с начала слова, чтобы «проект» ловил «проекте»,
-# но «порт» не срабатывал внутри «спорт».
-CODE_STEMS = (
-    "git", "коммит", "закоммить", "коммить", "ветк", "мердж", "пул реквест",
-    "тест", "npm", "pytest", "билд", "сборк", "деплой", "deployment", "линт",
-    "рефактор", "запусти", "исправ", "почини", "откати", "репозитор", "функци",
-    "баг", "ошибк", "стек", "компилир", "docker", "миграц",
-    # Живая речь про работу: «покажи файлы в проекте», «что в конфиге».
-    "файл", "папк", "каталог", "проект", "модул", "конфиг",
-    "зависимост", "скрипт", "сервер", "служб", "верси",
-)
-# Короткие слова: как основа они тащат чужое — «логично», «классно»,
-# «кодекс», «спорт». Поэтому только целиком, перечисляя падежи.
-CODE_WORD_GROUPS = (
-    ("pr",),
-    ("лог", "лога", "логи", "логов", "логах", "логами"),
-    ("код", "кода", "коде", "кодом", "коды", "кодов"),
-    ("класс", "класса", "классе", "классы", "классов"),
-    ("порт", "порта", "порту", "порты", "портов"),
-)
-CODE_STEM_RES = tuple(re.compile(r"(?<!\w)" + re.escape(stem), re.I) for stem in CODE_STEMS)
-CODE_WORD_RES = tuple(
-    re.compile(r"\b(?:" + "|".join(re.escape(w) for w in group) + r")\b", re.I)
-    for group in CODE_WORD_GROUPS
-)
+# Признаки цели живут в lexicon на четырёх языках сразу: какой из них
+# прозвучит следующим, роутер заранее не знает.
+CODE_STEM_RES, CODE_WORD_RES = lexicon.code_patterns()
 # Совместимость: прежний плоский словарь, по которому кто-то может пройтись.
-CODE_LEXICON = CODE_STEMS + tuple(group[0] for group in CODE_WORD_GROUPS)
-CHAT_LEXICON = (
-    "что такое", "кто такой", "объясни", "посчитай", "сформулируй", "напиши письмо",
-    "как думаешь", "переведи", "что он сказал", "что она сказала", "напомни",
-    "во сколько", "сколько будет", "какая разница", "стоит ли",
-)
-CONTINUATION = ("продолжай", "добей", "давай", "дальше", "ок делай", "окей делай")
+CODE_LEXICON = tuple(lexicon.SHARED_CODE_STEMS) + tuple(
+    stem for lang in lexicon.LANGUAGES for stem in lexicon.CODE_STEMS.get(lang, ())
+) + tuple(word for lang in lexicon.LANGUAGES for word in lexicon.CODE_WORDS.get(lang, ()))
+CHAT_LEXICON = lexicon.every("chat")
+CONTINUATION = lexicon.every("continuation")
 
 
 @dataclass
@@ -116,10 +93,25 @@ class Router:
         for rule in self._router["explicit_prefix"]:
             for utterance in rule["utterances"]:
                 u = utterance.lower()
-                if lowered.startswith(u) and len(u) > best_len:
-                    rest = lowered[len(u):].lstrip(" ,.:—-")
+                if self._prefix_fits(lowered, u) and len(u) > best_len:
+                    rest = lowered[len(u):].lstrip(" ,.:—-，。、")
                     best, best_len = (rule["target"], rest), len(u)
         return best
+
+    @staticmethod
+    def _prefix_fits(lowered: str, prefix: str) -> bool:
+        """Префикс — это слово целиком, а не начало другого.
+
+        Без этого «кодекс» уходил в код, а «codebase» — в код на английском:
+        `startswith` ничего не знает о границах слов. В китайском границы нет
+        вовсе, там достаточно самого начала.
+        """
+        if not lowered.startswith(prefix):
+            return False
+        rest = lowered[len(prefix):]
+        if not rest or lexicon.CJK.search(prefix[-1:]):
+            return True
+        return not rest[0].isalnum()
 
     def _classify(self, lowered: str) -> tuple[str | None, float]:
         code_hits = sum(1 for pattern in CODE_STEM_RES if pattern.search(lowered))

@@ -1039,9 +1039,14 @@
       "User → LLM #1 интерпретирует → LLM #2 переписывает prompt → Claude Code (испорченный телефон)"
     ],
     "allowed_additions": {
-      "system_preamble": "Реплика ниже надиктована голосом.\nРаспознавание почти всегда портит имена собственные: города, людей, названия продуктов и файлов. Остальные слова обычно верны.\nВосстанови искажённое имя сам — по смыслу фразы, по тому, что уже обсуждалось, по проекту и по тому, что знаешь о мире. Названный вариант скажи в ответе: «маршрут из Сдерота, верно?» — это дешевле, чем переспрашивать.\nПереспрашивай только тогда, когда правдоподобных вариантов несколько и они ведут к разным последствиям. Тогда назови их сам, а не спрашивай «что ты имел в виду».\nЕсли рядом идут другие гипотезы распознавателя, выбирай из них — верная часто оказывается второй.\nЕсли восстановить нечем — назови свои варианты и один раз коротко подскажи: «скажи «запомни, что …» — и я перестану переспрашивать».\nСамо сказанное не переписывай: в ответе говори, как понял.",
+      "system_preamble": "The utterance below was dictated by voice.\nSpeech recognition almost always mangles proper nouns: cities, people, product and file names. The other words are usually right.\nReconstruct the mangled name yourself — from the sense of the sentence, from what has already been discussed, from the project, and from what you know about the world. Say the version you settled on in your answer: «the route from Sderot, right?» is cheaper than asking again.\nOnly ask when several readings are plausible and they lead to different consequences. Then name them yourself instead of asking «what did you mean».\nIf other recognition hypotheses are attached, choose among them — the right one is often second.\nIf there is nothing to reconstruct from, name your options and hint once, briefly: «say “remember that …” and I will stop asking».\nDo not rewrite what was said: answer in terms of how you understood it.",
       "speaker_role_line": "см. speaker_identification.claude_injection",
-      "nothing_else": true
+      "nothing_else": true,
+      "system_preamble_by_language": {
+        "ru": "Реплика ниже надиктована голосом.\nРаспознавание почти всегда портит имена собственные: города, людей, названия продуктов и файлов. Остальные слова обычно верны.\nВосстанови искажённое имя сам — по смыслу фразы, по тому, что уже обсуждалось, по проекту и по тому, что знаешь о мире. Названный вариант скажи в ответе: «маршрут из Сдерота, верно?» — это дешевле, чем переспрашивать.\nПереспрашивай только тогда, когда правдоподобных вариантов несколько и они ведут к разным последствиям. Тогда назови их сам, а не спрашивай «что ты имел в виду».\nЕсли рядом идут другие гипотезы распознавателя, выбирай из них — верная часто оказывается второй.\nЕсли восстановить нечем — назови свои варианты и один раз коротко подскажи: «скажи «запомни, что …» — и я перестану переспрашивать».\nСамо сказанное не переписывай: в ответе говори, как понял.",
+        "es": "La frase de abajo fue dictada por voz.\nEl reconocimiento casi siempre estropea los nombres propios: ciudades, personas, productos y archivos. El resto de las palabras suele estar bien.\nReconstruye tú mismo el nombre estropeado — por el sentido de la frase, por lo que ya se ha hablado, por el proyecto y por lo que sabes del mundo. Di en tu respuesta la versión que elegiste: «la ruta desde Sderot, ¿verdad?» sale más barato que volver a preguntar.\nPregunta solo cuando haya varias lecturas plausibles que lleven a consecuencias distintas. Entonces nómbralas tú, en lugar de preguntar «¿qué quisiste decir?».\nSi vienen otras hipótesis del reconocedor, elige entre ellas — la correcta suele ser la segunda.\nSi no hay con qué reconstruir, di tus opciones y sugiere una vez, breve: «di “recuerda que …” y dejaré de preguntar».\nNo reescribas lo dicho: responde según cómo lo entendiste.",
+        "zh": "下面这句话是用语音说出来的。\n语音识别几乎总会弄错专有名词：城市、人名、产品名和文件名。其他词通常是对的。\n自己把被弄错的名字还原回来——根据句子的意思、已经谈过的内容、项目本身，以及你对世界的了解。把你选定的那个写法说在回答里：「从 Sderot 出发的路线，对吧？」比再问一遍便宜。\n只有当几种读法都说得通、且后果不同时才追问。那时也要自己把选项说出来，而不是问「你是什么意思」。\n如果附带了识别器的其他候选，就在它们中间选——正确的那个往往排第二。\n实在无从还原，就把你的几种猜测说出来，并简短地提醒一次：「说‘记住……’，我就不再问了」。\n不要改写他说的话：照你理解的意思回答。"
+      }
     },
     "transcript_mutations_allowed": [
       "тримминг тишины и wake word в начале",
@@ -1127,7 +1132,18 @@
             "код",
             "в код",
             "клод код",
-            "в проекте"
+            "в проекте",
+            "code",
+            "in code",
+            "claude code",
+            "in the project",
+            "código",
+            "codigo",
+            "en código",
+            "en el proyecto",
+            "代码",
+            "切到代码",
+            "在项目里"
           ],
           "target": "code"
         },
@@ -1136,14 +1152,35 @@
             "чат",
             "просто скажи",
             "вопрос",
-            "в чат"
+            "в чат",
+            "chat",
+            "just tell me",
+            "question",
+            "in chat",
+            "charla",
+            "solo dime",
+            "pregunta",
+            "en el chat",
+            "聊天",
+            "就说一下",
+            "问你个问题"
           ],
           "target": "chat"
         },
         {
           "utterances": [
             "запиши",
-            "заметка"
+            "заметка",
+            "note",
+            "write down",
+            "note that",
+            "take a note",
+            "nota",
+            "apunta",
+            "anota",
+            "记一下",
+            "笔记",
+            "写下来"
           ],
           "target": "note"
         }
@@ -1189,7 +1226,14 @@
         {
           "utterances": [
             "перекинь это в код",
-            "сделай это в проекте"
+            "сделай это в проекте",
+            "hand this to code",
+            "do this in the project",
+            "make it so",
+            "pasa esto a código",
+            "hazlo en el proyecto",
+            "把这个交给代码",
+            "在项目里做这个"
           ],
           "target": "code",
           "effect": "последний ответ chat уходит в code-сессию как контекст + исходная реплика"
@@ -1197,7 +1241,14 @@
         {
           "utterances": [
             "объясни попроще",
-            "а что это значит"
+            "а что это значит",
+            "explain it simply",
+            "what does that mean",
+            "put that in plain words",
+            "explícalo más simple",
+            "qué significa eso",
+            "解释得简单点",
+            "这是什么意思"
           ],
           "target": "chat",
           "effect": "последний вывод code уходит в chat как контекст"
@@ -1223,7 +1274,16 @@
       "misroute_recovery": {
         "utterances": [
           "не туда",
-          "я не про код"
+          "я не про код",
+          "wrong target",
+          "not the code",
+          "i didn't mean code",
+          "that's not what i meant",
+          "ahí no",
+          "no me refería al código",
+          "eso no es lo que quería",
+          "不是这个",
+          "我不是说代码"
         ],
         "effect": "отменить отправку, если действие ещё не выполнено; переотправить в другую цель"
       },
@@ -1557,7 +1617,22 @@
           "да",
           "давай",
           "разрешаю",
-          "ок"
+          "ок",
+          "yes",
+          "go ahead",
+          "allow",
+          "ok",
+          "okay",
+          "do it",
+          "sí",
+          "si",
+          "dale",
+          "permito",
+          "adelante",
+          "可以",
+          "行",
+          "允许",
+          "好的"
         ],
         "action": "approve_once"
       },
@@ -1565,21 +1640,46 @@
         "utterances": [
           "нет",
           "не надо",
-          "отмена"
+          "отмена",
+          "no",
+          "don't",
+          "do not",
+          "cancel",
+          "stop",
+          "no lo hagas",
+          "cancela",
+          "para",
+          "不行",
+          "不要",
+          "取消"
         ],
         "action": "reject"
       },
       {
         "utterances": [
           "да, и больше не спрашивай для этой команды",
-          "всегда разрешай это"
+          "всегда разрешай это",
+          "yes and stop asking for this command",
+          "always allow this",
+          "sí y no preguntes más por este comando",
+          "permite esto siempre",
+          "可以，以后这个命令别问了",
+          "以后都允许"
         ],
         "action": "approve_and_remember_rule"
       },
       {
         "utterances": [
           "что именно?",
-          "подробнее"
+          "подробнее",
+          "what exactly",
+          "what exactly?",
+          "details",
+          "tell me more",
+          "qué exactamente",
+          "más detalles",
+          "具体是什么",
+          "说详细点"
         ],
         "action": "speak_details"
       }
@@ -1834,7 +1934,8 @@
           "v": "int",
           "token": "string",
           "device_id": "string",
-          "app_version": "string"
+          "app_version": "string",
+          "language": "en|ru|es|zh — the phone's language tag (BCP-47 is accepted, ru-RU reads as ru). Optional; what the person actually speaks overrides it per utterance."
         }
       },
       {
@@ -1845,7 +1946,8 @@
           "sessions": "array<session>",
           "active_session": "string",
           "daemon_version": "string",
-          "credential": "subscription|api_key|none"
+          "credential": "subscription|api_key|none",
+          "language": "en|ru|es|zh — what the daemon is answering in now"
         }
       },
       {
@@ -2207,7 +2309,19 @@
       "env": "CLAUDE_CODE_OAUTH_TOKEN",
       "fallback_env": "ANTHROPIC_API_KEY"
     },
-    "permission_mode": "auto"
+    "permission_mode": "auto",
+    "language": {
+      "default": "en",
+      "supported": [
+        "en",
+        "ru",
+        "es",
+        "zh"
+      ],
+      "env": "VOICE_LANG",
+      "follows": "hello.language, then the language actually spoken, then VOICE_LANG",
+      "why": "A voice assistant that answers in the wrong language is useless even when the answer is right. Command phrases from every supported language are matched at once, because the shell cannot know which language the next sentence will be in."
+    }
   },
   "definition_of_done": {
     "id": "definition_of_done",

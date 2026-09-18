@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from .i18n import t
+
 MODES = ("off", "watch", "fix")
 
 
@@ -72,13 +74,13 @@ def github_failures(workspace: str | Path, limit: int = 5) -> list[Event]:
     for run in runs:
         if run.get("status") != "completed" or run.get("conclusion") != "failure":
             continue
-        name = run.get("workflowName") or "сборка"
+        name = run.get("workflowName") or t("watch.build_default_name")
         branch = run.get("headBranch") or ""
         events.append(Event(
             key=f"run-{run.get('databaseId')}",
-            text=f"Упала сборка {name}" + (f" на ветке {branch}." if branch else "."),
-            fix_prompt=(f"Сборка «{name}» на ветке {branch} упала. "
-                        f"Посмотри логи через gh, найди причину и почини."),
+            text=(t("watch.build_failed_branch", name=name, branch=branch) if branch
+                  else t("watch.build_failed", name=name)),
+            fix_prompt=t("watch.fix_prompt", name=name, branch=branch),
         ))
     return events
 

@@ -12,7 +12,9 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-STOP_WORDS = {"и", "в", "на", "а", "что", "как", "мне", "мой", "это", "там", "по", "ну", "же"}
+from . import lexicon
+
+STOP_WORDS = set(lexicon.every("stopwords"))
 
 
 @dataclass

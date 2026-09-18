@@ -18,6 +18,7 @@ import os
 
 from . import policy
 from .auth import credential_kind, credential_problem, credentials_present
+from .i18n import t
 
 PermissionHook = Callable[[str, dict[str, Any]], Awaitable[bool]]
 
@@ -52,11 +53,11 @@ def _stub_reason() -> str:
     try:
         import claude_agent_sdk  # noqa: F401
     except ImportError:
-        return "не установлен claude-agent-sdk"
+        return t("stub.no_sdk")
     problem = credential_problem()
     if problem:
-        return f"токен доступа неверный — {problem}"
-    return "не подключена подписка Claude"
+        return t("stub.bad_token", problem=problem)
+    return t("stub.no_subscription")
 
 
 class _SdkTarget:
@@ -101,7 +102,7 @@ class _SdkTarget:
     async def send(self, text: str, preamble: str = "", role_line: str = "") -> Reply:
         message = self.compose(text, preamble, role_line)
         if not self.available:
-            return Reply(text=f"Claude недоступен: {_stub_reason()}.",
+            return Reply(text=t("target.unavailable", reason=_stub_reason()),
                          full_output=message, target=self.target_id, stubbed=True)
         await self.connect()
         async with self._lock:
@@ -157,7 +158,7 @@ class CodeTarget(_SdkTarget):
                 return PermissionResultAllow()
             approved = await self.permission_hook(tool_name, input_data)
             return PermissionResultAllow() if approved else PermissionResultDeny(
-                message="Отклонено голосом")
+                message=t("target.denied_by_voice"))
 
         options: dict[str, Any] = {"cwd": str(self.cwd)}
         if policy.mode() == "auto" and not running_as_root():
@@ -181,19 +182,13 @@ class ChatTarget(_SdkTarget):
                  system: str | None = None) -> None:
         super().__init__(cwd or Path(tempfile.gettempdir()) / "voice-claude-chat")
         self.model = model
-        self.system = system or (
-            "Ты голосовой собеседник в наушнике. Отвечай одним-двумя короткими "
-            "предложениями, без списков и разметки. Отвечай на том языке, на котором "
-            "к тебе обратились.\n"
-            "У тебя есть поиск в интернете и чтение страниц — пользуйся ими, когда "
-            "нужен свежий факт, и называй источник одним словом, без ссылок: их "
-            "неудобно слушать.\n"
-            "Менять файлы и запускать команды ты не можешь. Если для ответа нужно "
-            "действие в проекте, скажи об этом — человек переключит на цель «код».\n"
-            "Тебя читают вслух: латинские слова пиши русскими буквами так, как их "
-            "произносят, а в технических словах, заимствованиях и омографах ставь + "
-            "перед ударной гласной («комм+ит», «з+амок»). В обычных словах знак не нужен."
-        )
+        # None — брать из каталога на языке разговора в момент подключения:
+        # цель живёт долго, а язык решается на каждой реплике.
+        self._system = system
+
+    @property
+    def system(self) -> str:
+        return self._system or t("prompt.chat_system")
 
     def _options(self) -> Any:
         from claude_agent_sdk import ClaudeAgentOptions  # type: ignore
@@ -207,8 +202,7 @@ class ChatTarget(_SdkTarget):
             """
             from claude_agent_sdk import PermissionResultDeny  # type: ignore
             return PermissionResultDeny(
-                message=f"{tool_name} недоступен в разговорной цели — скажи «в код», если нужно действие"
-            )
+                message=t("target.chat_cannot", tool=tool_name))
 
         options: dict[str, Any] = {
             "cwd": str(self.cwd),
@@ -231,22 +225,9 @@ class SummaryTarget(_SdkTarget):
     """
 
     target_id = "summary"
-    SYSTEM = (
-        "Ты сокращаешь вывод Claude Code до реплики, которую произнесут вслух в наушник.\n"
-        "Правила:\n"
-        "1–3 коротких предложения, не длиннее 35 слов.\n"
-        "Никогда не произноси команды, пути к файлам, флаги, хеши, стек-трейсы и куски кода.\n"
-        "Имена файлов сокращай до сути: «исправил auth и session».\n"
-        "Числа результатов сохраняй точно: 47 тестов — именно 47.\n"
-        "Если Claude задал вопрос или просит решение — закончи этим вопросом.\n"
-        "Не добавляй ничего, чего нет в выводе. Отвечай только самой репликой.\n"
-        "Отвечай на языке вывода: русский вывод — русская реплика, английский — английская.\n"
-        "Латинские слова пиши русскими буквами так, как их произносят: config — конфиг, "
-        "timeout — таймаут, commit — коммит, deploy — деплой.\n"
-        "Ставь + перед ударной гласной там, где синтез ошибается: в технических словах, "
-        "заимствованиях и омографах («з+амок» или «зам+ок»). В обычных коротких словах "
-        "знак не нужен — лишние знаки портят речь не меньше, чем неверное ударение."
-    )
+    @property
+    def SYSTEM(self) -> str:                      # noqa: N802 - имя из спеки
+        return t("prompt.summary_system")
 
     def __init__(self, cwd: str | Path | None = None) -> None:
         super().__init__(cwd or Path(tempfile.gettempdir()) / "voice-claude-summary")
@@ -280,15 +261,9 @@ class IntentTarget(_SdkTarget):
 
     target_id = "intent"
     VALID = ("code", "chat", "note")
-    SYSTEM = (
-        "Ты маршрутизатор голосовых реплик. Ответь ровно одним словом: code, chat или note.\n"
-        "code — человек хочет что-то сделать в проекте или на сервере: посмотреть, изменить, "
-        "починить, запустить, собрать, выкатить, проверить состояние.\n"
-        "chat — человек хочет ответ: объяснение, совет, расчёт, перевод, факт, мнение.\n"
-        "note — человек проговаривает мысль, чтобы её записали, и ответа не ждёт.\n"
-        "Сомневаешься между code и chat — отвечай chat: эта цель ничего не меняет.\n"
-        "Никаких пояснений и знаков препинания, только одно слово."
-    )
+    @property
+    def SYSTEM(self) -> str:                      # noqa: N802 - имя из спеки
+        return t("prompt.intent_system")
 
     def __init__(self, cwd: str | Path | None = None) -> None:
         super().__init__(cwd or Path(tempfile.gettempdir()) / "voice-claude-intent")
@@ -324,7 +299,7 @@ class NoteTarget:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.path, "a", encoding="utf-8") as fh:
             fh.write(f"- {text}\n")
-        return Reply(text="Записал.", full_output=text, target="note")
+        return Reply(text=t("note.saved"), full_output=text, target="note")
 
 
 @dataclass

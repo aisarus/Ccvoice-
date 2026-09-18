@@ -13,6 +13,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from .i18n import t
 from .spec import defaults, section
 
 RECALL_PATTERNS = (
@@ -33,7 +34,8 @@ class Line:
     confidence: float
 
     def rendered(self) -> str:
-        who = {"master": "я", "bystander": "собеседник", "unknown": "?"}[self.role]
+        who = {"master": t("ambient.me"),
+               "bystander": t("ambient.bystander"), "unknown": "?"}[self.role]
         return f"[{time.strftime('%H:%M', time.localtime(self.ts))}] {who}: {self.text}"
 
 

@@ -10,11 +10,13 @@
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+from . import lexicon
+from .i18n import t
 
 JOURNAL = "checkpoints.json"
 STATE_DIR = ".voice-shell"
@@ -27,14 +29,9 @@ JUNK = ("__pycache__/", "*.pyc", ".pytest_cache/", "node_modules/",
 # Свой журнал в чужой коммит попадать не должен: он бы приезжал в каждый
 # коммит проекта и в каждый пул-реквест.
 OURS = (f":(exclude){STATE_DIR}", f":(exclude){STATE_DIR}/**")
-UNDO_PHRASES = (
-    "откати последнее", "откати", "отмени последнее", "отмени изменения",
-    "верни как было", "верни обратно", "отмена последнего",
-)
-HISTORY_PHRASES = (
-    "что ты сделал", "что ты наделал", "покажи последние изменения",
-    "какие были изменения", "что изменилось",
-)
+# Фразы живут в lexicon: их четыре языка, и слушаем мы все сразу.
+UNDO_PHRASES = lexicon.every("undo")
+HISTORY_PHRASES = lexicon.every("history")
 
 
 @dataclass
@@ -144,13 +141,13 @@ def summary(workspace: str | Path, before: str, after: str) -> str:
     """Человеческое описание изменения: «auth.ts и ещё два файла»."""
     files = changed_files(workspace, before, after)
     if not files:
-        return "без изменений в файлах"
+        return t("changes.none")
     names = [Path(f).name for f in files]
     if len(names) == 1:
         return names[0]
     if len(names) == 2:
-        return f"{names[0]} и {names[1]}"
-    return f"{names[0]}, {names[1]} и ещё {len(names) - 2}"
+        return t("changes.two", first=names[0], second=names[1])
+    return t("changes.more", first=names[0], second=names[1], rest=len(names) - 2)
 
 
 class Journal:
@@ -198,8 +195,7 @@ class Journal:
 
 
 # Обращение и слова-затравки в начале — часть команды, а не её отмена.
-OPENERS = ("клод", "клауд", "слушай", "эй", "окей", "ок", "а", "ну", "и", "так",
-           "давай", "пожалуйста")
+OPENERS = lexicon.every("openers")
 
 
 def matches(text: str, phrases: tuple[str, ...]) -> bool:
@@ -209,8 +205,4 @@ def matches(text: str, phrases: tuple[str, ...]) -> bool:
     откатить?» делал настоящий откат. Команда должна стоять в начале — после
     обращения, но не после рассуждения о ней.
     """
-    words = re.sub(r"[^\w\s]", " ", text.lower()).split()
-    while words and words[0] in OPENERS:
-        words.pop(0)
-    lowered = " ".join(words)
-    return any(lowered == phrase or lowered.startswith(phrase + " ") for phrase in phrases)
+    return lexicon.starts_with(text, phrases)

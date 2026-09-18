@@ -11,6 +11,8 @@ import re
 from dataclasses import dataclass
 from typing import Callable
 
+from . import lexicon
+from .i18n import join, t
 from .spec import section
 
 FENCE_RE = re.compile(r"```.*?```", re.S)
@@ -64,10 +66,11 @@ def _spoken_files(files: list[str]) -> str:
     if not stems:
         return ""
     if len(stems) == 1:
-        return f"Исправил {stems[0]}."
+        return t("fmt.fixed_one", first=stems[0])
     if len(stems) <= 3:
-        return "Исправил " + " и ".join([", ".join(stems[:-1]), stems[-1]]) + "."
-    return f"Исправил {stems[0]}, {stems[1]} и ещё {len(stems) - 2} файла."
+        names = f"{join(stems[:-1])} {t('fmt.and')} {stems[-1]}"
+        return t("fmt.fixed_list", names=names)
+    return t("fmt.fixed_more", first=stems[0], second=stems[1], rest=len(stems) - 2)
 
 
 def summarize(output: str, llm: Callable[[str], str] | None = None,
@@ -88,9 +91,9 @@ def summarize(output: str, llm: Callable[[str], str] | None = None,
     failed = FAILED_RE.search(output)
     passed = TESTS_RE.search(output)
     if failed:
-        parts.append(f"{failed.group(1)} тестов падают.")
+        parts.append(t("fmt.tests_failed", count=failed.group(1)))
     elif passed:
-        parts.append(f"Все {passed.group(1)} тестов проходят.")
+        parts.append(t("fmt.tests_passed", count=passed.group(1)))
 
     question = _last_question(output)
     if question:
@@ -130,9 +133,7 @@ def _trim_to(text: str, limit: int) -> str:
 
 def parse_approval(text: str) -> str | None:
     """Разбирает голосовой ответ на запрос разрешения (спека: permissions.answers)."""
-    def normalise(value: str) -> str:
-        return " ".join(re.sub(r"[^\w\s]", " ", value.lower()).split())
-
+    normalise = lexicon.normalise
     lowered = normalise(text)
     if not lowered:
         return None
@@ -140,7 +141,9 @@ def parse_approval(text: str) -> str | None:
     for rule in section("permissions")["answers"]:
         for utterance in rule["utterances"]:
             u = normalise(utterance)
-            matched = lowered == u or lowered.startswith(u + " ") or f" {u} " in f" {lowered} "
+            matched = (lowered == u or lowered.startswith(u + " ")
+                       or f" {u} " in f" {lowered} "
+                       or (lexicon.CJK.search(u) and u in lowered))
             # Самое длинное совпадение выигрывает: "да, и больше не спрашивай"
             # не должно превратиться в простое "да".
             if matched and (best is None or len(u) > best[0]):
@@ -152,16 +155,16 @@ def approval_to_speech(raw: str) -> str:
     """Turn a tool-permission request into a human question."""
     tool = raw.strip().splitlines()[0][:120]
     human = {
-        r"\brm\b.*build": "удалить старую папку build",
-        r"\bnpm install\b": "установить зависимости",
-        r"\bgit push\b": "запушить изменения",
-        r"\bgit commit\b": "закоммитить изменения",
-        r"\bpytest\b|\bnpm test\b": "запустить тесты",
+        r"\brm\b.*build": "fmt.tool.rm_build",
+        r"\bnpm install\b": "fmt.tool.npm_install",
+        r"\bgit push\b": "fmt.tool.git_push",
+        r"\bgit commit\b": "fmt.tool.git_commit",
+        r"\bpytest\b|\bnpm test\b": "fmt.tool.tests",
     }
-    for pattern, phrase in human.items():
+    for pattern, key in human.items():
         if re.search(pattern, tool, re.I):
-            return f"Клод хочет {phrase}. Разрешить?"
-    return f"Клод хочет выполнить: {tool}. Разрешить?"
+            return t("fmt.permission_known", phrase=t(key))
+    return t("fmt.permission_tool", tool=tool)
 
 
 # Технический текст ошибки в ухо не годится: там стек, коды и пути. Но и
@@ -169,25 +172,25 @@ def approval_to_speech(raw: str) -> str:
 # что-то самому. Частные причины идут первыми: «сессия не поднялась» написано
 # на любой поломке CLI и перебивало собой и кончившийся лимит, и полный диск.
 FAILURE_HINTS = (
-    (r"root/sudo privileges", "служба работает от root, и CLI не принял режим без вопросов"),
-    (r"credit|quota|rate.?limit|too low", "кончился лимит подписки"),
-    (r"overloaded|529\b|503\b", "Claude сейчас перегружен"),
-    (r"No space left|ENOSPC|disk quota", "на диске кончилось место"),
+    (r"root/sudo privileges", "reason.root"),
+    (r"credit|quota|rate.?limit|too low", "reason.quota"),
+    (r"overloaded|529\b|503\b", "reason.overloaded"),
+    (r"No space left|ENOSPC|disk quota", "reason.disk"),
     (r"ENOTFOUND|ECONNREFUSED|Temporary failure|getaddrinfo|fetch failed|"
-     r"EAI_AGAIN|ENETUNREACH|socket hang up", "нет сети"),
-    (r"not a git repository|Not a git repo", "рабочий каталог — не репозиторий"),
-    (r"timed? ?out|ETIMEDOUT", "ответ не пришёл вовремя"),
-    (r"permission denied|EACCES", "не хватило прав"),
-    (r"not found|No such file|ENOENT", "не нашёлся нужный файл"),
-    (r"exit code 1\b|Command failed|exit code: 1\b", "сессия Claude не поднялась"),
+     r"EAI_AGAIN|ENETUNREACH|socket hang up", "reason.network"),
+    (r"not a git repository|Not a git repo", "reason.not_repo"),
+    (r"timed? ?out|ETIMEDOUT", "reason.timeout"),
+    (r"permission denied|EACCES", "reason.permission"),
+    (r"not found|No such file|ENOENT", "reason.not_found"),
+    (r"exit code 1\b|Command failed|exit code: 1\b", "reason.session"),
 )
 
 # То же самое, но по структуре, а не по словам: SDK кладёт причину отказа
 # в поля, и угадывать её по тексту незачем.
 API_STATUS_HINTS = {
-    401: "токен доступа не принят", 403: "токен доступа не принят",
-    429: "кончился лимит подписки", 500: "Claude сейчас перегружен",
-    503: "Claude сейчас перегружен", 529: "Claude сейчас перегружен",
+    401: "reason.token_rejected", 403: "reason.token_rejected",
+    429: "reason.quota", 500: "reason.overloaded",
+    503: "reason.overloaded", 529: "reason.overloaded",
 }
 
 
@@ -195,11 +198,22 @@ def reason_for_voice(exc: BaseException) -> str:
     """Одна короткая фраза о причине — без стека, кодов и путей."""
     status = getattr(exc, "api_error_status", None)
     if isinstance(status, int):
-        return (API_STATUS_HINTS.get(status) or "Claude ответил ошибкой").capitalize() + "."
+        return _sentence(t(API_STATUS_HINTS.get(status) or "reason.api_error"))
     if getattr(exc, "subtype", None) == "error_max_turns":
-        return "Работа не уложилась в отведённые шаги."
+        return t("reason.max_turns")
     text = f"{type(exc).__name__}: {exc}"
-    for pattern, phrase in FAILURE_HINTS:
+    for pattern, key in FAILURE_HINTS:
         if re.search(pattern, text, re.I):
-            return phrase.capitalize() + "."
-    return "Причина в логе службы."
+            return _sentence(t(key))
+    return t("reason.in_log")
+
+
+def _sentence(phrase: str) -> str:
+    """Причина — это кусок фразы; вслух она идёт отдельным предложением.
+
+    Точка и заглавная ставятся только там, где они существуют: в китайском
+    заглавных букв нет, а точка своя.
+    """
+    if lexicon.CJK.search(phrase):
+        return phrase if phrase.endswith(("。", "！", "？")) else phrase + "。"
+    return phrase[:1].upper() + phrase[1:] + "."

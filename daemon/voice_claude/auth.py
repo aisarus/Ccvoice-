@@ -18,6 +18,8 @@ from pathlib import Path
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from .i18n import t
+
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b[()][B0]")
 # Ссылка в терминале печатается с переносами, поэтому видимый текст обрезан.
 # Целая ссылка лежит в OSC 8 — гиперссылке, которой терминал оборачивает вывод.
@@ -90,13 +92,13 @@ class SetupTokenFlow:
         url = extract_auth_url(raw)
         if url is None:
             self.close()
-            raise SetupError("не удалось получить ссылку авторизации")
+            raise SetupError(t("auth.no_link"))
         return url
 
     async def submit(self, code: str) -> str:
         """Отдаёт код команде и возвращает долгоживущий токен."""
         if self._master is None:
-            raise SetupError("флоу не запущен")
+            raise SetupError(t("auth.flow_not_started"))
         await asyncio.to_thread(os.write, self._master, code.strip().encode() + b"\r")
         raw = await asyncio.to_thread(
             self._read_until, lambda text: TOKEN_RE.search(strip_ansi(text)) is not None,
@@ -105,8 +107,8 @@ class SetupTokenFlow:
         if not match:
             detail = self._tail(raw)
             self.close()
-            raise SetupError(f"код не принят или токен не выдан. CLI ответил: {detail}"
-                             if detail else "код не принят или токен не выдан")
+            raise SetupError(t("auth.code_rejected_detail", detail=detail) if detail
+                             else t("auth.code_rejected"))
         token = match.group(0)
         self.close()
         return token
@@ -177,13 +179,13 @@ def token_problem(value: str) -> str | None:
     """
     token = value.strip()
     if not token:
-        return "пусто"
+        return t("auth.token.empty")
     if not token.isascii():
-        return "содержит не-ASCII символы — похоже, вставился не токен"
+        return t("auth.token.non_ascii")
     if len(token) < 20:
-        return f"слишком короткий ({len(token)} символов)"
+        return t("auth.token.short", length=len(token))
     if not token.startswith("sk-ant-"):
-        return "не начинается с sk-ant-"
+        return t("auth.token.prefix")
     return None
 
 
@@ -271,8 +273,7 @@ def credential_problem() -> str | None:
             if problem:
                 return f"{name}: {problem}"
     if credential_kind() == "none":
-        return ("нет ни токена подписки, ни ключа, и CLI не авторизован — "
-                "войди на сервере командой claude setup-token")
+        return t("auth.no_credentials")
     return None
 
 
