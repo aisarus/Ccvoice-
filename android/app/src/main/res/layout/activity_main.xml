@@ -25,7 +25,7 @@
             android:layout_height="wrap_content"
             android:textSize="14sp"
             android:textStyle="bold"
-            android:text="проверяю готовность…" />
+            android:text="@string/readiness_checking" />
 
         <LinearLayout
             android:id="@+id/readiness"
@@ -38,14 +38,14 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="адрес сервиса"
+            android:text="@string/label_server"
             android:textSize="12sp" />
 
         <EditText
             android:id="@+id/server"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="https://voice-shell.onrender.com"
+            android:hint="@string/hint_server"
             android:inputType="textUri"
             android:autofillHints="url"
             android:importantForAutofill="no" />
@@ -53,7 +53,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="токен доступа"
+            android:text="@string/label_token"
             android:textSize="12sp"
             android:layout_marginTop="12dp" />
 
@@ -61,14 +61,14 @@
             android:id="@+id/token"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="VOICE_TOKEN"
+            android:hint="@string/hint_token"
             android:inputType="textNoSuggestions"
             android:importantForAutofill="no" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="язык реплик — дальше меняется голосом"
+            android:text="@string/label_language"
             android:textSize="12sp"
             android:layout_marginTop="12dp" />
 
@@ -82,21 +82,21 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
-            android:text="запустить" />
+            android:text="@string/action_start" />
 
         <Button
             android:id="@+id/stop"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="остановить" />
+            android:text="@string/action_stop" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
             android:textSize="12sp"
-            android:text="движок синтеза — RHVoice звучит живее системного" />
+            android:text="@string/label_engine" />
 
         <Spinner
             android:id="@+id/engine"
@@ -107,26 +107,26 @@
             android:id="@+id/engineList"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="показать движки" />
+            android:text="@string/action_engines_show" />
 
         <Button
             android:id="@+id/engineUse"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="использовать выбранный" />
+            android:text="@string/action_engine_use" />
 
         <Button
             android:id="@+id/engineInstall"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="установить RHVoice" />
+            android:text="@string/action_engine_install" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
             android:textSize="12sp"
-            android:text="голос синтеза" />
+            android:text="@string/label_voice" />
 
         <Spinner
             android:id="@+id/voice"
@@ -137,26 +137,26 @@
             android:id="@+id/voiceList"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="показать голоса" />
+            android:text="@string/action_voices_show" />
 
         <Button
             android:id="@+id/voiceTry"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="прослушать и выбрать" />
+            android:text="@string/action_voice_try" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
             android:textSize="12sp"
-            android:text="сказать текстом — когда говорить нельзя" />
+            android:text="@string/label_say" />
 
         <EditText
             android:id="@+id/say"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="скажи привет"
+            android:hint="@string/hint_say"
             android:inputType="textCapSentences"
             android:importantForAutofill="no" />
 
@@ -164,55 +164,55 @@
             android:id="@+id/saySend"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="отправить" />
+            android:text="@string/action_send" />
 
         <Button
             android:id="@+id/mute"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="озвучка: вкл" />
+            android:text="@string/speech_on" />
 
         <Button
             android:id="@+id/stress"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="ударения: авто" />
+            android:text="@string/stress_auto" />
 
         <Button
             android:id="@+id/btmic"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="микрофон: гарнитура" />
+            android:text="@string/mic_headset" />
 
         <Button
             android:id="@+id/acoustics"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="признаки говорящего: вкл" />
+            android:text="@string/acoustics_on" />
 
         <Button
             android:id="@+id/battery"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="разрешить работу в фоне" />
+            android:text="@string/action_background" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
             android:textSize="12sp"
-            android:text="подписка Claude на сервере" />
+            android:text="@string/label_auth" />
 
         <EditText
             android:id="@+id/authToken"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="sk-ant-oat01-… если токен уже есть"
+            android:hint="@string/hint_auth_token"
             android:inputType="textNoSuggestions"
             android:importantForAutofill="no" />
 
@@ -220,34 +220,34 @@
             android:id="@+id/authSave"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="сохранить токен Claude" />
+            android:text="@string/action_auth_save" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:textSize="12sp"
-            android:text="или пройти авторизацию заново:" />
+            android:text="@string/label_auth_again" />
 
         <Button
             android:id="@+id/authStart"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="подключить подписку" />
+            android:text="@string/action_auth_start" />
 
         <Button
             android:id="@+id/authOpen"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:enabled="false"
-            android:text="открыть авторизацию" />
+            android:text="@string/action_auth_open" />
 
         <EditText
             android:id="@+id/authCode"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:visibility="gone"
-            android:hint="вставь код со страницы"
+            android:hint="@string/hint_auth_code"
             android:inputType="textNoSuggestions"
             android:importantForAutofill="no" />
 
@@ -256,14 +256,14 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:visibility="gone"
-            android:text="готово" />
+            android:text="@string/action_auth_done" />
 
         <Button
             android:id="@+id/copyError"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="скопировать последнюю ошибку" />
+            android:text="@string/action_copy_error" />
 
         <TextView
             android:id="@+id/status"
@@ -271,7 +271,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
             android:textSize="14sp"
-            android:text="не запущено" />
+            android:text="@string/status_idle" />
 
         <TextView
             android:id="@+id/log"
@@ -288,6 +288,6 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
             android:textSize="13sp"
-            android:text="Язык меняется голосом: «Клод, английский», «Клод, иврит», «Клод, русский». Ответ произносится на том языке, на котором пришёл. Обращение «Клод» слышит сама трубка, без интернета. Дальше реплика распознаётся на выбранном языке — русский, английский или иврит. Скажи «Клод…» — распознавание обращения идёт на телефоне, наружу уходит только текст принятой реплики. Кнопка на наушниках разрешает сказать реплику без обращения. «Стоп» гасит голос, «останови работу» прерывает работу." />
+            android:text="@string/help_text" />
     </LinearLayout>
 </ScrollView>

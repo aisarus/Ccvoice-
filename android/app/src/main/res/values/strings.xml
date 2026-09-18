@@ -1,3 +1,214 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Английский — базовый язык. Русский, испанский и китайский лежат рядом,
+  в values-ru, values-es и values-zh; ключи и число подстановок сверяет
+  StringsTest на JVM.
+
+  Строки, которые слышит человек, — здесь. То, что человек не видит (ключи
+  настроек, имена действий Intent, теги логов, пакеты движков) и то, что
+  слышит распознаватель (слова обращения и остановки), остаётся в коде:
+  перевод сломал бы не интерфейс, а логику.
+-->
 <resources>
-    <string name="app_name">Voice Shell</string>
+
+    <!-- Имя приложения и служебные склейки: переводить нечего. -->
+    <string name="app_name" translatable="false">Voice Shell</string>
+    <string name="notification_title" translatable="false">Voice Shell · %1$s</string>
+    <string name="readiness_line" translatable="false">%1$s %2$s — %3$s</string>
+    <string name="link_hint_detail" translatable="false">%1$s (%2$s)</string>
+    <string name="hint_server" translatable="false">https://voice-shell.onrender.com</string>
+    <string name="hint_token" translatable="false">VOICE_TOKEN</string>
+
+    <!--
+      Языки реплик названы на самих себе: так их узнаёт тот, кто на них
+      говорит, независимо от языка интерфейса. Порядок совпадает с кодами
+      в MainActivity.
+    -->
+    <string-array name="reply_language_names" translatable="false">
+        <item>русский</item>
+        <item>English</item>
+        <item>עברית</item>
+    </string-array>
+
+    <!-- Главный экран: подписи полей и кнопок. -->
+    <string name="readiness_checking">checking readiness…</string>
+    <string name="label_server">service address</string>
+    <string name="label_token">access token</string>
+    <string name="label_language">speech language — you can switch it by voice later</string>
+    <string name="action_start">start</string>
+    <string name="action_stop">stop</string>
+    <string name="label_engine">speech engine — RHVoice sounds more alive than the system one</string>
+    <string name="action_engines_show">show engines</string>
+    <string name="action_engine_use">use selected</string>
+    <string name="action_engine_install">install RHVoice</string>
+    <string name="label_voice">voice</string>
+    <string name="action_voices_show">show voices</string>
+    <string name="action_voice_try">listen and pick</string>
+    <string name="label_say">type it instead — for when you cannot speak</string>
+    <string name="hint_say">say hello</string>
+    <string name="action_send">send</string>
+    <string name="action_background">allow background work</string>
+    <string name="label_auth">Claude subscription on the server</string>
+    <string name="hint_auth_token">sk-ant-oat01-… if you already have a token</string>
+    <string name="action_auth_save">save the Claude token</string>
+    <string name="label_auth_again">or sign in again:</string>
+    <string name="action_auth_start">connect the subscription</string>
+    <string name="action_auth_open">open the sign-in page</string>
+    <string name="hint_auth_code">paste the code from the page</string>
+    <string name="action_auth_done">done</string>
+    <string name="action_copy_error">copy the last error</string>
+    <string name="status_idle">not running</string>
+    <string name="help_text">Switch languages by voice: “Claude, English”, “Claude, Hebrew”, “Claude, Russian”. An answer is spoken in the language it arrived in. The wake word “Claude” is heard by the phone itself, with no internet. After that your words are recognised in the chosen language — Russian, English or Hebrew. Say “Claude…” and only the text of what you said leaves the phone. The headset button lets you speak without the wake word. “Stop” silences the voice, “stop working” interrupts the work.</string>
+
+    <!-- Переключатели: подпись кнопки и есть её состояние. -->
+    <string name="speech_on">speech: on</string>
+    <string name="speech_off">speech: off</string>
+    <string name="stress_auto">stress marks: auto</string>
+    <string name="stress_plus">stress marks: plus</string>
+    <string name="stress_acute">stress marks: accent</string>
+    <string name="stress_off">stress marks: off</string>
+    <string name="mic_headset">mic: headset</string>
+    <string name="mic_phone">mic: phone</string>
+    <string name="acoustics_on">speaker cues: on</string>
+    <string name="acoustics_off">speaker cues: off</string>
+
+    <!-- Что экран отвечает на нажатия. -->
+    <string name="engines_none">no engines found</string>
+    <string name="voices_none">no voices found</string>
+    <string name="error_need_server_and_token">the service address and the token are both needed</string>
+    <string name="sent_text">sent: %1$s</string>
+    <string name="engine_selected">engine: %1$s</string>
+    <string name="voice_selected">voice: %1$s</string>
+    <string name="error_paste_token">paste the token that starts with sk-ant-</string>
+    <string name="auth_token_sent">token sent to the server</string>
+    <string name="auth_requesting_link">requesting the link…</string>
+    <string name="error_copied">error copied</string>
+    <string name="service_stopped">the service is stopped</string>
+    <string name="error_no_microphone">without a microphone I cannot work</string>
+    <string name="engines_listed_below">the engines are below — pick one and tap “use selected”</string>
+    <string name="link_retrying">trying to connect again</string>
+    <string name="background_already_allowed">background work is already allowed</string>
+    <string name="service_starting">the service is starting…</string>
+    <string name="last_error">previous run: %1$s</string>
+
+    <!-- Проверка готовности: пять строк вместо гадания. -->
+    <string name="readiness_all_ready">all set</string>
+    <string name="readiness_with_warnings">ready, with a couple of notes</string>
+    <string name="readiness_not_ready">not ready: %1$s</string>
+    <string name="readiness_mic">microphone</string>
+    <string name="readiness_mic_ok">granted</string>
+    <string name="readiness_mic_bad">without it the service is not allowed to start</string>
+    <string name="readiness_fix_grant">grant</string>
+    <string name="readiness_notifications">notifications</string>
+    <string name="readiness_notifications_ok">on</string>
+    <string name="readiness_notifications_bad">without them Android will not keep a background service alive</string>
+    <string name="readiness_fix_enable">turn on</string>
+    <string name="readiness_background">background work</string>
+    <string name="readiness_background_ok">allowed</string>
+    <string name="readiness_background_bad">otherwise the system puts the service to sleep a few minutes after the screen goes off</string>
+    <string name="readiness_fix_allow">allow</string>
+    <string name="readiness_tts">speech synthesis</string>
+    <string name="readiness_tts_none">no engines on this phone — nothing to speak the answer with</string>
+    <string name="readiness_fix_install">install</string>
+    <string name="readiness_tts_default">no engine picked — the system robot speaks</string>
+    <string name="readiness_fix_pick">pick</string>
+    <string name="readiness_tts_gone">the chosen engine is gone from the system</string>
+    <string name="readiness_tts_ok">picked</string>
+    <string name="readiness_link">link to the server</string>
+    <string name="readiness_link_online">the daemon answers</string>
+    <string name="readiness_link_connecting">connecting…</string>
+    <string name="readiness_link_unknown">the service is not running</string>
+    <string name="readiness_fix_start">start</string>
+    <string name="readiness_link_off">no address or token</string>
+    <string name="readiness_link_no_network">the phone is offline</string>
+    <string name="readiness_fix_network">network</string>
+    <string name="readiness_link_no_server">the server does not answer — check the address and that the daemon is running</string>
+    <string name="readiness_fix_retry">retry</string>
+    <string name="readiness_link_refused">the server refused — most likely the wrong token</string>
+    <string name="readiness_link_cleartext">http is blocked by the system — https is required</string>
+
+    <!-- Состояние связи: строка идёт и на экран, и в уведомление. -->
+    <string name="link_unknown">link: the service is not running</string>
+    <string name="link_off">link: not configured</string>
+    <string name="link_connecting">link: connecting</string>
+    <string name="link_online">link: up</string>
+    <string name="link_no_network">link: no network</string>
+    <string name="link_no_server">link: the server is silent</string>
+    <string name="link_refused">link: the server refused</string>
+    <string name="link_cleartext">link: http is blocked by the system</string>
+
+    <!-- Обрыв: что случилось и что с этим делать. -->
+    <string name="link_hint_off">not configured: enter the service address and the token</string>
+    <string name="link_hint_unknown">the service is not running</string>
+    <string name="link_hint_connecting">connecting to the server…</string>
+    <string name="link_hint_online">connected</string>
+    <string name="link_hint_no_network">no network: the phone is offline — waiting for it to come back</string>
+    <string name="link_hint_no_server">the server does not answer: check the address, the port and that the daemon is running</string>
+    <string name="link_hint_refused">the server refused (HTTP %1$d): check the token and the address</string>
+    <string name="link_hint_cleartext">http is blocked by the system: use https, or ws on a trusted address</string>
+    <string name="link_retry_in">%1$s · retrying in %2$d s</string>
+    <string name="link_connecting_to">connecting to %1$s</string>
+
+    <!-- Фаза: одно слово, которое видно с экрана блокировки. -->
+    <string name="state_starting">starting</string>
+    <string name="state_waiting_for_wake">waiting to be called</string>
+    <string name="state_listening">listening</string>
+    <string name="state_speaking">speaking</string>
+    <string name="state_sent">sent</string>
+    <string name="action_speak">Speak</string>
+    <string name="action_stop_short">Stop</string>
+
+    <!-- Что говорит служба. -->
+    <string name="error_mic_permission">no microphone permission — grant it and start again</string>
+    <string name="error_service_start">the service could not start: %1$s</string>
+    <string name="error_startup">error while starting: %1$s</string>
+    <string name="acoustics_measuring">measuring how loud you speak and sending the cues</string>
+    <string name="acoustics_hint_only">cues are off — the role goes as a hint</string>
+    <string name="engines_found">speech engines: %1$d</string>
+    <string name="engine_set">speech engine: %1$s</string>
+    <string name="engine_system">system</string>
+    <string name="voices_found">voices available: %1$d</string>
+    <string name="auth_checking_token">checking the Claude token…</string>
+    <string name="auth_requesting_url">requesting the sign-in link…</string>
+    <string name="auth_checking_code">checking the code…</string>
+    <string name="wake_error">wake word recognition: %1$s</string>
+    <string name="state_listening_for_wake">listening — say “Claude…”</string>
+    <string name="wake_unavailable">wake word is unavailable (%1$s) — start speaking with the button</string>
+    <string name="wake_stopped">wake word stopped: %1$s</string>
+    <string name="wake_downloading_model">downloading the recognition model, ~45 MB</string>
+    <string name="stopping_work">stopping the work</string>
+    <string name="going_quiet">quiet</string>
+    <string name="language_set">language: %1$s</string>
+    <string name="heard_locally">heard on the phone: %1$s</string>
+    <string name="sent_to">→ %1$s</string>
+    <string name="calibrating_mic">calibrating the microphone level on your first words</string>
+    <string name="recognizer_silent">the recognizer did not answer — listening again</string>
+    <string name="tts_silent">the engine did not report back — listening again</string>
+    <string name="listener_restarted">the listener had stalled — restarted it</string>
+    <string name="recognition_unavailable">recognition is unavailable: %1$s</string>
+    <string name="recognition_error">speech recognition: error %1$d</string>
+    <string name="listening_for_reply">listening…</string>
+    <string name="listening_go_ahead">listening — go ahead</string>
+    <string name="tts_failed">speech synthesis did not start (code %1$d)</string>
+    <string name="ready_credential">ready · %1$s</string>
+    <string name="auth_open_link">open the link, sign in to Claude and paste the code</string>
+    <string name="auth_link_received">sign-in link received</string>
+    <string name="auth_saved">the subscription is connected and saved on the server</string>
+    <string name="auth_not_saved">the subscription is connected but was not saved — put the token into the service file</string>
+    <string name="auth_connected">subscription connected</string>
+    <string name="auth_connected_unsaved">subscription connected (not saved)</string>
+    <string name="auth_failed">sign-in failed: %1$s</string>
+    <string name="error_bad_token">the token was rejected — paste only the value, without VOICE_TOKEN=</string>
+    <string name="error_from_server">error: %1$s</string>
+    <string name="role_gate">the daemon did not accept what you said: %1$s</string>
+    <string name="role_gate_off">it took me for someone else twice — speaker cues turned off</string>
+    <string name="not_sent">nothing went out — %1$s</string>
+
+    <!-- Куда смотрит микрофон. -->
+    <string name="mic_headset_bluetooth">mic: headset (bluetooth)</string>
+    <string name="mic_phone_bluetooth_off">mic: phone (the bluetooth mic is off)</string>
+    <string name="mic_phone_no_channel">mic: phone — the headset channel did not come up</string>
+    <string name="mic_switch_failed">could not switch to the headset mic — listening with the phone</string>
+    <string name="mic_sco_unavailable">the system will not give the headset mic outside a call — listening with the phone</string>
+    <string name="mic_channel_failed">the headset channel did not open: %1$s</string>
 </resources>

@@ -1,21 +1,24 @@
 package com.voiceshell
 
+import android.content.Context
+
 /**
  * Что со связью прямо сейчас.
  *
  * Отдельным состоянием, а не строкой в журнале: одну и ту же строку «нет связи»
  * человек видел и когда телефон выпал из сети, и когда сервер отказал по
- * токену, и чинил не то. Строка идёт и на экран, и в уведомление.
+ * токену, и чинил не то. Строка идёт и на экран, и в уведомление, поэтому у
+ * состояния лежит не текст, а ключ ресурса: слова выбирает система по локали.
  */
-enum class LinkState(val label: String) {
-    UNKNOWN("связь: служба не запущена"),
-    OFF("связь: не настроена"),
-    CONNECTING("связь: подключаюсь"),
-    ONLINE("связь: есть"),
-    NO_NETWORK("связь: нет сети"),
-    NO_SERVER("связь: сервер не отвечает"),
-    REFUSED("связь: сервер отказал"),
-    CLEARTEXT("связь: http запрещён системой"),
+enum class LinkState(val label: Int) {
+    UNKNOWN(R.string.link_unknown),
+    OFF(R.string.link_off),
+    CONNECTING(R.string.link_connecting),
+    ONLINE(R.string.link_online),
+    NO_NETWORK(R.string.link_no_network),
+    NO_SERVER(R.string.link_no_server),
+    REFUSED(R.string.link_refused),
+    CLEARTEXT(R.string.link_cleartext),
 }
 
 /**
@@ -44,19 +47,32 @@ object Link {
         return LinkState.NO_SERVER
     }
 
-    /** Строка человеку: что именно случилось и что с этим делать. */
-    fun hint(state: LinkState, message: String?, httpCode: Int): String = when (state) {
-        LinkState.OFF -> "не настроено: укажи адрес сервиса и токен"
-        LinkState.UNKNOWN -> "служба не запущена"
-        LinkState.CONNECTING -> "подключаюсь к серверу…"
-        LinkState.ONLINE -> "подключено"
-        LinkState.NO_NETWORK -> "нет сети: телефон не в интернете — жду сеть"
-        LinkState.NO_SERVER ->
-            "сервер не отвечает: проверь адрес, порт и что демон запущен" +
-                message.orEmpty().takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
-        LinkState.REFUSED -> "сервер отказал (HTTP $httpCode): проверь токен и адрес"
-        LinkState.CLEARTEXT -> "http запрещён системой: нужен https или ws на доверенном адресе"
+    /** Ключ подсказки: у каждой причины своя, общей «ошибки связи» здесь нет. */
+    fun hintText(state: LinkState): Int = when (state) {
+        LinkState.OFF -> R.string.link_hint_off
+        LinkState.UNKNOWN -> R.string.link_hint_unknown
+        LinkState.CONNECTING -> R.string.link_hint_connecting
+        LinkState.ONLINE -> R.string.link_hint_online
+        LinkState.NO_NETWORK -> R.string.link_hint_no_network
+        LinkState.NO_SERVER -> R.string.link_hint_no_server
+        LinkState.REFUSED -> R.string.link_hint_refused
+        LinkState.CLEARTEXT -> R.string.link_hint_cleartext
     }
+
+    /** Строка человеку: что именно случилось и что с этим делать. */
+    fun hint(context: Context, state: LinkState, message: String?, httpCode: Int): String =
+        when (state) {
+            // Текст ошибки от okhttp — единственное, что отличает один мёртвый
+            // адрес от другого, поэтому он идёт в скобках как есть.
+            LinkState.NO_SERVER -> {
+                val base = context.getString(hintText(state))
+                message?.takeIf { it.isNotBlank() }
+                    ?.let { context.getString(R.string.link_hint_detail, base, it) }
+                    ?: base
+            }
+            LinkState.REFUSED -> context.getString(hintText(state), httpCode)
+            else -> context.getString(hintText(state))
+        }
 
     /**
      * Через сколько пробовать снова.

@@ -54,43 +54,45 @@ class AudioRoute(
     val onBluetoothMic: Boolean get() = engaged
 
     /** Человеческая строка для журнала: на телефоне это единственная диагностика. */
-    fun describe(): String = when {
-        engaged -> "микрофон: гарнитура (bluetooth)"
-        !wanted -> "микрофон: телефон (bluetooth-микрофон выключен)"
-        bluetoothMicPresent() -> "микрофон: телефон — канал гарнитуры не поднялся"
-        else -> "микрофон: телефон"
-    }
+    fun describe(): String = context.getString(
+        when {
+            engaged -> R.string.mic_headset_bluetooth
+            !wanted -> R.string.mic_phone_bluetooth_off
+            bluetoothMicPresent() -> R.string.mic_phone_no_channel
+            else -> R.string.mic_phone
+        }
+    )
 
     fun start(enabled: Boolean) {
         wanted = enabled
         watch()
-        engage("запуск")
+        engage("start")
     }
 
     /** Переключатель в приложении: гарнитура может вести себя плохо. */
     fun enable(enabled: Boolean) {
         if (wanted == enabled) return
         wanted = enabled
-        if (enabled) engage("включили микрофон гарнитуры")
-        else disengage("выключили микрофон гарнитуры")
+        if (enabled) engage("headset mic enabled")
+        else disengage("headset mic disabled")
     }
 
     fun release() {
         wanted = false
         unwatch()
         main.removeCallbacksAndMessages(null)
-        disengage("остановка", notify = false)
+        disengage("stop", notify = false)
     }
 
     // ---------- слежение за устройствами ----------
     private val deviceCallback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>?) {
-            main.post { engage("гарнитура подключилась") }
+            main.post { engage("headset connected") }
         }
 
         override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>?) {
             main.post {
-                if (engaged && !bluetoothMicPresent()) disengage("гарнитуру отключили")
+                if (engaged && !bluetoothMicPresent()) disengage("headset disconnected")
             }
         }
     }
@@ -99,13 +101,13 @@ class AudioRoute(
     private val scoReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1)) {
-                AudioManager.SCO_AUDIO_STATE_CONNECTED -> ready("канал гарнитуры поднялся")
+                AudioManager.SCO_AUDIO_STATE_CONNECTED -> ready("headset channel up")
                 AudioManager.SCO_AUDIO_STATE_DISCONNECTED -> if (engaged) {
                     engaged = false
                     log(describe())
-                    onChanged("канал гарнитуры отвалился")
+                    onChanged("headset channel dropped")
                     // Система роняет канал и сама по себе — пробуем ещё раз.
-                    main.postDelayed({ engage("переподключение") }, RETRY_MS)
+                    main.postDelayed({ engage("reconnect") }, RETRY_MS)
                 }
             }
         }
@@ -150,13 +152,13 @@ class AudioRoute(
                 main.postDelayed({ ready(why) }, SETTLE_MS)
             } else {
                 restoreMode()
-                log("не вышло переключиться на микрофон гарнитуры — слушаю телефоном")
+                log(context.getString(R.string.mic_switch_failed))
             }
             return
         }
 
         if (!audio.isBluetoothScoAvailableOffCall) {
-            log("система не отдаёт микрофон гарнитуры вне звонка — слушаю телефоном")
+            log(context.getString(R.string.mic_sco_unavailable))
             return
         }
         runCatching {
@@ -165,7 +167,7 @@ class AudioRoute(
             audio.isBluetoothScoOn = true
         }.onFailure {
             restoreMode()
-            log("канал гарнитуры не открылся: ${it.javaClass.simpleName}")
+            log(context.getString(R.string.mic_channel_failed, it.javaClass.simpleName))
         }
         // Дальше ждём SCO_AUDIO_STATE_CONNECTED: раньше слушать нечего.
     }

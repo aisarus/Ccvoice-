@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Китайский упрощённый. Голосовые команды («Claude», «stop», «stop working»)
+  оставлены как есть: их слышит распознаватель, а он знает только русские и
+  английские слова.
+-->
+<resources>
+
+    <!-- Главный экран: подписи полей и кнопок. -->
+    <string name="readiness_checking">正在检查是否就绪…</string>
+    <string name="label_server">服务地址</string>
+    <string name="label_token">访问令牌</string>
+    <string name="label_language">说话语言，之后可以用语音切换</string>
+    <string name="action_start">启动</string>
+    <string name="action_stop">停止</string>
+    <string name="label_engine">语音引擎，RHVoice 比系统自带的更自然</string>
+    <string name="action_engines_show">查看引擎</string>
+    <string name="action_engine_use">使用所选</string>
+    <string name="action_engine_install">安装 RHVoice</string>
+    <string name="label_voice">朗读声音</string>
+    <string name="action_voices_show">查看声音</string>
+    <string name="action_voice_try">试听并选用</string>
+    <string name="label_say">打字代替说话，不方便出声时用</string>
+    <string name="hint_say">说句你好</string>
+    <string name="action_send">发送</string>
+    <string name="action_background">允许后台运行</string>
+    <string name="label_auth">服务器上的 Claude 订阅</string>
+    <string name="hint_auth_token">sk-ant-oat01-… 已有令牌就直接粘贴</string>
+    <string name="action_auth_save">保存 Claude 令牌</string>
+    <string name="label_auth_again">或者重新登录授权：</string>
+    <string name="action_auth_start">连接订阅</string>
+    <string name="action_auth_open">打开授权页面</string>
+    <string name="hint_auth_code">粘贴页面上的代码</string>
+    <string name="action_auth_done">完成</string>
+    <string name="action_copy_error">复制最后一条错误</string>
+    <string name="status_idle">未启动</string>
+    <string name="help_text">用语音切换语言：“Claude, English”“Claude, Hebrew”“Claude, Russian”，口令只认英语和俄语。答复用它到来时的语言朗读。唤醒词“Claude”由手机本地识别，不联网。之后你说的话按所选语言识别：俄语、英语或希伯来语。说一声“Claude…”，离开手机的只有识别出来的文字。耳机上的按键可以不说唤醒词直接讲话。“stop”让它闭嘴，“stop working”中断正在做的事。</string>
+
+    <!-- Переключатели: подпись кнопки и есть её состояние. -->
+    <string name="speech_on">朗读：开</string>
+    <string name="speech_off">朗读：关</string>
+    <string name="stress_auto">重音标记：自动</string>
+    <string name="stress_plus">重音标记：加号</string>
+    <string name="stress_acute">重音标记：符号</string>
+    <string name="stress_off">重音标记：关</string>
+    <string name="mic_headset">麦克风：耳机</string>
+    <string name="mic_phone">麦克风：手机</string>
+    <string name="acoustics_on">说话人特征：开</string>
+    <string name="acoustics_off">说话人特征：关</string>
+
+    <!-- Что экран отвечает на нажатия. -->
+    <string name="engines_none">没找到引擎</string>
+    <string name="voices_none">没找到声音</string>
+    <string name="error_need_server_and_token">需要填写服务地址和令牌</string>
+    <string name="sent_text">已发送：%1$s</string>
+    <string name="engine_selected">引擎：%1$s</string>
+    <string name="voice_selected">声音：%1$s</string>
+    <string name="error_paste_token">请粘贴以 sk-ant- 开头的令牌</string>
+    <string name="auth_token_sent">令牌已发给服务器</string>
+    <string name="auth_requesting_link">正在请求链接…</string>
+    <string name="error_copied">错误已复制</string>
+    <string name="service_stopped">服务已停止</string>
+    <string name="error_no_microphone">没有麦克风就没法工作</string>
+    <string name="engines_listed_below">引擎在下面，选一个再点“使用所选”</string>
+    <string name="link_retrying">正在重新连接</string>
+    <string name="background_already_allowed">后台运行早就允许了</string>
+    <string name="service_starting">服务正在启动…</string>
+    <string name="last_error">上次运行：%1$s</string>
+
+    <!-- Проверка готовности: пять строк вместо гадания. -->
+    <string name="readiness_all_ready">一切就绪</string>
+    <string name="readiness_with_warnings">能用，但有几点要注意</string>
+    <string name="readiness_not_ready">还不能用：%1$s</string>
+    <string name="readiness_mic">麦克风</string>
+    <string name="readiness_mic_ok">已授权</string>
+    <string name="readiness_mic_bad">没有它，服务根本无权启动</string>
+    <string name="readiness_fix_grant">授权</string>
+    <string name="readiness_notifications">通知</string>
+    <string name="readiness_notifications_ok">已开启</string>
+    <string name="readiness_notifications_bad">没有通知，Android 不让后台服务活着</string>
+    <string name="readiness_fix_enable">开启</string>
+    <string name="readiness_background">后台运行</string>
+    <string name="readiness_background_ok">已允许</string>
+    <string name="readiness_background_bad">否则息屏几分钟后系统就会让服务休眠</string>
+    <string name="readiness_fix_allow">允许</string>
+    <string name="readiness_tts">语音合成</string>
+    <string name="readiness_tts_none">系统里没有引擎，答复没法朗读</string>
+    <string name="readiness_fix_install">安装</string>
+    <string name="readiness_tts_default">没选引擎，由系统机器音朗读</string>
+    <string name="readiness_fix_pick">选择</string>
+    <string name="readiness_tts_gone">所选引擎已从系统里消失</string>
+    <string name="readiness_tts_ok">已选择</string>
+    <string name="readiness_link">与服务器的连接</string>
+    <string name="readiness_link_online">守护进程有响应</string>
+    <string name="readiness_link_connecting">正在连接…</string>
+    <string name="readiness_link_unknown">服务没有运行</string>
+    <string name="readiness_fix_start">启动</string>
+    <string name="readiness_link_off">还没填地址或令牌</string>
+    <string name="readiness_link_no_network">手机没有联网</string>
+    <string name="readiness_fix_network">网络</string>
+    <string name="readiness_link_no_server">服务器没有响应，检查地址，并确认守护进程在运行</string>
+    <string name="readiness_fix_retry">重试</string>
+    <string name="readiness_link_refused">服务器拒绝了，多半是令牌不对</string>
+    <string name="readiness_link_cleartext">系统禁止 http，需要 https</string>
+
+    <!-- Состояние связи: строка идёт и на экран, и в уведомление. -->
+    <string name="link_unknown">连接：服务没有运行</string>
+    <string name="link_off">连接：未配置</string>
+    <string name="link_connecting">连接：正在连接</string>
+    <string name="link_online">连接：正常</string>
+    <string name="link_no_network">连接：没有网络</string>
+    <string name="link_no_server">连接：服务器没有响应</string>
+    <string name="link_refused">连接：服务器拒绝</string>
+    <string name="link_cleartext">连接：系统禁止 http</string>
+
+    <!-- Обрыв: что случилось и что с этим делать. -->
+    <string name="link_hint_off">未配置：填上服务地址和令牌</string>
+    <string name="link_hint_unknown">服务没有运行</string>
+    <string name="link_hint_connecting">正在连接服务器…</string>
+    <string name="link_hint_online">已连接</string>
+    <string name="link_hint_no_network">没有网络：手机不在线，等它回来</string>
+    <string name="link_hint_no_server">服务器没有响应：检查地址、端口，并确认守护进程在运行</string>
+    <string name="link_hint_refused">服务器拒绝了（HTTP %1$d）：检查令牌和地址</string>
+    <string name="link_hint_cleartext">系统禁止 http：需要 https，或者可信地址上的 ws</string>
+    <string name="link_retry_in">%1$s · %2$d 秒后重试</string>
+    <string name="link_connecting_to">正在连接 %1$s</string>
+
+    <!-- Фаза: одно слово, которое видно с экрана блокировки. -->
+    <string name="state_starting">启动中</string>
+    <string name="state_waiting_for_wake">等待唤醒</string>
+    <string name="state_listening">聆听中</string>
+    <string name="state_speaking">说话中</string>
+    <string name="state_sent">已发送</string>
+    <string name="action_speak">说话</string>
+    <string name="action_stop_short">停止</string>
+
+    <!-- Что говорит служба. -->
+    <string name="error_mic_permission">没有麦克风权限，授权后重新启动</string>
+    <string name="error_service_start">服务未能启动：%1$s</string>
+    <string name="error_startup">启动时出错：%1$s</string>
+    <string name="acoustics_measuring">正在测量你的音量并上报特征</string>
+    <string name="acoustics_hint_only">特征已关闭，角色只作为提示发出去</string>
+    <string name="engines_found">语音引擎：%1$d 个</string>
+    <string name="engine_set">语音引擎：%1$s</string>
+    <string name="engine_system">系统自带</string>
+    <string name="voices_found">可用声音：%1$d 个</string>
+    <string name="auth_checking_token">正在校验 Claude 令牌…</string>
+    <string name="auth_requesting_url">正在请求授权链接…</string>
+    <string name="auth_checking_code">正在校验代码…</string>
+    <string name="wake_error">唤醒词识别：%1$s</string>
+    <string name="state_listening_for_wake">在听着呢，说一声“Claude…”</string>
+    <string name="wake_unavailable">唤醒词用不了（%1$s），用按钮开始说话</string>
+    <string name="wake_stopped">唤醒词监听停了：%1$s</string>
+    <string name="wake_downloading_model">正在下载识别模型，约 45 MB</string>
+    <string name="stopping_work">正在停下手里的事</string>
+    <string name="going_quiet">安静了</string>
+    <string name="language_set">语言：%1$s</string>
+    <string name="heard_locally">手机本地听到：%1$s</string>
+    <string name="sent_to">→ %1$s</string>
+    <string name="calibrating_mic">正在用你的第一句话校准麦克风音量</string>
+    <string name="recognizer_silent">识别器没有回应，重新开始听</string>
+    <string name="tts_silent">合成没有回报，重新开始听</string>
+    <string name="listener_restarted">监听停住了，已经重启</string>
+    <string name="recognition_unavailable">识别用不了：%1$s</string>
+    <string name="recognition_error">语音识别出错：%1$d</string>
+    <string name="listening_for_reply">在听你说…</string>
+    <string name="listening_go_ahead">在听着呢，请说</string>
+    <string name="tts_failed">语音合成没能启动（代码 %1$d）</string>
+    <string name="ready_credential">就绪 · %1$s</string>
+    <string name="auth_open_link">打开链接，登录 Claude，再把代码粘回来</string>
+    <string name="auth_link_received">已拿到授权链接</string>
+    <string name="auth_saved">订阅已连接，并保存在服务器上</string>
+    <string name="auth_not_saved">订阅已连接，但没保存下来，请把令牌写进服务的配置文件</string>
+    <string name="auth_connected">订阅已连接</string>
+    <string name="auth_connected_unsaved">订阅已连接（未保存）</string>
+    <string name="auth_failed">授权没成功：%1$s</string>
+    <string name="error_bad_token">令牌不对，只粘贴值本身，不要带 VOICE_TOKEN=</string>
+    <string name="error_from_server">出错：%1$s</string>
+    <string name="role_gate">守护进程没有接受这句话：%1$s</string>
+    <string name="role_gate_off">两次把我当成别人，已关闭说话人特征</string>
+    <string name="not_sent">话没发出去，%1$s</string>
+
+    <!-- Куда смотрит микрофон. -->
+    <string name="mic_headset_bluetooth">麦克风：耳机（蓝牙）</string>
+    <string name="mic_phone_bluetooth_off">麦克风：手机（蓝牙麦克风已关闭）</string>
+    <string name="mic_phone_no_channel">麦克风：手机，耳机通道没能建立</string>
+    <string name="mic_switch_failed">切不到耳机麦克风，改用手机听</string>
+    <string name="mic_sco_unavailable">通话之外系统不放开耳机麦克风，改用手机听</string>
+    <string name="mic_channel_failed">耳机通道没能打开：%1$s</string>
+</resources>

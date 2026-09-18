@@ -28,7 +28,7 @@ class ReadinessTest {
 
     @Test
     fun everythingInPlaceReadsAsReady() {
-        assertEquals("всё готово", Readiness.summary(checks()))
+        assertEquals(Ready.OK, Readiness.verdict(checks()))
     }
 
     @Test
@@ -44,14 +44,14 @@ class ReadinessTest {
         // приложение молчит без единого слова о том, почему.
         val check = byId(Readiness.LINK, checks(link = LinkState.UNKNOWN))
         assertEquals(Ready.WARN, check.state)
-        assertEquals("запустить", check.fix)
+        assertEquals(R.string.readiness_fix_start, check.fix)
     }
 
     @Test
     fun batteryOptimisationIsFatalBecauseThePhoneLivesInAPocket() {
         val check = byId(Readiness.BACKGROUND, checks(background = false))
         assertEquals(Ready.BAD, check.state)
-        assertTrue(check.detail.contains("усыпит"))
+        assertEquals(R.string.readiness_background_bad, check.detail)
     }
 
     @Test
@@ -66,7 +66,7 @@ class ReadinessTest {
         // что телефон переставал говорить.
         val check = byId(Readiness.VOICE, checks(engine = "com.gone.tts"))
         assertEquals(Ready.BAD, check.state)
-        assertEquals("выбрать", check.fix)
+        assertEquals(R.string.readiness_fix_pick, check.fix)
     }
 
     @Test
@@ -87,20 +87,27 @@ class ReadinessTest {
 
     @Test
     fun theSummaryNamesWhatIsBroken() {
-        val summary = Readiness.summary(checks(mic = false, notifications = false))
-        assertTrue(summary, summary.contains("микрофон"))
-        assertTrue(summary, summary.contains("уведомления"))
+        // Итог собирает экран, здесь важно другое: сломанное названо поимённо,
+        // а не свалено в одну строку «что-то не так».
+        val broken = checks(mic = false, notifications = false)
+            .filter { it.state == Ready.BAD }
+            .map { it.title }
+        assertTrue("$broken", R.string.readiness_mic in broken)
+        assertTrue("$broken", R.string.readiness_notifications in broken)
     }
 
     @Test
     fun aWarningDoesNotPretendEverythingIsFine() {
-        assertEquals("готово, но есть замечания", Readiness.summary(checks(engine = "")))
+        assertEquals(Ready.WARN, Readiness.verdict(checks(engine = "")))
     }
 
     @Test
     fun everyLineSaysBothWhatAndHowBad() {
-        val line = Readiness.line(byId(Readiness.MIC, checks(mic = false)))
-        assertTrue(line, line.startsWith("✗"))
-        assertTrue(line, line.contains("микрофон"))
+        // Слова собираются из ресурсов на экране, а здесь проверяется то, что
+        // от языка не зависит: знак беды и то, про что она.
+        val check = byId(Readiness.MIC, checks(mic = false))
+        assertEquals("✗", Readiness.mark(check.state))
+        assertEquals(R.string.readiness_mic, check.title)
+        assertEquals(R.string.readiness_mic_bad, check.detail)
     }
 }

@@ -49,7 +49,8 @@ class MainActivity : AppCompatActivity() {
                 val spinner = findViewById<Spinner>(R.id.engine)
                 spinner.adapter = ArrayAdapter(
                     this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
-                    if (engines.isEmpty()) listOf("движков не нашлось") else engines.map { it.first }
+                    if (engines.isEmpty()) listOf(getString(R.string.engines_none))
+                    else engines.map { it.first }
                 )
                 val current = engines.indexOfFirst { it.second == prefs.engine }
                 if (current >= 0) spinner.setSelection(current)
@@ -59,7 +60,7 @@ class MainActivity : AppCompatActivity() {
                 val spinner = findViewById<Spinner>(R.id.voice)
                 spinner.adapter = ArrayAdapter(
                     this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
-                    if (names.isEmpty()) listOf("голосов не нашлось") else names
+                    if (names.isEmpty()) listOf(getString(R.string.voices_none)) else names
                 )
                 val saved = voices.indexOf(prefs.voice)
                 if (saved >= 0) spinner.setSelection(saved)
@@ -94,9 +95,13 @@ class MainActivity : AppCompatActivity() {
         server.setText(prefs.server)
         token.setText(prefs.token)
 
+        // Коды — для распознавателя и синтеза, подписи — для человека: они
+        // названы на самих себе и от языка интерфейса не зависят.
         val codes = listOf("ru-RU", "en-US", "he-IL")
-        val labels = listOf("русский", "English", "עברית")
-        language.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
+        language.adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_dropdown_item,
+            resources.getStringArray(R.array.reply_language_names)
+        )
         language.setSelection(codes.indexOf(prefs.language).coerceAtLeast(0))
 
         findViewById<Button>(R.id.start).setOnClickListener {
@@ -104,7 +109,7 @@ class MainActivity : AppCompatActivity() {
             prefs.token = token.text.toString()
             prefs.language = codes[language.selectedItemPosition]
             if (!prefs.isConfigured) {
-                status.text = "нужны адрес сервиса и токен"
+                status.text = getString(R.string.error_need_server_and_token)
                 return@setOnClickListener
             }
             // Сначала разрешение, потом служба: без микрофона она падает при старте.
@@ -122,18 +127,18 @@ class MainActivity : AppCompatActivity() {
                     .putExtra(VoiceService.EXTRA_TEXT, text)
             )
             say.setText("")
-            status.text = "отправлено: $text"
+            status.text = getString(R.string.sent_text, text)
         }
 
         val mute = findViewById<Button>(R.id.mute)
-        fun paintMute() { mute.text = if (prefs.mute) "озвучка: выкл" else "озвучка: вкл" }
+        fun paintMute() { mute.setText(if (prefs.mute) R.string.speech_off else R.string.speech_on) }
         paintMute()
         mute.setOnClickListener { prefs.mute = !prefs.mute; paintMute() }
 
         // Ударения: если конкретная сборка RHVoice не понимает «+», здесь
         // переключается запись — проверяется на слух полем «скажи».
         val stress = findViewById<Button>(R.id.stress)
-        fun paintStress() { stress.text = Stress.label(prefs.stressStyle) }
+        fun paintStress() { stress.setText(Stress.label(prefs.stressStyle)) }
         paintStress()
         stress.setOnClickListener {
             prefs.stressStyle = Stress.next(prefs.stressStyle)
@@ -142,7 +147,7 @@ class MainActivity : AppCompatActivity() {
 
         // Микрофон гарнитуры: служба поднимает канал связи, здесь только выбор.
         val btmic = findViewById<Button>(R.id.btmic)
-        fun paintMic() { btmic.text = if (prefs.btMic) "микрофон: гарнитура" else "микрофон: телефон" }
+        fun paintMic() { btmic.setText(if (prefs.btMic) R.string.mic_headset else R.string.mic_phone) }
         paintMic()
         btmic.setOnClickListener {
             prefs.btMic = !prefs.btMic
@@ -162,7 +167,7 @@ class MainActivity : AppCompatActivity() {
                     .setAction(VoiceService.ACTION_SET_ENGINE)
                     .putExtra(VoiceService.EXTRA_CODE, engine.second)
             )
-            status.text = "движок: ${engine.first}"
+            status.text = getString(R.string.engine_selected, engine.first)
         }
         findViewById<Button>(R.id.engineInstall).setOnClickListener { installVoiceEngine() }
 
@@ -179,7 +184,7 @@ class MainActivity : AppCompatActivity() {
                     .setAction(VoiceService.ACTION_TRY_VOICE)
                     .putExtra(VoiceService.EXTRA_CODE, name)
             )
-            status.text = "голос: $name"
+            status.text = getString(R.string.voice_selected, name)
         }
 
         findViewById<Button>(R.id.battery).setOnClickListener { askForBackgroundFreedom() }
@@ -188,8 +193,9 @@ class MainActivity : AppCompatActivity() {
         // выключатель возвращает прежнее поведение одним нажатием.
         val acoustics = findViewById<Button>(R.id.acoustics)
         fun paintAcoustics() {
-            acoustics.text =
-                if (prefs.acoustics) "признаки говорящего: вкл" else "признаки говорящего: выкл"
+            acoustics.setText(
+                if (prefs.acoustics) R.string.acoustics_on else R.string.acoustics_off
+            )
         }
         paintAcoustics()
         acoustics.setOnClickListener {
@@ -204,7 +210,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.authSave).setOnClickListener {
             val token = findViewById<EditText>(R.id.authToken).text.toString().trim()
             if (token.isEmpty()) {
-                status.text = "вставь токен, который начинается с sk-ant-"
+                status.text = getString(R.string.error_paste_token)
                 return@setOnClickListener
             }
             startService(
@@ -212,13 +218,13 @@ class MainActivity : AppCompatActivity() {
                     .setAction(VoiceService.ACTION_AUTH_SET)
                     .putExtra(VoiceService.EXTRA_CODE, token)
             )
-            status.text = "отправил токен на сервер"
+            status.text = getString(R.string.auth_token_sent)
         }
 
         // Подключение подписки Claude — тот же флоу, что в веб-клиенте.
         findViewById<Button>(R.id.authStart).setOnClickListener {
             startService(Intent(this, VoiceService::class.java).setAction(VoiceService.ACTION_AUTH_START))
-            status.text = "запрашиваю ссылку…"
+            status.text = getString(R.string.auth_requesting_link)
         }
         findViewById<Button>(R.id.authOpen).setOnClickListener {
             authUrl?.let { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it))) }
@@ -237,13 +243,13 @@ class MainActivity : AppCompatActivity() {
             clipboard.setPrimaryClip(
                 android.content.ClipData.newPlainText("voice-shell", prefs.lastError)
             )
-            status.text = "ошибка скопирована"
+            status.text = getString(R.string.error_copied)
         }
 
         findViewById<Button>(R.id.stop).setOnClickListener {
             stopService(Intent(this, VoiceService::class.java))
             link = LinkState.UNKNOWN
-            status.text = "служба остановлена"
+            status.text = getString(R.string.service_stopped)
             paintReadiness()
         }
 
@@ -261,7 +267,7 @@ class MainActivity : AppCompatActivity() {
         val micIndex = permissions.indexOf(Manifest.permission.RECORD_AUDIO)
         val micGranted = micIndex < 0 ||
             grantResults.getOrNull(micIndex) == PackageManager.PERMISSION_GRANTED
-        if (micGranted) launchService() else status.text = "без микрофона работать не смогу"
+        if (micGranted) launchService() else status.text = getString(R.string.error_no_microphone)
     }
 
     /**
@@ -287,7 +293,7 @@ class MainActivity : AppCompatActivity() {
             engines = ttsEngines(),
             link = if (prefs.isConfigured) link else LinkState.OFF,
         )
-        findViewById<TextView>(R.id.ready).text = Readiness.summary(checks)
+        findViewById<TextView>(R.id.ready).text = Readiness.summary(this, checks)
         box.removeAllViews()
         for (check in checks) {
             val row = LinearLayout(this).apply {
@@ -295,7 +301,7 @@ class MainActivity : AppCompatActivity() {
                 gravity = Gravity.CENTER_VERTICAL
             }
             row.addView(TextView(this).apply {
-                text = Readiness.line(check)
+                text = Readiness.line(this@MainActivity, check)
                 textSize = 13f
                 layoutParams = LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
@@ -304,7 +310,7 @@ class MainActivity : AppCompatActivity() {
             val label = check.fix
             if (label != null) {
                 row.addView(Button(this).apply {
-                    text = label
+                    setText(label)
                     textSize = 12f
                     setOnClickListener { fix(check.id) }
                 })
@@ -333,7 +339,7 @@ class MainActivity : AppCompatActivity() {
                 startService(
                     Intent(this, VoiceService::class.java).setAction(VoiceService.ACTION_ENGINES)
                 )
-                status.text = "движки ниже — выбери и нажми «использовать выбранный»"
+                status.text = getString(R.string.engines_listed_below)
             }
             Readiness.LINK -> when (link) {
                 // Сеть не чинится из приложения — открываем то место, где чинится.
@@ -346,7 +352,7 @@ class MainActivity : AppCompatActivity() {
                         Intent(this, VoiceService::class.java)
                             .setAction(VoiceService.ACTION_RECONNECT)
                     )
-                    status.text = "пробую связаться заново"
+                    status.text = getString(R.string.link_retrying)
                 }
             }
         }
@@ -392,7 +398,7 @@ class MainActivity : AppCompatActivity() {
     private fun askForBackgroundFreedom() {
         val power = getSystemService(PowerManager::class.java)
         if (power.isIgnoringBatteryOptimizations(packageName)) {
-            status.text = "фоновая работа уже разрешена"
+            status.text = getString(R.string.background_already_allowed)
             return
         }
         runCatching {
@@ -407,12 +413,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun launchService() {
         ContextCompat.startForegroundService(this, Intent(this, VoiceService::class.java))
-        status.text = "служба запускается…"
+        status.text = getString(R.string.service_starting)
     }
 
     override fun onStart() {
         super.onStart()
-        if (prefs.lastError.isNotBlank()) status.text = "прошлый запуск: ${prefs.lastError}"
+        if (prefs.lastError.isNotBlank()) status.text = getString(R.string.last_error, prefs.lastError)
         val filter = IntentFilter(VoiceService.ACTION_STATUS)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(statusReceiver, filter, Context.RECEIVER_NOT_EXPORTED)

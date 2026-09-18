@@ -48,7 +48,9 @@ class AudioRouteTest {
         try {
             route.start(true)
             assertFalse("гарнитуры нет, а канал считается поднятым", route.onBluetoothMic)
-            assertTrue(route.describe(), route.describe().startsWith("микрофон: телефон"))
+            // Слова зависят от языка телефона, поэтому сверяемся с ресурсом, а
+            // не с русской строкой: на эмуляторе система говорит по-английски.
+            assertEquals(context.getString(R.string.mic_phone), route.describe())
             assertTrue("маршрут не менялся — перезапускать поток незачем", changes.isEmpty())
         } finally {
             route.release()
@@ -60,7 +62,7 @@ class AudioRouteTest {
         val route = route()
         try {
             route.start(false)
-            assertTrue(route.describe(), route.describe().contains("выключен"))
+            assertEquals(context.getString(R.string.mic_phone_bluetooth_off), route.describe())
         } finally {
             route.release()
         }
@@ -84,10 +86,12 @@ class AudioRouteTest {
     fun theServiceStartsAndSaysWhatItListensWith() {
         val said = CountDownLatch(1)
         var line = ""
+        // Без гарнитуры служба обязана сказать ровно это — на языке телефона.
+        val expected = context.getString(R.string.mic_phone)
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 val text = intent?.getStringExtra(VoiceService.EXTRA_TEXT).orEmpty()
-                if (text.startsWith("микрофон:")) {
+                if (text == expected) {
                     line = text
                     said.countDown()
                 }
@@ -99,7 +103,7 @@ class AudioRouteTest {
         try {
             context.startForegroundService(Intent(context, VoiceService::class.java))
             assertTrue("служба не сказала, чем слушает", said.await(20, TimeUnit.SECONDS))
-            assertTrue(line, line.startsWith("микрофон: телефон"))
+            assertEquals(expected, line)
         } finally {
             context.stopService(Intent(context, VoiceService::class.java))
             runCatching { context.unregisterReceiver(receiver) }
