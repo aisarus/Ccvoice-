@@ -197,3 +197,41 @@ def test_a_name_that_matches_nothing_sends_nothing():
 def test_two_files_with_the_same_skeleton_are_not_guessed():
     """Костяк «mn» подходит и main.py, и money.py. Молчим."""
     assert telegram.best_match("мейн", ["main.py", "money.py"]) is None
+
+
+def _демон(tmp_path, monkeypatch, сервер):
+    import subprocess
+    from voice_claude.server import Daemon, Settings
+    репо = tmp_path / "проект"
+    репо.mkdir()
+    subprocess.run(["git", "-C", str(репо), "init", "-q"], check=True)
+    monkeypatch.setenv("TELEGRAM_TOKEN", "1234567890:" + "A" * 35)
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    monkeypatch.setenv("TELEGRAM_API", сервер)
+    return Daemon(Settings(workspace=str(репо), token="t",
+                           note_path=str(tmp_path / "i.md"))), репо
+
+
+def test_it_sends_the_thing_we_just_made(tmp_path, monkeypatch, сервер):
+    """«Скинь мне ЕГО в телегу» — это не имя файла, а змейка, которую он
+    только что написал. Живая поломка: он искал файл «его» и отвечал
+    «такого файла нет»."""
+    daemon, репо = _демон(tmp_path, monkeypatch, сервер)
+    (репо / "snake.py").write_text("игра", encoding="utf-8")
+
+    файлы = daemon._files_to_share("его", репо)
+    assert [p.name for p in файлы] == ["snake.py"]
+
+
+def test_a_deleted_file_is_never_offered(tmp_path, monkeypatch, сервер):
+    """В diff попадают и удалённые файлы — отправлять их нечем."""
+    daemon, репо = _демон(tmp_path, monkeypatch, сервер)
+    (репо / "живой.txt").write_text("тут", encoding="utf-8")
+
+    daemon.journal.add("a" * 40, "b" * 40, "правка голосом")
+    monkeypatch.setattr("voice_claude.checkpoints.is_repo", lambda *a: True)
+    monkeypatch.setattr("voice_claude.checkpoints.changed_files",
+                        lambda *a: ["удалённый.txt", "живой.txt"])
+
+    файлы = daemon._recently_changed(репо)
+    assert [p.name for p in файлы] == ["живой.txt"]

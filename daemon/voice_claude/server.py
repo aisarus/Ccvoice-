@@ -100,6 +100,7 @@ class Daemon:
         self.examples = learning.Examples(settings.workspace)
         self._last_utterance: tuple[str, str] | None = None   # текст и куда ушло
         self._last_output: dict[str, str] = {}                # что ответила каждая цель
+        self._device_of: dict[Any, str] = {}                 # какое соединение чьё
         self.watcher = watcher.Watcher(settings.workspace)
         # Очередь фоновых задач: сказал и забыл.
         self.queue = tasks.TaskQueue(settings.workspace)
@@ -154,6 +155,7 @@ class Daemon:
             # Начатую работу не обрываем: телефон переподключается сам, а
             # брошенная посреди дела правка — худшее, что можно сделать.
             self.clients.discard(websocket)
+            self._device_of.pop(websocket, None)
 
     async def _guarded(self, ws: Any, msg: dict[str, Any]) -> None:
         """Ни одна поломка не имеет права стать тишиной.
@@ -185,6 +187,18 @@ class Daemon:
                                       "message": "bad token", "recoverable": False})
                 await ws.close()
                 return
+            # Телефон переподключается сам: при смене сети, при возврате из
+            # сна, при перезапуске службы. Прежнее соединение того же
+            # устройства может ещё не отвалиться по таймауту, и тогда каждый
+            # ответ уходит дважды и трижды — человек слышит его хором.
+            device = str(msg.get("device_id") or "")
+            if device:
+                for прежний in [c for c in self.clients
+                                if self._device_of.get(c) == device and c is not ws]:
+                    self.clients.discard(прежний)
+                    self._device_of.pop(прежний, None)
+                    asyncio.create_task(self._close_quietly(прежний))
+                self._device_of[ws] = device
             self.clients.add(ws)
             # Пока никто не слушал, новости копились — отдаём их первым делом.
             news, self._pending_news = self._pending_news, []
@@ -785,21 +799,22 @@ class Daemon:
             сказать.append("Не отправил — " + "; ".join(отказы[:2]))
         await self._say(". ".join(сказать) or "Нечего отправлять.")
 
+    # «Скинь мне ЕГО в телегу» — это не имя файла, а «то, что мы сейчас делали».
+    МЕСТОИМЕНИЯ = {"его", "это", "этот", "её", "ее", "их", "то", "тот", "файл", "их же"}
+
     def _files_to_share(self, wanted: str, workspace: Path) -> list[Path]:
-        """Что именно человек просит: названное или то, что только что менялось."""
-        if wanted:
-            корень = wanted.lower().strip(" .,")
-            кандидаты: list[Path] = []
-            for path in workspace.rglob("*"):
-                if not path.is_file():
-                    continue
-                части = path.relative_to(workspace).parts
-                if any(p.startswith(".") or p in ("node_modules", "__pycache__")
-                       for p in части):
-                    continue
-                кандидаты.append(path)
-                if len(кандидаты) >= 500:       # большой проект целиком не нужен
-                    break
+        """Что именно человек просит отправить.
+
+        Порядок: названное им имя, потом то, что Claude только что менял,
+        потом просто самое свежее в проекте. Несуществующее не предлагаем
+        никогда: «такого файла нет» — плохой ответ на «скинь мне его».
+        """
+        корень = wanted.lower().strip(" .,")
+        if корень in self.МЕСТОИМЕНИЯ:
+            корень = ""
+
+        кандидаты = self._project_files(workspace)
+        if корень:
             точные = [p for p in кандидаты
                       if корень in p.name.lower() or корень in p.stem.lower()]
             if точные:
@@ -808,6 +823,17 @@ class Daemon:
             похожее = telegram.best_match(корень, [p.name for p in кандидаты])
             if похожее:
                 return [p for p in кандидаты if p.name == похожее][:1]
+
+        изменённые = self._recently_changed(workspace)
+        if изменённые:
+            return изменённые
+        # Точки отката может не быть вовсе — например, правка ещё не закрыта
+        # коммитом. Тогда «его» — это просто самое свежее в проекте.
+        свежие = sorted(кандидаты, key=lambda p: p.stat().st_mtime, reverse=True)
+        return свежие[:1] if свежие else []
+
+    def _recently_changed(self, workspace: Path) -> list[Path]:
+        """Файлы последней точки отката — только те, что ещё существуют."""
         point = self.journal.last()
         if point is None or not checkpoints.is_repo(workspace):
             return []
@@ -815,7 +841,24 @@ class Daemon:
             имена = checkpoints.changed_files(workspace, point.before, point.after)
         except (RuntimeError, OSError):
             return []
-        return [workspace / name for name in имена][:5]
+        # В diff попадают и удалённые файлы: отправлять их нечем.
+        живые = [workspace / имя for имя in имена]
+        return [p for p in живые if p.is_file()][:5]
+
+    @staticmethod
+    def _project_files(workspace: Path) -> list[Path]:
+        найдено: list[Path] = []
+        for path in workspace.rglob("*"):
+            if not path.is_file():
+                continue
+            части = path.relative_to(workspace).parts
+            if any(p.startswith(".") or p in ("node_modules", "__pycache__")
+                   for p in части):
+                continue
+            найдено.append(path)
+            if len(найдено) >= 500:        # большой проект целиком не нужен
+                break
+        return найдено
 
     # -- очередь фоновых задач -------------------------------------------
     async def _handle_queue_command(self, ws: Any, text: str) -> bool:
@@ -1042,6 +1085,13 @@ class Daemon:
     async def _broadcast_state(self) -> None:
         await self._broadcast({"id": "state", "state": self.machine.state,
                                "window_open": self.machine.window_open()})
+
+    async def _close_quietly(self, ws: Any) -> None:
+        """Закрыть прежнее соединение того же телефона, не поднимая шума."""
+        try:
+            await ws.close(1000, "заменено новым подключением")
+        except Exception:                        # оно могло уже умереть
+            pass
 
     async def _broadcast(self, payload: dict[str, Any]) -> None:
         for ws in list(self.clients):
