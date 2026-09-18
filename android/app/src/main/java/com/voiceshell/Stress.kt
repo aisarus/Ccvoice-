@@ -22,11 +22,12 @@ object Stress {
     private const val ACUTE = '́'
     private const val VOWELS = "аеёиоуыэюяАЕЁИОУЫЭЮЯ"
 
-    fun label(style: String): String = when (style) {
-        PLUS -> "ударения: плюсом"
-        ACUTE_STYLE -> "ударения: знаком"
-        OFF -> "ударения: выкл"
-        else -> "ударения: авто"
+    /** Ключ подписи кнопки: слова выбирает система по локали. */
+    fun label(style: String): Int = when (style) {
+        PLUS -> R.string.stress_plus
+        ACUTE_STYLE -> R.string.stress_acute
+        OFF -> R.string.stress_off
+        else -> R.string.stress_auto
     }
 
     fun next(style: String): String = STYLES[(STYLES.indexOf(style).coerceAtLeast(0) + 1) % STYLES.size]

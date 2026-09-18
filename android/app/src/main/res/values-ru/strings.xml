@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Русский: язык, на котором интерфейс написали изначально. Слова здесь те же,
+  что были в коде, — их не переводили обратно, а просто перенесли.
+-->
+<resources>
+
+    <!-- Главный экран: подписи полей и кнопок. -->
+    <string name="readiness_checking">проверяю готовность…</string>
+    <string name="label_server">адрес сервиса</string>
+    <string name="label_token">токен доступа</string>
+    <string name="label_language">язык реплик — дальше меняется голосом</string>
+    <string name="action_start">запустить</string>
+    <string name="action_stop">остановить</string>
+    <string name="label_engine">движок синтеза — RHVoice звучит живее системного</string>
+    <string name="action_engines_show">показать движки</string>
+    <string name="action_engine_use">использовать выбранный</string>
+    <string name="action_engine_install">установить RHVoice</string>
+    <string name="label_voice">голос синтеза</string>
+    <string name="action_voices_show">показать голоса</string>
+    <string name="action_voice_try">прослушать и выбрать</string>
+    <string name="label_say">сказать текстом — когда говорить нельзя</string>
+    <string name="hint_say">скажи привет</string>
+    <string name="action_send">отправить</string>
+    <string name="action_background">разрешить работу в фоне</string>
+    <string name="label_auth">подписка Claude на сервере</string>
+    <string name="hint_auth_token">sk-ant-oat01-… если токен уже есть</string>
+    <string name="action_auth_save">сохранить токен Claude</string>
+    <string name="label_auth_again">или пройти авторизацию заново:</string>
+    <string name="action_auth_start">подключить подписку</string>
+    <string name="action_auth_open">открыть авторизацию</string>
+    <string name="hint_auth_code">вставь код со страницы</string>
+    <string name="action_auth_done">готово</string>
+    <string name="action_copy_error">скопировать последнюю ошибку</string>
+    <string name="status_idle">не запущено</string>
+    <string name="help_text">Язык меняется голосом: «Клод, английский», «Клод, иврит», «Клод, русский». Ответ произносится на том языке, на котором пришёл. Обращение «Клод» слышит сама трубка, без интернета. Дальше реплика распознаётся на выбранном языке — русский, английский или иврит. Скажи «Клод…» — распознавание обращения идёт на телефоне, наружу уходит только текст принятой реплики. Кнопка на наушниках разрешает сказать реплику без обращения. «Стоп» гасит голос, «останови работу» прерывает работу.</string>
+
+    <!-- Переключатели: подпись кнопки и есть её состояние. -->
+    <string name="speech_on">озвучка: вкл</string>
+    <string name="speech_off">озвучка: выкл</string>
+    <string name="stress_auto">ударения: авто</string>
+    <string name="stress_plus">ударения: плюсом</string>
+    <string name="stress_acute">ударения: знаком</string>
+    <string name="stress_off">ударения: выкл</string>
+    <string name="mic_headset">микрофон: гарнитура</string>
+    <string name="mic_phone">микрофон: телефон</string>
+    <string name="acoustics_on">признаки говорящего: вкл</string>
+    <string name="acoustics_off">признаки говорящего: выкл</string>
+
+    <!-- Что экран отвечает на нажатия. -->
+    <string name="engines_none">движков не нашлось</string>
+    <string name="voices_none">голосов не нашлось</string>
+    <string name="error_need_server_and_token">нужны адрес сервиса и токен</string>
+    <string name="sent_text">отправлено: %1$s</string>
+    <string name="engine_selected">движок: %1$s</string>
+    <string name="voice_selected">голос: %1$s</string>
+    <string name="error_paste_token">вставь токен, который начинается с sk-ant-</string>
+    <string name="auth_token_sent">отправил токен на сервер</string>
+    <string name="auth_requesting_link">запрашиваю ссылку…</string>
+    <string name="error_copied">ошибка скопирована</string>
+    <string name="service_stopped">служба остановлена</string>
+    <string name="error_no_microphone">без микрофона работать не смогу</string>
+    <string name="engines_listed_below">движки ниже — выбери и нажми «использовать выбранный»</string>
+    <string name="link_retrying">пробую связаться заново</string>
+    <string name="background_already_allowed">фоновая работа уже разрешена</string>
+    <string name="service_starting">служба запускается…</string>
+    <string name="last_error">прошлый запуск: %1$s</string>
+
+    <!-- Проверка готовности: пять строк вместо гадания. -->
+    <string name="readiness_all_ready">всё готово</string>
+    <string name="readiness_with_warnings">готово, но есть замечания</string>
+    <string name="readiness_not_ready">не готово: %1$s</string>
+    <string name="readiness_mic">микрофон</string>
+    <string name="readiness_mic_ok">разрешён</string>
+    <string name="readiness_mic_bad">без него служба не имеет права запуститься</string>
+    <string name="readiness_fix_grant">выдать</string>
+    <string name="readiness_notifications">уведомления</string>
+    <string name="readiness_notifications_ok">включены</string>
+    <string name="readiness_notifications_bad">без них Android не даёт держать фоновую службу</string>
+    <string name="readiness_fix_enable">включить</string>
+    <string name="readiness_background">работа в фоне</string>
+    <string name="readiness_background_ok">разрешена</string>
+    <string name="readiness_background_bad">иначе система усыпит службу через несколько минут после экрана</string>
+    <string name="readiness_fix_allow">разрешить</string>
+    <string name="readiness_tts">синтез речи</string>
+    <string name="readiness_tts_none">движков в системе нет — ответ нечем произнести</string>
+    <string name="readiness_fix_install">установить</string>
+    <string name="readiness_tts_default">движок не выбран — говорит системный робот</string>
+    <string name="readiness_fix_pick">выбрать</string>
+    <string name="readiness_tts_gone">выбранный движок пропал из системы</string>
+    <string name="readiness_tts_ok">выбран</string>
+    <string name="readiness_link">связь с сервером</string>
+    <string name="readiness_link_online">демон отвечает</string>
+    <string name="readiness_link_connecting">подключаюсь…</string>
+    <string name="readiness_link_unknown">служба не запущена</string>
+    <string name="readiness_fix_start">запустить</string>
+    <string name="readiness_link_off">не заданы адрес или токен</string>
+    <string name="readiness_link_no_network">телефон не в сети</string>
+    <string name="readiness_fix_network">сеть</string>
+    <string name="readiness_link_no_server">сервер не отвечает — проверь адрес и что демон запущен</string>
+    <string name="readiness_fix_retry">повторить</string>
+    <string name="readiness_link_refused">сервер отказал — скорее всего не тот токен</string>
+    <string name="readiness_link_cleartext">адрес по http запрещён системой — нужен https</string>
+
+    <!-- Состояние связи: строка идёт и на экран, и в уведомление. -->
+    <string name="link_unknown">связь: служба не запущена</string>
+    <string name="link_off">связь: не настроена</string>
+    <string name="link_connecting">связь: подключаюсь</string>
+    <string name="link_online">связь: есть</string>
+    <string name="link_no_network">связь: нет сети</string>
+    <string name="link_no_server">связь: сервер не отвечает</string>
+    <string name="link_refused">связь: сервер отказал</string>
+    <string name="link_cleartext">связь: http запрещён системой</string>
+
+    <!-- Обрыв: что случилось и что с этим делать. -->
+    <string name="link_hint_off">не настроено: укажи адрес сервиса и токен</string>
+    <string name="link_hint_unknown">служба не запущена</string>
+    <string name="link_hint_connecting">подключаюсь к серверу…</string>
+    <string name="link_hint_online">подключено</string>
+    <string name="link_hint_no_network">нет сети: телефон не в интернете — жду сеть</string>
+    <string name="link_hint_no_server">сервер не отвечает: проверь адрес, порт и что демон запущен</string>
+    <string name="link_hint_refused">сервер отказал (HTTP %1$d): проверь токен и адрес</string>
+    <string name="link_hint_cleartext">http запрещён системой: нужен https или ws на доверенном адресе</string>
+    <string name="link_retry_in">%1$s · повтор через %2$d с</string>
+    <string name="link_connecting_to">подключаюсь к %1$s</string>
+
+    <!-- Фаза: одно слово, которое видно с экрана блокировки. -->
+    <string name="state_starting">запуск</string>
+    <string name="state_waiting_for_wake">жду обращения</string>
+    <string name="state_listening">слушаю</string>
+    <string name="state_speaking">говорю</string>
+    <string name="state_sent">отправил</string>
+    <string name="action_speak">Говорить</string>
+    <string name="action_stop_short">Стоп</string>
+
+    <!-- Что говорит служба. -->
+    <string name="error_mic_permission">нет разрешения на микрофон — выдай его и запусти снова</string>
+    <string name="error_service_start">служба не смогла стартовать: %1$s</string>
+    <string name="error_startup">ошибка при запуске: %1$s</string>
+    <string name="acoustics_measuring">мерю громкость реплики и шлю признаки</string>
+    <string name="acoustics_hint_only">признаки выключены — роль уходит подсказкой</string>
+    <string name="engines_found">движков синтеза: %1$d</string>
+    <string name="engine_set">движок синтеза: %1$s</string>
+    <string name="engine_system">системный</string>
+    <string name="voices_found">голосов доступно: %1$d</string>
+    <string name="auth_checking_token">проверяю токен Claude…</string>
+    <string name="auth_requesting_url">запрашиваю ссылку авторизации…</string>
+    <string name="auth_checking_code">проверяю код…</string>
+    <string name="wake_error">распознавание обращения: %1$s</string>
+    <string name="state_listening_for_wake">слушаю — скажи «Клод…»</string>
+    <string name="wake_unavailable">wake word недоступен (%1$s) — начинай реплику кнопкой</string>
+    <string name="wake_stopped">wake word остановился: %1$s</string>
+    <string name="wake_downloading_model">качаю модель распознавания, ~45 МБ</string>
+    <string name="stopping_work">останавливаю работу</string>
+    <string name="going_quiet">тихо</string>
+    <string name="language_set">язык: %1$s</string>
+    <string name="heard_locally">расслышано локально: %1$s</string>
+    <string name="sent_to">→ %1$s</string>
+    <string name="calibrating_mic">калибрую уровень микрофона по первой реплике</string>
+    <string name="recognizer_silent">распознаватель не ответил — слушаю снова</string>
+    <string name="tts_silent">синтез не отчитался — слушаю снова</string>
+    <string name="listener_restarted">слушатель стоял — перезапустил</string>
+    <string name="recognition_unavailable">распознавание недоступно: %1$s</string>
+    <string name="recognition_error">распознавание реплики: ошибка %1$d</string>
+    <string name="listening_for_reply">слушаю реплику…</string>
+    <string name="listening_go_ahead">слушаю — говори</string>
+    <string name="tts_failed">синтез речи не запустился (код %1$d)</string>
+    <string name="ready_credential">готов · %1$s</string>
+    <string name="auth_open_link">открой ссылку, войди в Claude и вставь код</string>
+    <string name="auth_link_received">ссылка авторизации получена</string>
+    <string name="auth_saved">подписка подключена и сохранена на сервере</string>
+    <string name="auth_not_saved">подписка подключена, но не сохранилась — впиши токен в файл службы</string>
+    <string name="auth_connected">подписка подключена</string>
+    <string name="auth_connected_unsaved">подписка подключена (не сохранена)</string>
+    <string name="auth_failed">авторизация не вышла: %1$s</string>
+    <string name="error_bad_token">токен не подошёл — вставь только значение, без VOICE_TOKEN=</string>
+    <string name="error_from_server">ошибка: %1$s</string>
+    <string name="role_gate">демон не принял реплику: %1$s</string>
+    <string name="role_gate_off">дважды принял меня за чужого — выключил признаки говорящего</string>
+    <string name="not_sent">реплика не ушла — %1$s</string>
+
+    <!-- Куда смотрит микрофон. -->
+    <string name="mic_headset_bluetooth">микрофон: гарнитура (bluetooth)</string>
+    <string name="mic_phone_bluetooth_off">микрофон: телефон (bluetooth-микрофон выключен)</string>
+    <string name="mic_phone_no_channel">микрофон: телефон — канал гарнитуры не поднялся</string>
+    <string name="mic_switch_failed">не вышло переключиться на микрофон гарнитуры — слушаю телефоном</string>
+    <string name="mic_sco_unavailable">система не отдаёт микрофон гарнитуры вне звонка — слушаю телефоном</string>
+    <string name="mic_channel_failed">канал гарнитуры не открылся: %1$s</string>
+</resources>

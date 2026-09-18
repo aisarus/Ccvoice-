@@ -40,7 +40,7 @@ class WakeWordEngine(private val context: Context) {
     fun prepare(onProgress: (String) -> Unit) {
         val dir = File(context.filesDir, MODEL_DIR)
         if (!dir.exists()) {
-            onProgress("качаю модель распознавания, ~45 МБ")
+            onProgress(context.getString(R.string.wake_downloading_model))
             download(MODEL_URL, context.filesDir)
         }
         LibVosk.setLogLevel(LogLevel.WARNINGS)
@@ -48,7 +48,7 @@ class WakeWordEngine(private val context: Context) {
     }
 
     fun start(onText: (String) -> Unit, onError: (Throwable) -> Unit) {
-        val ready = model ?: throw IllegalStateException("модель не подготовлена")
+        val ready = model ?: throw IllegalStateException("model is not prepared")
         stop()
         speech = SpeechService(Recognizer(ready, 16000.0f), 16000.0f)
         speech?.startListening(object : RecognitionListener {

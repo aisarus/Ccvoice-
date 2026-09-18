@@ -104,12 +104,12 @@ class VoiceService : Service() {
     /** Громкость реплики: единственное, что телефон может измерить сам. */
     private val meter = SpeechMeter()
     /** Что происходит прямо сейчас — первая строка уведомления. */
-    private var phase = "жду обращения"
+    private var phase = R.string.state_waiting_for_wake
 
     private var speaking = false
     private var awaitingCommand = false
     private var lastSpoken = ""
-    private var lastLine = "запуск"
+    private var lastLine = ""
     private var spokeAt = 0L
     private var windowUntil = 0L
     private var wakeReady = false
@@ -128,23 +128,24 @@ class VoiceService : Service() {
     override fun onCreate() {
         super.onCreate()
         prefs = Prefs(this)
+        lastLine = getString(R.string.state_starting)
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
         ) {
-            fail("нет разрешения на микрофон — выдай его и запусти снова")
+            fail(getString(R.string.error_mic_permission))
             return
         }
 
         try {
             createChannel()
             ServiceCompat.startForeground(
-                this, NOTIFICATION_ID, notification("запуск"),
+                this, NOTIFICATION_ID, notification(lastLine),
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0
             )
         } catch (t: Throwable) {
-            fail("служба не смогла стартовать: ${t.javaClass.simpleName}: ${t.message}")
+            fail(getString(R.string.error_service_start, "${t.javaClass.simpleName}: ${t.message}"))
             return
         }
 
@@ -154,7 +155,7 @@ class VoiceService : Service() {
             connect()
             prefs.lastError = ""
         } catch (t: Throwable) {
-            fail("ошибка при запуске: ${t.javaClass.simpleName}: ${t.message}")
+            fail(getString(R.string.error_startup, "${t.javaClass.simpleName}: ${t.message}"))
             return
         }
 
@@ -167,7 +168,7 @@ class VoiceService : Service() {
             log = { line -> report(line) }
         )
         runCatching { route?.start(prefs.btMic) }
-        report(route?.describe().orEmpty().ifBlank { "микрофон: телефон" })
+        report(route?.describe().orEmpty().ifBlank { getString(R.string.mic_phone) })
 
         // Сеть вернулась — незачем досиживать паузу до конца: человек уже
         // говорит в телефон и ждёт ответа.
@@ -192,11 +193,13 @@ class VoiceService : Service() {
             ACTION_LISTEN -> armWindow()
             ACTION_MIC -> {
                 route?.enable(prefs.btMic)
-                report(route?.describe().orEmpty().ifBlank { "микрофон: телефон" })
+                report(route?.describe().orEmpty().ifBlank { getString(R.string.mic_phone) })
             }
             ACTION_ACOUSTICS -> report(
-                if (prefs.acoustics) "мерю громкость реплики и шлю признаки"
-                else "признаки выключены — роль уходит подсказкой"
+                getString(
+                    if (prefs.acoustics) R.string.acoustics_measuring
+                    else R.string.acoustics_hint_only
+                )
             )
             // Человек нажал «повторить» на экране готовности: ждать паузу незачем.
             ACTION_RECONNECT -> connectNow()
@@ -208,7 +211,7 @@ class VoiceService : Service() {
                 val engines = runCatching { tts?.engines.orEmpty() }.getOrDefault(emptyList())
                 sendBroadcast(
                     Intent(ACTION_STATUS).setPackage(packageName)
-                        .putExtra(EXTRA_TEXT, "движков синтеза: ${engines.size}")
+                        .putExtra(EXTRA_TEXT, getString(R.string.engines_found, engines.size))
                         .putStringArrayListExtra(
                             EXTRA_ENGINES,
                             ArrayList(engines.map { "${it.label}\u0000${it.name}" })
@@ -222,7 +225,8 @@ class VoiceService : Service() {
                 runCatching { tts?.shutdown() }
                 tts = null
                 setUpTts()
-                report("движок синтеза: ${engine.ifBlank { "системный" }}")
+                val named = engine.ifBlank { getString(R.string.engine_system) }
+                report(getString(R.string.engine_set, named))
             }
             ACTION_VOICES -> {
                 val names = runCatching { tts?.voices.orEmpty() }.getOrDefault(emptySet())
@@ -231,7 +235,7 @@ class VoiceService : Service() {
                     .map { it.name }
                 sendBroadcast(
                     Intent(ACTION_STATUS).setPackage(packageName)
-                        .putExtra(EXTRA_TEXT, "голосов доступно: ${names.size}")
+                        .putExtra(EXTRA_TEXT, getString(R.string.voices_found, names.size))
                         .putStringArrayListExtra(EXTRA_VOICES, ArrayList(names))
                 )
             }
@@ -251,18 +255,18 @@ class VoiceService : Service() {
             ACTION_AUTH_SET -> {
                 val token = intent.getStringExtra(EXTRA_CODE).orEmpty().trim()
                 if (token.isNotEmpty()) {
-                    report("проверяю токен Claude…")
+                    report(getString(R.string.auth_checking_token))
                     send(JSONObject().put("id", "auth_set").put("token", token))
                 }
             }
             ACTION_AUTH_START -> {
-                report("запрашиваю ссылку авторизации…")
+                report(getString(R.string.auth_requesting_url))
                 send(JSONObject().put("id", "auth_start"))
             }
             ACTION_AUTH_CODE -> {
                 val code = intent.getStringExtra(EXTRA_CODE).orEmpty().trim()
                 if (code.isNotEmpty()) {
-                    report("проверяю код…")
+                    report(getString(R.string.auth_checking_code))
                     send(JSONObject().put("id", "auth_code").put("code", code))
                 }
             }
@@ -296,16 +300,16 @@ class VoiceService : Service() {
             engine.prepare { report(it) }
             engine.start(
                 onText = { text -> main.post { handle(text) } },
-                onError = { t -> report("распознавание обращения: ${t.message}") }
+                onError = { t -> report(getString(R.string.wake_error, t.message.orEmpty())) }
             )
             wake = engine
             wakeReady = true
-            report("слушаю — скажи «Клод…»")
+            report(getString(R.string.state_listening_for_wake))
         } catch (t: Throwable) {
             // Самый частый случай: не поднялась нативная библиотека.
             Log.e(TAG, "wake word", t)
             wakeReady = false
-            report("wake word недоступен (${t.javaClass.simpleName}) — начинай реплику кнопкой")
+            report(getString(R.string.wake_unavailable, t.javaClass.simpleName))
         }
     }
 
@@ -314,7 +318,7 @@ class VoiceService : Service() {
      * Уже открытый поток записи остался на старом устройстве — перезапускаем.
      */
     private fun onRouteChanged(why: String) {
-        Log.i(TAG, "маршрут: $why")
+        Log.i(TAG, "route: $why")
         if (!wakeReady || speaking || awaitingCommand) return
         runCatching { wake?.stop() }
         resumeWake()
@@ -326,12 +330,12 @@ class VoiceService : Service() {
         Intents.stopIntent(text)?.let { scope ->
             silence()
             send(JSONObject().put("id", "interrupt").put("scope", scope))
-            report(if (scope == "work") "останавливаю работу" else "тихо")
+            report(getString(if (scope == "work") R.string.stopping_work else R.string.going_quiet))
             return
         }
         Intents.languageSwitch(text)?.let { code ->
             prefs.language = code
-            report("язык: $code")
+            report(getString(R.string.language_set, code))
             speak(mapOf("ru-RU" to "Говорю по-русски.", "en-US" to "Switching to English.",
                         "he-IL" to "עובר לעברית.")[code].orEmpty())
             return
@@ -382,7 +386,7 @@ class VoiceService : Service() {
         val text = fallbackText
         fallbackText = ""
         if (text.isBlank()) return
-        report("расслышано локально: $text")
+        report(getString(R.string.heard_locally, text))
         deliver(text)
     }
 
@@ -393,8 +397,8 @@ class VoiceService : Service() {
     ) {
         if (payload.isBlank()) return
         signals?.accepted(route?.onBluetoothMic == true)
-        phase("отправил")
-        report("→ $payload")
+        phase(R.string.state_sent)
+        report(getString(R.string.sent_to, payload))
         val device = if (route?.onBluetoothMic == true) "sony_mic" else "phone_mic"
         send(
             JSONObject()
@@ -435,7 +439,7 @@ class VoiceService : Service() {
             // Первая реплика на этом микрофоне задаёт норму: сравнивать пока
             // не с чем, и выдумывать «ноль» нельзя — это сказало бы демону,
             // что говорили ровно как обычно.
-            report("калибрую уровень микрофона по первой реплике")
+            report(getString(R.string.calibrating_mic))
         } else {
             val json = JSONObject()
             for ((name, value) in features) json.put(name, value)
@@ -459,7 +463,7 @@ class VoiceService : Service() {
      */
     private val recognizerWatchdog = Runnable {
         if (awaitingCommand) {
-            report("распознаватель не ответил — слушаю снова")
+            report(getString(R.string.recognizer_silent))
             runCatching { cloud?.cancel() }
             finishCommand()
             deliverFallback()
@@ -475,7 +479,7 @@ class VoiceService : Service() {
             speaking = false
             spokeAt = System.currentTimeMillis()
             windowUntil = System.currentTimeMillis() + WINDOW_MS
-            report("синтез не отчитался — слушаю снова")
+            report(getString(R.string.tts_silent))
             if (!awaitingCommand) resumeWake()
         }
     }
@@ -487,7 +491,7 @@ class VoiceService : Service() {
     private val heartbeat = object : Runnable {
         override fun run() {
             if (wakeReady && !speaking && !awaitingCommand && wake?.isRunning != true) {
-                report("слушатель стоял — перезапустил")
+                report(getString(R.string.listener_restarted))
                 resumeWake()
             }
             main.postDelayed(this, HEARTBEAT_MS)
@@ -532,7 +536,7 @@ class VoiceService : Service() {
                 main.postDelayed(recognizerWatchdog, RECOGNIZER_DEADLINE_MS)
             } catch (t: Throwable) {
                 awaitingCommand = false
-                report("распознавание недоступно: ${t.javaClass.simpleName}")
+                report(getString(R.string.recognition_unavailable, t.javaClass.simpleName))
                 deliverFallback()
                 resumeWake()
             }
@@ -548,7 +552,7 @@ class VoiceService : Service() {
             if (text.isEmpty()) {
                 if (fallbackText.isBlank()) {
                     signals?.missed(route?.onBluetoothMic == true)
-                    phase("жду обращения")
+                    phase(R.string.state_waiting_for_wake)
                 }
                 deliverFallback()
                 return
@@ -561,7 +565,7 @@ class VoiceService : Service() {
             }
             Intents.languageSwitch(text)?.let { code ->
                 prefs.language = code
-                report("язык: $code")
+                report(getString(R.string.language_set, code))
                 return
             }
             deliver(text, heard.drop(1).take(3), meter.segment())
@@ -572,19 +576,19 @@ class VoiceService : Service() {
             if (error != SpeechRecognizer.ERROR_NO_MATCH &&
                 error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT
             ) {
-                report("распознавание реплики: ошибка $error")
+                report(getString(R.string.recognition_error, error))
             }
             if (fallbackText.isBlank()) {
                 signals?.missed(route?.onBluetoothMic == true)
-                phase("жду обращения")
+                phase(R.string.state_waiting_for_wake)
             }
             deliverFallback()
         }
 
         override fun onReadyForSpeech(params: Bundle?) {
             signals?.listening(route?.onBluetoothMic == true)
-            phase("слушаю")
-            report("слушаю реплику…")
+            phase(R.string.state_listening)
+            report(getString(R.string.listening_for_reply))
         }
 
         /** Человек всё-таки говорит — запасной вариант больше не нужен. */
@@ -623,9 +627,9 @@ class VoiceService : Service() {
         runCatching {
             wake?.start(
                 onText = { text -> main.post { handle(text) } },
-                onError = { t -> report("распознавание обращения: ${t.message}") }
+                onError = { t -> report(getString(R.string.wake_error, t.message.orEmpty())) }
             )
-        }.onFailure { report("wake word остановился: ${it.javaClass.simpleName}") }
+        }.onFailure { report(getString(R.string.wake_stopped, it.javaClass.simpleName)) }
     }
 
     // ---------- кнопка гарнитуры ----------
@@ -655,7 +659,7 @@ class VoiceService : Service() {
     private fun armWindow() {
         if (speaking) silence()
         windowUntil = System.currentTimeMillis() + WINDOW_MS
-        report("слушаю — говори")
+        report(getString(R.string.listening_go_ahead))
         if (!wakeReady || prefs.language != "ru-RU") listenForCommand()
     }
 
@@ -696,12 +700,12 @@ class VoiceService : Service() {
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {
                         speaking = true
-                        phase("говорю")
+                        phase(R.string.state_speaking)
                     }
                     override fun onDone(utteranceId: String?) {
                         main.removeCallbacks(speechWatchdog)
                         speaking = false
-                        phase("жду обращения")
+                        phase(R.string.state_waiting_for_wake)
                         spokeAt = System.currentTimeMillis()
                         windowUntil = System.currentTimeMillis() + WINDOW_MS
                         // Хвост фразы ещё звучит в комнате — ждём, потом слушаем.
@@ -716,7 +720,7 @@ class VoiceService : Service() {
                     }
                 })
             } else {
-                report("синтез речи не запустился (код $code)")
+                report(getString(R.string.tts_failed, code))
             }
         }
         tts = if (engine != null) TextToSpeech(this, listener, engine)
@@ -783,11 +787,11 @@ class VoiceService : Service() {
         reconnectScheduled = false
         if (stopped) return
         if (!prefs.isConfigured) {
-            link(LinkState.OFF, Link.hint(LinkState.OFF, null, 0))
+            link(LinkState.OFF, Link.hint(this, LinkState.OFF, null, 0))
             return
         }
         if (socket != null) return
-        link(LinkState.CONNECTING, "подключаюсь к ${prefs.server}")
+        link(LinkState.CONNECTING, getString(R.string.link_connecting_to, prefs.server))
         val request = Request.Builder().url(prefs.socketUrl()).build()
         socket = http.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -799,7 +803,7 @@ class VoiceService : Service() {
                 main.post {
                     unauthorized = false
                     attempt = 0
-                    link(LinkState.ONLINE, "подключено")
+                    link(LinkState.ONLINE, getString(R.string.link_hint_online))
                 }
             }
 
@@ -829,7 +833,7 @@ class VoiceService : Service() {
     private fun lost(state: LinkState, message: String?, httpCode: Int) {
         socket = null
         if (stopped) return
-        val reason = Link.hint(state, message, httpCode)
+        val reason = Link.hint(this, state, message, httpCode)
         if (reconnectScheduled) {
             link(state, reason)
             return
@@ -838,7 +842,7 @@ class VoiceService : Service() {
         attempt++
         reconnectScheduled = true
         main.postDelayed(reconnect, delay)
-        link(state, "$reason · повтор через ${delay / 1000} с")
+        link(state, getString(R.string.link_retry_in, reason, delay / 1000))
     }
 
     private val reconnect = Runnable { connect() }
@@ -871,7 +875,7 @@ class VoiceService : Service() {
 
     private fun onServerMessage(message: JSONObject) {
         when (message.optString("id")) {
-            "welcome" -> report("готов · ${message.optString("credential")}")
+            "welcome" -> report(getString(R.string.ready_credential, message.optString("credential")))
             "route" -> onRoute(message)
             "voice_summary" -> {
                 val text = message.optString("text")
@@ -887,35 +891,41 @@ class VoiceService : Service() {
             }
             "auth_url" -> {
                 val url = message.optString("url")
-                report("открой ссылку, войди в Claude и вставь код")
+                report(getString(R.string.auth_open_link))
                 sendBroadcast(
                     Intent(ACTION_STATUS).setPackage(packageName)
-                        .putExtra(EXTRA_TEXT, "ссылка авторизации получена")
+                        .putExtra(EXTRA_TEXT, getString(R.string.auth_link_received))
                         .putExtra(EXTRA_AUTH_URL, url)
                 )
             }
             "auth_token" -> {
                 val persisted = message.optBoolean("persisted")
                 report(
-                    if (persisted) "подписка подключена и сохранена на сервере"
-                    else "подписка подключена, но не сохранилась — впиши токен в файл службы"
+                    getString(
+                        if (persisted) R.string.auth_saved else R.string.auth_not_saved
+                    )
                 )
                 sendBroadcast(
                     Intent(ACTION_STATUS).setPackage(packageName)
-                        .putExtra(EXTRA_TEXT, if (persisted) "подписка подключена" else "подписка подключена (не сохранена)")
+                        .putExtra(
+                            EXTRA_TEXT,
+                            getString(
+                                if (persisted) R.string.auth_connected
+                                else R.string.auth_connected_unsaved
+                            )
+                        )
                         .putExtra(EXTRA_AUTH_TOKEN, message.optString("token"))
                 )
             }
-            "auth_error" -> report("авторизация не вышла: ${message.optString("message")}")
+            "auth_error" -> report(getString(R.string.auth_failed, message.optString("message")))
             "whisper" -> speak(message.optString("text"))
             "error" -> {
                 val code = message.optString("code")
                 if (code == "unauthorized") {
                     unauthorized = true
-                    link(LinkState.REFUSED,
-                         "токен не подошёл — вставь только значение, без VOICE_TOKEN=")
+                    link(LinkState.REFUSED, getString(R.string.error_bad_token))
                 } else {
-                    report("ошибка: ${message.optString("message")}")
+                    report(getString(R.string.error_from_server, message.optString("message")))
                 }
             }
         }
@@ -936,15 +946,19 @@ class VoiceService : Service() {
         }
         roleGates++
         signals?.missed(route?.onBluetoothMic == true)
-        phase("жду обращения")
-        report("демон не принял реплику: ${message.optString("label")}")
+        phase(R.string.state_waiting_for_wake)
+        report(getString(R.string.role_gate, message.optString("label")))
         // Два отказа подряд — это уже не чужая речь рядом, это врут измерения.
         // Ронять команды молча хуже, чем работать по-старому: выключаем сами и
         // говорим вслух, иначе человек так и не узнает, почему всё ожило.
         if (roleGates >= 2 && prefs.acoustics) {
             prefs.acoustics = false
             roleGates = 0
-            report("дважды принял меня за чужого — выключил признаки говорящего")
+            report(getString(R.string.role_gate_off))
+            // Вслух — на языке реплик, а не интерфейса: голос синтеза
+            // выбирается по письменности самого текста, и фраза из ресурсов
+            // досталась бы голосу чужого языка. Поэтому произносимое живёт
+            // рядом с остальным произносимым, а не в strings.xml.
             speak("Выключил признаки говорящего: демон принимал меня за чужого.")
         }
     }
@@ -953,7 +967,7 @@ class VoiceService : Service() {
         val ws = socket
         if (ws == null) {
             // Реплика пропала молча — это и есть «он меня не слышит».
-            report("реплика не ушла — ${linkState.label}")
+            report(getString(R.string.not_sent, getString(linkState.label)))
             // Раз человек говорит, самое время попробовать связаться снова.
             main.post { connectNow() }
             return
@@ -964,7 +978,9 @@ class VoiceService : Service() {
     // ---------- уведомление и статус ----------
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL, "Voice Shell", NotificationManager.IMPORTANCE_LOW)
+            val channel = NotificationChannel(
+                CHANNEL, getString(R.string.app_name), NotificationManager.IMPORTANCE_LOW
+            )
             channel.setShowBadge(false)
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
@@ -985,21 +1001,21 @@ class VoiceService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("Voice Shell · $phase")
+            .setContentTitle(getString(R.string.notification_title, getString(phase)))
             // Фаза говорит, слушает ли телефон; строка связи — дойдёт ли
             // сказанное до демона. Без второй первая обманчива.
-            .setSubText(linkState.label)
+            .setSubText(getString(linkState.label))
             .setContentText(text)
             .setContentIntent(open)
-            .addAction(0, "Говорить", listen)
-            .addAction(0, "Стоп", stop)
+            .addAction(0, getString(R.string.action_speak), listen)
+            .addAction(0, getString(R.string.action_stop_short), stop)
             .setOngoing(true)
             .setSilent(true)
             .build()
     }
 
     /** Одно слово о том, что сейчас происходит: его видно с экрана блокировки. */
-    private fun phase(next: String) {
+    private fun phase(next: Int) {
         if (phase == next) return
         phase = next
         report(lastLine)

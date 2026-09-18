@@ -21,7 +21,7 @@ class VoiceApp : Application() {
                 val trace = StringWriter().also { error.printStackTrace(PrintWriter(it)) }.toString()
                 Prefs(this).lastError = "${error.javaClass.name}: ${error.message}\n" +
                     trace.lineSequence().take(12).joinToString("\n")
-                Log.e("VoiceShell", "падение в ${thread.name}", error)
+                Log.e("VoiceShell", "crash in ${thread.name}", error)
             }
             previous?.uncaughtException(thread, error)
         }
