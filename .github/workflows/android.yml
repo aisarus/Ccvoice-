@@ -135,6 +135,12 @@ jobs:
           cp app-debug.apk voice-shell.apk
           zip -q voice-shell-apk.zip voice-shell.apk
           sha256sum app-debug.apk voice-shell-apk.zip > checksums.txt
+          # Размер рядом с суммой: сумму на телефоне не посчитаешь, а размер
+          # показывает любой файловый менеджер. Оборванная закачка — самая
+          # частая причина «пакет повреждён», и отличается она именно этим.
+          for f in app-debug.apk voice-shell-apk.zip; do
+            echo "$(stat -c %s "$f") байт  $f" >> checksums.txt
+          done
           # Чем подписано — рядом с суммами: скачавшему это нужно знать раньше,
           # чем он поставит APK поверх своего.
           cat signing.txt >> checksums.txt
@@ -199,9 +205,16 @@ jobs:
                 done
           }
 
+          # Выложить мало: надо убедиться, что в релизе лежит ровно то, что
+          # собрали. Загрузка может оборваться, и GitHub примет обрезанное
+          # тело как готовый файл — на телефоне это «пакет повреждён», а в
+          # логе сборки зелёная галочка. Поэтому каждый файл после загрузки
+          # скачивается обратно по той самой ссылке, которую откроет человек,
+          # и сверяется по сумме. Не сошлось — попытка не засчитана.
           put() {
             name="$1"
-            echo "— $name ($(du -h "$name" | cut -f1))"
+            want=$(sha256sum "$name" | cut -d" " -f1)
+            echo "— $name ($(du -h "$name" | cut -f1), $want)"
             for attempt in 1 2 3; do
               drop "$name"
               code=$(curl -sS -o /tmp/upload.out -w '%{http_code}' --max-time 300 \
@@ -209,8 +222,16 @@ jobs:
                 -H "Content-Type: application/octet-stream" \
                 --data-binary @"$name" \
                 "https://uploads.github.com/repos/$REPO/releases/$id/assets?name=$name") || code=000
-              if [ "$code" = "201" ]; then echo "  выложен"; return 0; fi
-              echo "  попытка $attempt: HTTP $code $(head -c 200 /tmp/upload.out || true)"
+              if [ "$code" = "201" ]; then
+                sleep 3   # ссылке дают осесть: сразу после загрузки она ещё 404
+                got=$(curl -sfL --max-time 300 \
+                        "https://github.com/$REPO/releases/download/apk-latest/$name" \
+                      | sha256sum | cut -d" " -f1) || got=""
+                if [ "$got" = "$want" ]; then echo "  выложен и сверен"; return 0; fi
+                echo "  попытка $attempt: в релизе лежит не то (${got:-не скачалось})"
+              else
+                echo "  попытка $attempt: HTTP $code $(head -c 200 /tmp/upload.out || true)"
+              fi
               sleep 5
             done
             return 1
@@ -219,6 +240,39 @@ jobs:
           put app-debug.apk || { echo "::error::APK не выложен"; exit 1; }
           put voice-shell-apk.zip || echo "::warning::запасной архив не выложен"
           put checksums.txt || echo "::warning::контрольные суммы не выложены"
+
+          # Описание релиза переписываем каждый раз: размер меняется от сборки
+          # к сборке, а именно по размеру человек с телефона и проверяет, что
+          # файл дошёл целиком. Описание, отставшее на одну сборку, тут хуже,
+          # чем никакого.
+          python3 - "$REPO" "$GH_TOKEN" "$id" \
+              "$(stat -c %s app-debug.apk)" "$(stat -c %s voice-shell-apk.zip)" <<'PYBODY'
+          import json, sys, urllib.request
+          repo, token, rid, apk, zipped = sys.argv[1:6]
+          size = lambda n: f"{int(n):,}".replace(",", " ")
+          body = f"""Свежая сборка приложения.
+
+          - `app-debug.apk` — обычный файл, ставится сразу. Размер ровно **{size(apk)} байт**
+            (≈ {int(apk)/2**20:.1f} МиБ). Если файловый менеджер на телефоне показывает меньше —
+            закачка оборвалась, и установщик скажет «пакет повреждён»: надо качать заново.
+          - `voice-shell-apk.zip` — то же самое в архиве, вдвое меньше ({int(zipped)/2**20:.1f} МиБ),
+            потому что в APK библиотеки лежат несжатыми. Качается надёжнее: скачай,
+            распакуй файловым менеджером и поставь `voice-shell.apk`.
+          - `checksums.txt` — суммы, размеры и отпечаток ключа подписи.
+
+          Все сборки подписаны одним ключом, поэтому обновление ставится поверх
+          предыдущего без удаления. Если установщик всё-таки упирается при целом
+          файле — значит стоит сборка, подписанная другим ключом: удали приложение
+          и поставь заново (сервер и токен придётся ввести ещё раз).
+          """
+          req = urllib.request.Request(
+              f"https://api.github.com/repos/{repo}/releases/{rid}",
+              data=json.dumps({"body": body}).encode(), method="PATCH",
+              headers={"Authorization": f"Bearer {token}",
+                       "Accept": "application/vnd.github+json"})
+          urllib.request.urlopen(req, timeout=60).read()
+          print("описание релиза обновлено")
+          PYBODY
 
       # Проверяем состояние, а не код возврата: ссылка на скачивание либо
       # работает, либо нет.
