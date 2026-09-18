@@ -82,6 +82,50 @@ if [ -x "$ROOT/.venv/bin/python" ]; then
 Откат: git -C $ROOT reset --hard $STAMP"
 fi
 
+# Новые настройки, которых у старой установки быть не могло. Дописываем
+# только недостающее: то, что человек поправил руками, остаётся как есть.
+add_env() {
+    grep -q "^$1=" "$ENV_FILE" 2>/dev/null && return 0
+    printf '%s=%s\n' "$1" "$2" >> "$ENV_FILE"
+    echo "— новая настройка: $1=$2"
+}
+if [ -f "$ENV_FILE" ]; then
+    PUBLIC="${PUBLIC_DIR:-$ROOT/public}"
+    mkdir -p "$PUBLIC"
+    PORT_NOW="$(sed -n 's/^PORT=//p' "$ENV_FILE" | tail -1)"
+    # Домен знает Caddy — если он стоит, адрес публикации https и без порта.
+    DOMAIN_NOW="$(sed -n 's/^\([A-Za-z0-9.-]*\) {$/\1/p' /etc/caddy/Caddyfile 2>/dev/null | head -1)"
+    if [ -n "$DOMAIN_NOW" ]; then
+        BASE="https://$DOMAIN_NOW"
+    else
+        BASE="http://$(hostname -I 2>/dev/null | awk '{print $1}'):${PORT_NOW:-8787}"
+    fi
+    add_env PUBLIC_DIR "$PUBLIC"
+    add_env PUBLIC_URL "$BASE/p"
+    add_env MCP_CONFIG "$ROOT/mcp.json"
+fi
+
+# Инструменты, которыми Claude Code делает то, чего не умеет сам. Ставим
+# только недостающее и только на apt-системах; не встало — не беда, приписка
+# к промпту говорит сессии правду о том, что на машине есть.
+if [ "${TOOLBOX:-1}" = "1" ] && command -v apt-get >/dev/null; then
+    missing=""
+    command -v ffmpeg  >/dev/null || missing="$missing ffmpeg"
+    command -v magick  >/dev/null || command -v convert >/dev/null || missing="$missing imagemagick"
+    command -v rg      >/dev/null || missing="$missing ripgrep"
+    command -v jq      >/dev/null || missing="$missing jq"
+    command -v pandoc  >/dev/null || missing="$missing pandoc"
+    command -v chromium >/dev/null || command -v chromium-browser >/dev/null \
+        || missing="$missing chromium chromium-browser"
+    if [ -n "$missing" ]; then
+        echo "— доставляю инструменты:$missing (не обязательно, можно TOOLBOX=0)"
+        DEBIAN_FRONTEND=noninteractive apt-get update -qq || true
+        for pkg in $missing; do
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$pkg" 2>/dev/null || true
+        done
+    fi
+fi
+
 command -v systemctl >/dev/null 2>&1 \
     || die "нет systemd — перезапусти демон тем способом, которым запускал"
 systemctl restart voice-shell \

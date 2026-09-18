@@ -10,6 +10,10 @@
 #   VOICE_TOKEN   свой токен доступа (по умолчанию генерируется)
 #   WORKSPACE     каталог, в котором будет работать Claude Code
 #   PORT          порт демона (по умолчанию 8787)
+#   PUBLIC_DIR    каталог публикации: что туда положено, то доступно по ссылке
+#   CODE_MODEL    модель для Claude Code (по умолчанию — та, что у CLI)
+#   CODE_EFFORT   усилие: low | medium | high | xhigh | max
+#   TOOLBOX=0     не ставить ffmpeg, ImageMagick и headless-браузер
 set -euo pipefail
 
 BRANCH="claude/voice-shell-claude-code-77wwh2"
@@ -18,6 +22,8 @@ ENV_FILE="/etc/voice-shell.env"
 SERVICE="/etc/systemd/system/voice-shell.service"
 PORT="${PORT:-8787}"
 WORKSPACE="${WORKSPACE:-/opt/voice-shell/workspace}"
+PUBLIC="${PUBLIC_DIR:-/opt/voice-shell/public}"
+MCP_FILE="${MCP_CONFIG:-/opt/voice-shell/mcp.json}"
 DOMAIN="${DOMAIN:-}"
 # С доменом впереди стоит Caddy, поэтому наружу порт открывать незачем.
 BIND_HOST="${HOST:-$([ -n "$DOMAIN" ] && echo 127.0.0.1 || echo 0.0.0.0)}"
@@ -71,6 +77,18 @@ if command -v apt-get >/dev/null; then
         curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
         apt-get install -y -qq nodejs
     fi
+    # Инструменты, которыми Claude Code делает то, чего сам не умеет: режет
+    # видео, рисует в PNG через headless-браузер, правит картинки. Ставятся
+    # поодиночке и мягко: чего нет в репозитории этой системы — того не будет,
+    # и установка из-за этого не падает. Приписка к промпту говорит сессии,
+    # что нашлось на самом деле, так что отсутствие честно видно, а не
+    # оборачивается «command not found» посреди работы.
+    if [ "${TOOLBOX:-1}" = "1" ]; then
+        for pkg in ffmpeg imagemagick ripgrep jq unzip pandoc \
+                   chromium chromium-browser fonts-dejavu fonts-noto-color-emoji; do
+            apt-get install -y -qq "$pkg" 2>/dev/null || true
+        done
+    fi
 elif command -v dnf >/dev/null; then
     dnf install -y -q git curl python3 python3-pip nodejs
 else
@@ -95,7 +113,7 @@ else
     git clone --quiet https://github.com/aisarus/Ccvoice-.git "$ROOT"
     git -C "$ROOT" checkout --quiet "$BRANCH"
 fi
-mkdir -p "$WORKSPACE"
+mkdir -p "$WORKSPACE" "$PUBLIC"
 
 say "Зависимости"
 python3 -m venv "$ROOT/.venv"
@@ -130,6 +148,14 @@ fi
 
 TOKEN="${VOICE_TOKEN:-$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')}"
 
+# Адрес нужен раньше, чем служба поднимется: его же демон называет вслух,
+# когда отдаёт ссылку на сделанное.
+if [ -n "$DOMAIN" ]; then
+    URL="https://$DOMAIN"
+else
+    URL="http://$(hostname -I 2>/dev/null | awk '{print $1}'):$PORT"
+fi
+
 say "Порт"
 systemctl stop voice-shell 2>/dev/null || true
 if command -v ss >/dev/null && ss -lntH "sport = :$PORT" | grep -q .; then
@@ -148,6 +174,11 @@ PORT=$PORT
 HOST=$BIND_HOST
 VOICE_ENV_FILE=$ENV_FILE
 PYTHONPATH=$ROOT/daemon
+PUBLIC_DIR=$PUBLIC
+PUBLIC_URL=$URL/p
+MCP_CONFIG=$MCP_FILE
+${CODE_MODEL:+CODE_MODEL=$CODE_MODEL}
+${CODE_EFFORT:+CODE_EFFORT=$CODE_EFFORT}
 ${OAUTH:+CLAUDE_CODE_OAUTH_TOKEN=$OAUTH}
 ENV
 chmod 600 "$ENV_FILE"
@@ -184,7 +215,6 @@ sleep 2
 systemctl is-active --quiet voice-shell || { journalctl -u voice-shell -n 30 --no-pager; die "служба не поднялась"; }
 curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null || die "демон не отвечает на /healthz"
 
-URL="http://$(hostname -I 2>/dev/null | awk '{print $1}'):$PORT"
 if [ -n "$DOMAIN" ]; then
     say "HTTPS для $DOMAIN"
     if ! command -v caddy >/dev/null; then
@@ -201,7 +231,6 @@ $DOMAIN {
 }
 CADDY
     systemctl restart caddy
-    URL="https://$DOMAIN"
 fi
 
 cat <<REPORT
@@ -213,6 +242,7 @@ cat <<REPORT
   привязка  : $BIND_HOST:$PORT
   токен     : $TOKEN
   проект    : $WORKSPACE
+  публикация: $PUBLIC -> $URL/p
   служба    : systemctl status voice-shell
   обновления: вручную — bash $ROOT/scripts/update-server.sh
   логи      : journalctl -u voice-shell -f

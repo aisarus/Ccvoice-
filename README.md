@@ -413,4 +413,5 @@ Documentation: [`docs/VOICE.md`](docs/VOICE.md) ·
 [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) ·
 [`docs/ЕСЛИ-НЕ-РАБОТАЕТ.md`](docs/ЕСЛИ-НЕ-РАБОТАЕТ.md) (ru) ·
 [`docs/DEPLOY.md`](docs/DEPLOY.md) ·
-[`docs/DEPLOY.ru.md`](docs/DEPLOY.ru.md) (ru)
+[`docs/DEPLOY.ru.md`](docs/DEPLOY.ru.md) (ru) ·
+[`docs/ВОЗМОЖНОСТИ.md`](docs/ВОЗМОЖНОСТИ.md) (ru)

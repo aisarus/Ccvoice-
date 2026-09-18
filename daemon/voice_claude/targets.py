@@ -16,7 +16,7 @@ from typing import Any, Awaitable, Callable
 
 import os
 
-from . import policy
+from . import capabilities, policy
 from .auth import credential_kind, credential_problem, credentials_present
 from . import i18n
 from .i18n import t
@@ -175,7 +175,38 @@ class CodeTarget(_SdkTarget):
             return PermissionResultAllow() if approved else PermissionResultDeny(
                 message=t("target.denied_by_voice"))
 
-        options: dict[str, Any] = {"cwd": str(self.cwd)}
+        caps = capabilities.detect(self.cwd)
+        options: dict[str, Any] = {
+            "cwd": str(self.cwd),
+            # Без этой строки SDK передаёт CLI пустой системный промпт — и
+            # Claude Code остаётся без собственных инструкций: без того, что
+            # учит его планировать работу, держаться соглашений проекта и
+            # доводить задачу до конца. Снаружи это выглядит не как поломка, а
+            # как «модель стала хуже»: инструменты на месте, ответы вялые.
+            # Сюда же ложится всё, что эта машина умеет, — иначе сессия об
+            # этом не узнает.
+            "system_prompt": {"type": "preset", "preset": "claude_code",
+                              "append": caps.briefing()},
+            "skills": caps.skills,
+            # Всё, что лежит на диске: CLAUDE.md проекта, настройки,
+            # навыки, субагенты, свои команды. SDK, когда включают навыки,
+            # сам сужает этот список до user+project — а local это
+            # `.claude/settings.local.json`, то есть настройки этой самой
+            # машины, и терять их незачем.
+            "setting_sources": ["user", "project", "local"],
+        }
+        if caps.model:
+            options["model"] = caps.model
+        if caps.effort:
+            options["effort"] = caps.effort
+        if caps.mcp_config is not None:
+            # Точка расширения: новый MCP-сервер подключается файлом на
+            # сервере, без правки кода и без выкладки.
+            options["mcp_servers"] = str(caps.mcp_config)
+        if caps.public_dir is not None:
+            # Каталог публикации лежит вне рабочей папки: без этого Claude
+            # Code туда не запишет и результат будет некуда деть.
+            options["add_dirs"] = [str(caps.public_dir)]
         if policy.mode() == "auto" and not running_as_root():
             # Ничего не спрашиваем: так решил хозяин машины.
             options["permission_mode"] = "bypassPermissions"

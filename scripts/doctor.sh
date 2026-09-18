@@ -169,6 +169,38 @@ else
     fi
 fi
 
+line "во что может Claude Code"
+PUBLIC_VALUE="$(value_of PUBLIC_DIR)"
+PUBLIC_ADDR="$(value_of PUBLIC_URL)"
+if [ -n "$PUBLIC_VALUE" ] && [ -n "$PUBLIC_ADDR" ]; then
+    if [ -d "$PUBLIC_VALUE" ]; then
+        printf 'публикация: %s -> %s (%s файлов)\n' \
+            "$PUBLIC_VALUE" "$PUBLIC_ADDR" "$(find "$PUBLIC_VALUE" -type f 2>/dev/null | wc -l)"
+    else
+        echo "публикация: каталог $PUBLIC_VALUE не существует"
+        note "каталог публикации $PUBLIC_VALUE не создан — mkdir -p $PUBLIC_VALUE"
+    fi
+else
+    echo "публикация: выключена — сделанное некуда положить, ссылку назвать нечем"
+    note "нет PUBLIC_DIR/PUBLIC_URL в $ENV_FILE — обнови: update-server.sh"
+fi
+printf 'модель    : %s\n' "$(value_of CODE_MODEL || true)$([ -z "$(value_of CODE_MODEL)" ] && echo 'по умолчанию CLI')"
+printf 'усилие    : %s\n' "$(value_of CODE_EFFORT || true)$([ -z "$(value_of CODE_EFFORT)" ] && echo 'по умолчанию')"
+MCP_VALUE="$(value_of MCP_CONFIG)"
+if [ -n "$MCP_VALUE" ] && [ -f "$MCP_VALUE" ]; then
+    printf 'MCP       : %s\n' "$MCP_VALUE"
+else
+    printf 'MCP       : нет серверов (файл %s)\n' "${MCP_VALUE:-не задан}"
+fi
+printf 'инструменты:'
+for tool in ffmpeg magick convert chromium chromium-browser node rg pandoc jq; do
+    command -v "$tool" >/dev/null 2>&1 && printf ' %s' "$tool"
+done
+printf '\n'
+command -v voice-imagine >/dev/null 2>&1 \
+    && echo "генератор картинок: voice-imagine" \
+    || echo "генератор картинок: не подключён — рисовать сессия умеет, сочинить фотографию нет"
+
 line "последние логи"
 if command -v journalctl >/dev/null 2>&1; then
     logs="$(journalctl -u voice-shell -n 12 --no-pager 2>/dev/null)"

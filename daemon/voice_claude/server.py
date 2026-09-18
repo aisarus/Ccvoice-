@@ -18,7 +18,8 @@ import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from html import escape
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from websockets.datastructures import Headers
 from websockets.http11 import Response
@@ -1285,7 +1286,8 @@ class Daemon:
             self.clients.discard(ws)
 
 
-def http_response(status: http.HTTPStatus, body: bytes, content_type: str) -> Response:
+def http_response(status: http.HTTPStatus, body: bytes, content_type: str,
+                  cache: str = "no-store") -> Response:
     """Build the response by hand.
 
     `connection.respond()` already fills Content-Type and Content-Length, and
@@ -1295,8 +1297,89 @@ def http_response(status: http.HTTPStatus, body: bytes, content_type: str) -> Re
     headers = Headers()
     headers["Content-Type"] = content_type
     headers["Content-Length"] = str(len(body))
-    headers["Cache-Control"] = "no-store"
+    headers["Cache-Control"] = cache
     return Response(status.value, status.phrase, headers, body)
+
+
+# Готовое кладётся сюда и становится ссылкой. Без этого Claude Code на сервере
+# умеет сделать сайт, картинку или отчёт — и не умеет их отдать: человек на
+# другом конце слышит ответ одним ухом и экрана сервера не видит никогда.
+PUBLIC_PREFIX = "/p/"
+# Файл читается в память целиком: телефон просит его по обычному HTTP, а отдаёт
+# тот же процесс, что ведёт разговор. Полуторагигабайтное видео уронило бы
+# голосовую оболочку — поэтому потолок, и о нём сказано в приписке к промпту,
+# чтобы сессия сжимала видео, а не упиралась в отказ.
+MAX_PUBLISHED_BYTES = 64 * 1024 * 1024
+
+
+def public_dir(environ: dict[str, str] | None = None) -> Path | None:
+    raw = ((environ if environ is not None else os.environ).get("PUBLIC_DIR") or "").strip()
+    return Path(raw).expanduser() if raw else None
+
+
+def _listing(target: Path, root: Path) -> Response:
+    """Простой список файлов: с телефона это единственный способ увидеть,
+    что вообще лежит в публикации."""
+    here = "/" + str(target.relative_to(root)) if target != root else ""
+    rows = []
+    for item in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+        name = item.name + ("/" if item.is_dir() else "")
+        size = "" if item.is_dir() else f" — {item.stat().st_size / 1024:.0f} КБ"
+        rows.append(f'<li><a href="{escape(name)}">{escape(name)}</a>{size}</li>')
+    body = (f"<!doctype html><meta charset=utf-8>"
+            f"<meta name=viewport content='width=device-width,initial-scale=1'>"
+            f"<title>{escape(here or '/')}</title>"
+            f"<body style='font:16px/1.6 system-ui;margin:2rem'>"
+            f"<h1 style='font-size:1.2rem'>{escape(here or '/')}</h1>"
+            f"<ul>{''.join(rows) or '<li>пусто</li>'}</ul>")
+    return http_response(http.HTTPStatus.OK, body.encode("utf-8"),
+                         "text/html; charset=utf-8")
+
+
+def published_response(path: str, directory: Path) -> Response:
+    """Отдать то, что Claude Code положил в каталог публикации."""
+    rel = unquote(path[len(PUBLIC_PREFIX):]) if path.startswith(PUBLIC_PREFIX) else ""
+    root = directory.resolve()
+    if not root.is_dir():
+        return http_response(http.HTTPStatus.NOT_FOUND, b"publishing is off\n",
+                             "text/plain; charset=utf-8")
+    target = (root / rel).resolve()
+    # Единственная проверка, которая здесь важна: наружу не должно уехать
+    # ничего за пределами каталога. `..` в адресе — обычное дело.
+    if target != root and root not in target.parents:
+        return http_response(http.HTTPStatus.NOT_FOUND, b"not found\n",
+                             "text/plain; charset=utf-8")
+    if target.is_dir():
+        if not path.endswith("/"):
+            # Без косой черты браузер считает адрес файлом, и все
+            # относительные ссылки внутри страницы уезжают на уровень выше:
+            # сайт открывается без стилей и картинок.
+            headers = Headers()
+            # Заголовок ходит по сети как ASCII: «сайт» в нём — это отказ
+            # websockets собрать ответ, то есть пятисотая на имени папки,
+            # которое Claude Code выберет по-русски чаще, чем по-английски.
+            headers["Location"] = quote(PUBLIC_PREFIX + rel.strip("/") + "/", safe="/")
+            headers["Content-Length"] = "0"
+            return Response(http.HTTPStatus.MOVED_PERMANENTLY.value,
+                            http.HTTPStatus.MOVED_PERMANENTLY.phrase, headers, b"")
+        index = target / "index.html"
+        if index.is_file():
+            target = index
+        else:
+            return _listing(target, root)
+    if not target.is_file():
+        return http_response(http.HTTPStatus.NOT_FOUND, b"not found\n",
+                             "text/plain; charset=utf-8")
+    if target.stat().st_size > MAX_PUBLISHED_BYTES:
+        return http_response(http.HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                             f"файл больше {MAX_PUBLISHED_BYTES // 1024 // 1024} МБ\n"
+                             .encode("utf-8"), "text/plain; charset=utf-8")
+    content_type = EXTRA_TYPES.get(target.suffix) or \
+        mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    if content_type.startswith(("text/", "application/javascript")):
+        content_type += "; charset=utf-8"
+    return http_response(http.HTTPStatus.OK, target.read_bytes(), content_type,
+                         cache="public, max-age=60")
 
 
 def static_response(path: str, directory: Path = CLIENT_DIR) -> Response:
@@ -1344,6 +1427,10 @@ def make_process_request(directory: Path = CLIENT_DIR,
             return http_response(http.HTTPStatus.OK, b"ok\n", "text/plain; charset=utf-8")
         if request.headers.get("Upgrade", "").lower() == "websocket":
             return None
+        published = public_dir()
+        if published is not None and (path == PUBLIC_PREFIX.rstrip("/")
+                                      or path.startswith(PUBLIC_PREFIX)):
+            return published_response(path, published)
         return static_response(path, directory)
 
     return process_request
