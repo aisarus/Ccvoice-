@@ -15,26 +15,27 @@
 #   VOICE_ENV_FILE      файл окружения службы (по умолчанию /etc/voice-shell.env)
 set -euo pipefail
 
-# Этот скрипт обновляет репозиторий, в котором лежит сам, — и это ловушка.
-# bash читает файл по мере выполнения, по смещению в байтах, а `git reset
-# --hard` меняет этот файл прямо под ним. Дальше выполнение продолжается с
-# того же смещения, но уже в другом тексте: попадает в середину чужой
-# строки или молча упирается в конец файла. Снаружи это выглядит как
-# «команда отработала и ничего не сделала» — без ошибки, без слова, с нулевым
-# кодом возврата. Проверено: ровно так и происходит.
+# Скрипт сбрасывает репозиторий, в котором лежит сам. bash читает файл по
+# мере выполнения, по смещению в байтах, и `git reset --hard` меняет этот
+# файл под ним: дальше выполнение уходит в середину чужой строки или молча
+# упирается в конец. Ноль на выходе, половина работы сделана. Уходим в копию
+# до первой правки — её переписать некому.
 #
-# Поэтому первым делом уходим в копию. Её переписать некому.
+# Проверка на `.sh` не лишняя: при запуске через `curl | bash` в $0 лежит
+# «bash», копировать надо не его, да и переписывать под таким запуском нечего.
 VOICE_SHELL_SELF="${VOICE_SHELL_SELF:-$0}"
-if [ -z "${VOICE_SHELL_SELF_COPY:-}" ] && [ -f "$0" ] && [ -r "$0" ]; then
-    SELF_COPY="$(mktemp "${TMPDIR:-/tmp}/voice-shell-run.XXXXXX")"
-    cat "$0" > "$SELF_COPY"
-    export VOICE_SHELL_SELF VOICE_SHELL_SELF_COPY="$SELF_COPY"
-    exec bash "$SELF_COPY" "$@"
-fi
-if [ -n "${VOICE_SHELL_SELF_COPY:-}" ]; then
+if [ -z "${VOICE_SHELL_SELF_COPY:-}" ]; then
+    case "$0" in
+        *.sh)
+            SELF_COPY="$(mktemp "${TMPDIR:-/tmp}/voice-shell-run.XXXXXX")"
+            cat "$0" > "$SELF_COPY"
+            export VOICE_SHELL_SELF VOICE_SHELL_SELF_COPY="$SELF_COPY"
+            exec bash "$SELF_COPY" "$@"
+            ;;
+    esac
+else
     trap 'rm -f "$VOICE_SHELL_SELF_COPY"' EXIT
 fi
-
 ROOT="${VOICE_SHELL_DIR:-/opt/voice-shell}"
 BRANCH="${VOICE_SHELL_BRANCH:-claude/voice-shell-claude-code-77wwh2}"
 ENV_FILE="${VOICE_ENV_FILE:-/etc/voice-shell.env}"

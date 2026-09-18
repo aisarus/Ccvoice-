@@ -21,11 +21,31 @@
 #   VOICE_ENV_FILE   файл окружения службы (по умолчанию /etc/voice-shell.env)
 set -euo pipefail
 
-# Запускают через curl | sudo bash, и тогда $0 — это «bash».
+# Скрипт сбрасывает репозиторий, в котором лежит сам. bash читает файл по
+# мере выполнения, по смещению в байтах, и `git reset --hard` меняет этот
+# файл под ним: дальше выполнение уходит в середину чужой строки или молча
+# упирается в конец. Ноль на выходе, половина работы сделана. Уходим в копию
+# до первой правки — её переписать некому.
+#
+# Проверка на `.sh` не лишняя: при запуске через `curl | bash` в $0 лежит
+# «bash», копировать надо не его, да и переписывать под таким запуском нечего.
 VOICE_SHELL_SELF="${VOICE_SHELL_SELF:-$0}"
+if [ -z "${VOICE_SHELL_SELF_COPY:-}" ]; then
+    case "$0" in
+        *.sh)
+            SELF_COPY="$(mktemp "${TMPDIR:-/tmp}/voice-shell-run.XXXXXX")"
+            cat "$0" > "$SELF_COPY"
+            export VOICE_SHELL_SELF VOICE_SHELL_SELF_COPY="$SELF_COPY"
+            exec bash "$SELF_COPY" "$@"
+            ;;
+    esac
+else
+    trap 'rm -f "$VOICE_SHELL_SELF_COPY"' EXIT
+fi
 
 ROOT="${VOICE_SHELL_DIR:-/opt/voice-shell}"
 ENV_FILE="${VOICE_ENV_FILE:-/etc/voice-shell.env}"
+BRANCH="${VOICE_SHELL_BRANCH:-claude/voice-shell-claude-code-77wwh2}"
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf '\n\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
@@ -61,6 +81,18 @@ ask_secret() {
   curl -fsSL https://raw.githubusercontent.com/aisarus/Ccvoice-/claude/voice-shell-claude-code-77wwh2/scripts/install-server.sh | sudo bash"
 
 # ---------------------------------------------------------------- обновление
+# Сначала свежий код, и только потом запуск того, что в нём лежит. Иначе
+# круг не разорвать: update-server.sh на диске может быть той самой версией,
+# которую эта выкладка и чинит, — и сломается раньше, чем донесёт починку.
+# Этот скрипт пришёл по curl, тела на диске у него нет, переписывать под ним
+# нечего, поэтому сброс безопасно делать отсюда.
+say "Свежий код"
+git -C "$ROOT" fetch -q origin "$BRANCH" \
+    || die "не смог забрать ветку $BRANCH — проверь сеть и доступ"
+git -C "$ROOT" tag -f "before-setup-$(date +%Y%m%d-%H%M%S)" HEAD >/dev/null 2>&1 || true
+git -C "$ROOT" reset --hard -q "origin/$BRANCH"
+echo "версия: $(git -C "$ROOT" log --oneline -1)"
+
 say "Обновление сервера"
 bash "$ROOT/scripts/update-server.sh"
 
