@@ -7,7 +7,11 @@ package com.voiceshell
  * потому что остановка не должна зависеть от круга по сети.
  */
 object Intents {
-    val WAKE = listOf("клод", "клода", "клоуд", "клауд", "claude", "клот", "клоуде")
+    val WAKE = listOf("клод", "клода", "клоуд", "клауд", "claude", "клот", "клоуде",
+                      "claudio", "clod")
+
+    /** Обращение по-китайски: там нет пробелов, слово ищется в начале строки. */
+    private val WAKE_CJK = listOf("克劳德", "克劳德你好")
 
     /**
      * От этих слов отсчитывается допуск в одну букву.
@@ -23,8 +27,18 @@ object Intents {
         "стоп работу", "стоп работа", "останови работу", "останови", "прекрати",
         // Про работу сказано прямо — это остановка, а не откат.
         "отмени работу", "отмена работы",
-        "stop working", "stop the work", "abort", "cancel"
+        "stop working", "stop the work", "abort", "cancel",
+        "detén el trabajo", "deten el trabajo", "para el trabajo", "cancela"
     )
+
+    /**
+     * «Стоп» по-китайски: без пробелов, поэтому сравнение по началу строки.
+     *
+     * Отдельно от остальных ровно поэтому: `startsWith("$it ")` там не
+     * сработало бы никогда, а `bare == it` требовал бы идеально чистой реплики.
+     */
+    private val STOP_WORK_CJK = listOf("停止工作", "别做了", "取消任务")
+    private val STOP_VOICE_CJK = listOf("停下", "安静", "够了", "别说了", "停")
 
     /**
      * Остановка только целой репликой, без продолжения.
@@ -37,13 +51,20 @@ object Intents {
     private val STOP_WORK_ALONE = listOf("отмени", "отмена")
     private val STOP_VOICE = listOf(
         "стоп", "тихо", "хватит", "замолчи",
-        "stop", "quiet", "enough", "shut up"
+        "stop", "quiet", "enough", "shut up",
+        "silencio", "basta", "cállate", "callate", "para"
     )
+
+    private fun isCjk(text: String): Boolean = text.any { it in '\u4e00'..'\u9fff' }
 
     fun normalise(text: String): String =
         text.lowercase().replace(Regex("[^\\p{L}\\p{N}\\s]"), " ").replace(Regex("\\s+"), " ").trim()
 
-    fun hasWake(text: String): Boolean = isWake(normalise(text).substringBefore(' '))
+    fun hasWake(text: String): Boolean {
+        val bare = normalise(text)
+        if (WAKE_CJK.any { bare.startsWith(it) }) return true
+        return isWake(bare.substringBefore(' '))
+    }
 
     /**
      * Обращение с допуском в одну букву.
@@ -79,6 +100,9 @@ object Intents {
 
     fun stripWake(text: String): String {
         val normalised = normalise(text)
+        WAKE_CJK.firstOrNull { normalised.startsWith(it) }?.let { wake ->
+            return normalised.removePrefix(wake).trim().ifBlank { text.trim() }
+        }
         val first = normalised.substringBefore(' ')
         if (!isWake(first)) return text.trim()
         return normalised.substringAfter(' ', "").trim().ifBlank { text.trim() }
@@ -86,17 +110,25 @@ object Intents {
 
     /** Смена языка голосом: «Клод, английский». Возвращает код языка или null. */
     private val LANGUAGES = mapOf(
-        "ru-RU" to listOf("русский", "по русски", "russian", "рашн"),
-        "en-US" to listOf("английский", "по английски", "english", "инглиш"),
-        "he-IL" to listOf("иврит", "на иврите", "hebrew", "עברית")
+        "ru-RU" to listOf("русский", "по русски", "russian", "рашн", "ruso", "俄语"),
+        "en-US" to listOf("английский", "по английски", "english", "инглиш",
+                          "inglés", "ingles", "英语"),
+        "es-ES" to listOf("испанский", "по испански", "spanish", "español", "espanol",
+                          "西班牙语"),
+        "zh-CN" to listOf("китайский", "по китайски", "chinese", "chino",
+                          "中文", "汉语", "普通话"),
+        "he-IL" to listOf("иврит", "на иврите", "hebrew", "hebreo", "עברית", "希伯来语")
     )
 
     fun languageSwitch(text: String): String? {
         val bare = stripWake(normalise(text))
             .removePrefix("переключись на ").removePrefix("переключись ")
-            .removePrefix("говори ").removePrefix("switch to ").removePrefix("speak ").trim()
+            .removePrefix("говори ").removePrefix("switch to ").removePrefix("speak ")
+            .removePrefix("cambia a ").removePrefix("habla ")
+            .removePrefix("说").removePrefix("切换到").trim()
         for ((code, words) in LANGUAGES) {
             if (words.any { bare == it || bare.startsWith("$it ") }) return code
+            if (words.any { isCjk(it) && bare.startsWith(it) }) return code
         }
         return null
     }
@@ -104,8 +136,13 @@ object Intents {
     /** Язык ответа определяется по письменности, а не по настройке. */
     fun scriptLanguage(text: String, fallback: String): String = when {
         text.any { it in '\u0590'..'\u05FF' } -> "he-IL"
+        isCjk(text) -> "zh-CN"
         text.any { it in '\u0400'..'\u04FF' } -> "ru-RU"
-        text.any { it in 'a'..'z' || it in 'A'..'Z' } -> "en-US"
+        // Испанский от английского письменностью не отличить, и гадать по
+        // словам здесь незачем: выбранный язык реплик уже говорит, какой из
+        // двух имеется в виду.
+        text.any { it in 'a'..'z' || it in 'A'..'Z' } ->
+            if (fallback.startsWith("es")) "es-ES" else "en-US"
         else -> fallback
     }
 
@@ -114,7 +151,9 @@ object Intents {
         val bare = stripWake(normalise(text))
         if (STOP_WORK_ALONE.any { bare == it }) return "work"
         STOP_WORK.firstOrNull { bare == it || bare.startsWith("$it ") }?.let { return "work" }
+        STOP_WORK_CJK.firstOrNull { bare.startsWith(it) }?.let { return "work" }
         STOP_VOICE.firstOrNull { bare == it || bare.startsWith("$it ") }?.let { return "voice" }
+        STOP_VOICE_CJK.firstOrNull { bare.startsWith(it) }?.let { return "voice" }
         return null
     }
 }

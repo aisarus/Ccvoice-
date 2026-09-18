@@ -798,6 +798,9 @@ class VoiceService : Service() {
                 webSocket.send(
                     JSONObject().put("id", "hello").put("v", 1)
                         .put("token", prefs.token).put("device_id", "android")
+                        // Демон отвечает на языке телефона, пока не услышит
+                        // другой: иначе первая же реплика пришла бы по-английски.
+                        .put("language", prefs.language)
                         .put("app_version", "0.4.0").toString()
                 )
                 main.post {

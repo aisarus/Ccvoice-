@@ -97,7 +97,7 @@ class MainActivity : AppCompatActivity() {
 
         // Коды — для распознавателя и синтеза, подписи — для человека: они
         // названы на самих себе и от языка интерфейса не зависят.
-        val codes = listOf("ru-RU", "en-US", "he-IL")
+        val codes = listOf("en-US", "ru-RU", "es-ES", "zh-CN", "he-IL")
         language.adapter = ArrayAdapter(
             this, android.R.layout.simple_spinner_dropdown_item,
             resources.getStringArray(R.array.reply_language_names)

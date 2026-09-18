@@ -18,12 +18,29 @@ android {
 
     // Постоянный ключ: иначе каждая сборка в CI подписывается новым
     // отладочным ключом, и Android отказывается ставить обновление поверх.
+    //
+    // Ключ в репозитории — это ключ, который есть у всех: чужой человек
+    // соберёт APK, который встанет обновлением поверх настоящего. Поэтому
+    // настоящий релиз подписывается ключом из секретов GitHub Actions, а
+    // отладочный из репозитория остаётся запасным — иначе форк и локальная
+    // сборка у того, кто секретов не заводил, перестали бы собираться вовсе.
+    val releaseKeystore = (project.findProperty("keystore") as String?)
+        ?: System.getenv("ANDROID_KEYSTORE_FILE")
+    val releasePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+
     signingConfigs {
         create("shared") {
-            storeFile = file("voice-shell.keystore")
-            storePassword = "voiceshell"
-            keyAlias = "voiceshell"
-            keyPassword = "voiceshell"
+            if (!releaseKeystore.isNullOrBlank() && !releasePassword.isNullOrBlank()) {
+                storeFile = file(releaseKeystore)
+                storePassword = releasePassword
+                keyAlias = "voiceshell"
+                keyPassword = releasePassword
+            } else {
+                storeFile = file("voice-shell.keystore")
+                storePassword = "voiceshell"
+                keyAlias = "voiceshell"
+                keyPassword = "voiceshell"
+            }
         }
     }
 

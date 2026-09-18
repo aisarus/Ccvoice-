@@ -25,8 +25,10 @@
       в MainActivity.
     -->
     <string-array name="reply_language_names" translatable="false">
-        <item>русский</item>
         <item>English</item>
+        <item>русский</item>
+        <item>español</item>
+        <item>中文</item>
         <item>עברית</item>
     </string-array>
 
@@ -58,7 +60,7 @@
     <string name="action_auth_done">done</string>
     <string name="action_copy_error">copy the last error</string>
     <string name="status_idle">not running</string>
-    <string name="help_text">Switch languages by voice: “Claude, English”, “Claude, Hebrew”, “Claude, Russian”. An answer is spoken in the language it arrived in. The wake word “Claude” is heard by the phone itself, with no internet. After that your words are recognised in the chosen language — Russian, English or Hebrew. Say “Claude…” and only the text of what you said leaves the phone. The headset button lets you speak without the wake word. “Stop” silences the voice, “stop working” interrupts the work.</string>
+    <string name="help_text">Switch languages by voice: “Claude, Spanish”, “Claude, Chinese”, “Claude, Russian”, “Claude, English”. Commands are understood in English, Russian, Spanish and Chinese, all at once — you never have to say which one you are about to use. An answer comes back in the language you spoke. The wake word “Claude” is heard by the phone itself, with no internet; after it, your words are recognised in the chosen language. Say “Claude…” and only the text of what you said leaves the phone. The headset button lets you speak without the wake word. “Stop” silences the voice, “stop working” interrupts the work.</string>
 
     <!-- Переключатели: подпись кнопки и есть её состояние. -->
     <string name="speech_on">speech: on</string>

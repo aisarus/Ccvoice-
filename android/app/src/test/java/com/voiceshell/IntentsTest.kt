@@ -93,4 +93,59 @@ class IntentsTest {
         assertEquals("ru-RU", Intents.languageSwitch("говори русский"))
         assertNull(Intents.languageSwitch("клод покажи логи"))
     }
+
+    // -- четыре языка ------------------------------------------------------
+
+    @Test
+    fun `обращение по-китайски слышно, хотя пробела после него нет`() {
+        // В китайском слова не разделяются пробелом, и `substringBefore(' ')`
+        // отдавал бы всю реплику целиком — обращение не находилось никогда.
+        assertTrue(Intents.hasWake("克劳德，把测试修一下"))
+        assertEquals("把测试修一下", Intents.stripWake("克劳德，把测试修一下"))
+    }
+
+    @Test
+    fun `стоп понимается на всех четырёх языках`() {
+        assertEquals("voice", Intents.stopIntent("стоп"))
+        assertEquals("voice", Intents.stopIntent("quiet"))
+        assertEquals("voice", Intents.stopIntent("silencio"))
+        assertEquals("voice", Intents.stopIntent("安静"))
+        assertEquals("work", Intents.stopIntent("останови работу"))
+        assertEquals("work", Intents.stopIntent("stop working"))
+        assertEquals("work", Intents.stopIntent("detén el trabajo"))
+        assertEquals("work", Intents.stopIntent("停止工作"))
+    }
+
+    @Test
+    fun `язык переключается голосом на любом из четырёх`() {
+        assertEquals("es-ES", Intents.languageSwitch("клод, испанский"))
+        assertEquals("es-ES", Intents.languageSwitch("claude, spanish"))
+        assertEquals("zh-CN", Intents.languageSwitch("claude, chinese"))
+        assertEquals("zh-CN", Intents.languageSwitch("克劳德，中文"))
+        assertEquals("en-US", Intents.languageSwitch("claude, english"))
+        assertEquals("ru-RU", Intents.languageSwitch("клод, русский"))
+    }
+
+    @Test
+    fun `китайский ответ читается китайским голосом`() {
+        assertEquals("zh-CN", Intents.scriptLanguage("已回滚 auth.ts", "en-US"))
+    }
+
+    @Test
+    fun `испанский от английского письменностью не отличить, решает выбор языка`() {
+        // Обе латиницей: гадать по словам здесь незачем — выбранный язык
+        // реплик уже говорит, какой из двух имеется в виду.
+        assertEquals("es-ES", Intents.scriptLanguage("Anotado.", "es-ES"))
+        assertEquals("en-US", Intents.scriptLanguage("Noted.", "en-US"))
+        assertEquals("en-US", Intents.scriptLanguage("Noted.", "he-IL"))
+    }
+
+    @Test
+    fun `откат по-прежнему уезжает к демону, а не гасится телефоном`() {
+        // Ради этого STOP_WORK_ALONE и появился: добавление новых языков не
+        // должно было вернуть прежнюю поломку.
+        assertEquals(null, Intents.stopIntent("отмени последнее"))
+        assertEquals(null, Intents.stopIntent("撤销刚才的"))
+        assertEquals("work", Intents.stopIntent("отмени"))
+    }
 }

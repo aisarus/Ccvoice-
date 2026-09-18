@@ -14,10 +14,22 @@ class Prefs(context: Context) {
         get() = sp.getString("token", "") ?: ""
         set(value) = sp.edit().putString("token", clean(value)).apply()
 
-    /** Язык реплик: ru-RU, en-US, he-IL. Wake word всегда слушается локально. */
+    /**
+     * Язык реплик: en-US, ru-RU, es-ES, zh-CN, he-IL. Wake word всегда
+     * слушается локально, независимо от этого выбора.
+     *
+     * По умолчанию — язык телефона, если он из списка: человек, поставивший
+     * приложение, уже сказал системе, на каком языке говорит, и спрашивать
+     * его об этом второй раз незачем.
+     */
     var language: String
-        get() = sp.getString("language", "ru-RU") ?: "ru-RU"
+        get() = sp.getString("language", deviceLanguage()) ?: deviceLanguage()
         set(value) = sp.edit().putString("language", value).apply()
+
+    private fun deviceLanguage(): String {
+        val want = java.util.Locale.getDefault().language.lowercase()
+        return SUPPORTED.firstOrNull { it.startsWith(want) } ?: "en-US"
+    }
 
     /** Последняя ошибка службы: без компьютера это единственный способ её увидеть. */
     var lastError: String
@@ -113,5 +125,10 @@ class Prefs(context: Context) {
             raw.startsWith("wss://") || raw.startsWith("ws://") -> raw
             else -> "wss://$raw"
         }
+    }
+
+    companion object {
+        /** Порядок тот же, что у подписей в `reply_language_names`. */
+        val SUPPORTED = listOf("en-US", "ru-RU", "es-ES", "zh-CN", "he-IL")
     }
 }

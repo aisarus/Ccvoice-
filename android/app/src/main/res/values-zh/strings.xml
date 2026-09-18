@@ -34,7 +34,7 @@
     <string name="action_auth_done">完成</string>
     <string name="action_copy_error">复制最后一条错误</string>
     <string name="status_idle">未启动</string>
-    <string name="help_text">用语音切换语言：“Claude, English”“Claude, Hebrew”“Claude, Russian”，口令只认英语和俄语。答复用它到来时的语言朗读。唤醒词“Claude”由手机本地识别，不联网。之后你说的话按所选语言识别：俄语、英语或希伯来语。说一声“Claude…”，离开手机的只有识别出来的文字。耳机上的按键可以不说唤醒词直接讲话。“stop”让它闭嘴，“stop working”中断正在做的事。</string>
+    <string name="help_text">用语音切换语言：“克劳德，中文”“克劳德，英语”“克劳德，西班牙语”“克劳德，俄语”。口令同时认中文、英语、俄语和西班牙语，不用事先说明你要用哪种。答复会用你刚才说的那种语言回来。唤醒词“Claude”和“克劳德”由手机本地识别，不联网；之后你说的话按所选语言识别。说一声“克劳德……”，离开手机的只有识别出来的文字。耳机上的按键可以不说唤醒词直接讲话。“安静”让它闭嘴，“停止工作”中断正在做的事。</string>
 
     <!-- Переключатели: подпись кнопки и есть её состояние. -->
     <string name="speech_on">朗读：开</string>
