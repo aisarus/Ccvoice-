@@ -192,4 +192,5 @@
     <string name="listening_multilingual">我会听我认识的所有语言。</string>
     <string name="listening_one_language">我只听一种语言。</string>
     <string name="listening_language">现在按 %1$s 来听。</string>
+    <string name="headset_key_ignored">耳机按键 %1$s 到了，但没有给它绑定任何动作</string>
 </resources>

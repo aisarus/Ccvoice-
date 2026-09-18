@@ -9,8 +9,10 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.media.MediaPlayer
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -28,8 +30,10 @@ import android.speech.tts.Voice
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
+import android.view.KeyEvent
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import androidx.media.session.MediaButtonReceiver
 import androidx.core.content.ContextCompat
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -38,6 +42,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
@@ -197,6 +202,8 @@ class VoiceService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            // Нажатие на гарнитуре приходит сюда через androidx-приёмник.
+            Intent.ACTION_MEDIA_BUTTON -> MediaButtonReceiver.handleIntent(session, intent)
             ACTION_STOP -> { stopSelf(); return START_NOT_STICKY }
             ACTION_LISTEN -> armWindow()
             ACTION_MIC -> {
@@ -672,14 +679,45 @@ class VoiceService : Service() {
         session = MediaSessionCompat(this, "VoiceShell").apply {
             setPlaybackState(
                 PlaybackStateCompat.Builder()
+                    // Объявлять надо ровно то, что обрабатываешь: система
+                    // отбрасывает необъявленное действие до колбэка, и
+                    // двойное касание — то есть «следующий трек» — не
+                    // доходило никогда, хотя обработчик для него стоял.
                     .setActions(
                         PlaybackStateCompat.ACTION_PLAY or PlaybackStateCompat.ACTION_PAUSE or
-                            PlaybackStateCompat.ACTION_PLAY_PAUSE or PlaybackStateCompat.ACTION_STOP
+                            PlaybackStateCompat.ACTION_PLAY_PAUSE or
+                            PlaybackStateCompat.ACTION_STOP or
+                            PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+                            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
                     )
                     .setState(PlaybackStateCompat.STATE_PLAYING, 0, 1.0f)
                     .build()
             )
             setCallback(object : MediaSessionCompat.Callback() {
+                /**
+                 * Видимый след нажатия.
+                 *
+                 * Кнопка молчит по четырём разным причинам, и снаружи они
+                 * неотличимы: гарнитура не шлёт, система отдала другому,
+                 * действие не объявлено, обработчик не сработал. Эта строчка
+                 * отделяет «не дошло» от «дошло и ничего не сделало».
+                 */
+                override fun onMediaButtonEvent(intent: Intent): Boolean {
+                    val event = runCatching {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT)
+                    }.getOrNull()
+                    val handled = super.onMediaButtonEvent(intent)
+                    if (event != null && event.action == KeyEvent.ACTION_DOWN) {
+                        val name = KeyEvent.keyCodeToString(event.keyCode)
+                        Log.i(TAG, "headset key $name handled=$handled")
+                        // Нажатие дошло, но действие незнакомое: это третья,
+                        // самая неочевидная поломка, и молчать о ней нельзя —
+                        // снаружи она неотличима от «гарнитура ничего не шлёт».
+                        if (!handled) report(getString(R.string.headset_key_ignored, name))
+                    }
+                    return handled
+                }
                 override fun onPlay() = armWindow()
                 override fun onPause() = armWindow()
                 override fun onStop() = armWindow()
@@ -688,14 +726,79 @@ class VoiceService : Service() {
             })
             isActive = true
         }
+        claimMediaButtons()
     }
 
-    /** Кнопка разрешает реплику без обращения, а без wake word — начинает её. */
+    /**
+     * Занять очередь на кнопку, проиграв секунду тишины.
+     *
+     * Android отдаёт нажатие той сессии, которая последней **звучала**, а не
+     * той, которая объявила себя играющей. Оболочка, ни разу ничего не
+     * сказавшая, в этом споре не участвует вовсе — и кнопка уходит мимо.
+     *
+     * Держать поток постоянно было бы дороже, чем нужно: канал bluetooth
+     * остаётся открытым, и садятся обе батареи. Хватает одного раза при
+     * старте: дальше очередь обновляет сама речь оболочки — это настоящий
+     * звук, и каждый ответ заново делает нас последними.
+     */
+    private fun claimMediaButtons() {
+        runCatching {
+            val file = File(cacheDir, "silence.wav")
+            if (!file.exists()) file.writeBytes(silentWav(seconds = 1.0))
+            MediaPlayer().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                setDataSource(file.absolutePath)
+                // Не ноль: нулевую громкость система вправе счесть за молчание.
+                setVolume(0.0001f, 0.0001f)
+                setOnCompletionListener { it.release() }
+                setOnErrorListener { player, _, _ -> player.release(); true }
+                prepare()
+                start()
+            }
+        }.onFailure { Log.i(TAG, "media button claim: ${it.javaClass.simpleName}") }
+    }
+
+    /** WAV из одних нулей: файла в репозитории ради этого заводить незачем. */
+    private fun silentWav(seconds: Double): ByteArray {
+        val rate = 8000
+        val samples = (rate * seconds).toInt()
+        val data = samples * 2
+        val out = java.io.ByteArrayOutputStream(44 + data)
+        fun ascii(s: String) = out.write(s.toByteArray(Charsets.US_ASCII))
+        fun int32(v: Int) = out.write(byteArrayOf(
+            v.toByte(), (v shr 8).toByte(), (v shr 16).toByte(), (v shr 24).toByte()))
+        fun int16(v: Int) = out.write(byteArrayOf(v.toByte(), (v shr 8).toByte()))
+        ascii("RIFF"); int32(36 + data); ascii("WAVE")
+        ascii("fmt "); int32(16); int16(1); int16(1)
+        int32(rate); int32(rate * 2); int16(2); int16(16)
+        ascii("data"); int32(data)
+        out.write(ByteArray(data))
+        return out.toByteArray()
+    }
+
+    /**
+     * Нажатие на гарнитуре: слушаю прямо сейчас, говори.
+     *
+     * Раньше кнопка на русском только **взводила** окно, а распознавание
+     * начиналось, когда локальная модель услышит речь. Разница незаметна в
+     * коде и очень заметна в ухе: нажал — и не понял, услышали тебя или нет.
+     * Условие вдобавок спрашивало «русский ли язык», хотя настоящий вопрос —
+     * «покроет ли эту речь локальная модель»; языков стало пять, и вопрос
+     * стал звучать неправильно раньше, чем начал давать неправильный ответ.
+     */
     private fun armWindow() {
         if (speaking) silence()
         windowUntil = System.currentTimeMillis() + WINDOW_MS
+        // Сигнал в ухо: с телефоном в кармане это единственное подтверждение,
+        // что нажатие дошло.
+        signals?.listening(route?.onBluetoothMic == true)
         report(getString(R.string.listening_go_ahead))
-        if (!wakeReady || prefs.language != "ru-RU") listenForCommand()
+        listenForCommand()
     }
 
     // ---------- речь ----------

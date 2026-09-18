@@ -41,10 +41,19 @@
             </intent-filter>
         </activity>
 
+        <!--
+            MEDIA_BUTTON здесь не для красоты: androidx-приёмник ловит нажатие
+            и пересылает его сервису, который умеет это действие. Без фильтра
+            пересылать некому, и нажатие в фоне просто пропадало.
+        -->
         <service
             android:name=".VoiceService"
             android:exported="false"
-            android:foregroundServiceType="microphone" />
+            android:foregroundServiceType="microphone">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </service>
 
         <receiver
             android:name=".BootReceiver"

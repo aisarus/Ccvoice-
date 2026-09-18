@@ -192,4 +192,5 @@
     <string name="listening_multilingual">Escucho en todos los idiomas que conozco.</string>
     <string name="listening_one_language">Escucho en un solo idioma.</string>
     <string name="listening_language">Ahora escucho en %1$s.</string>
+    <string name="headset_key_ignored">la tecla %1$s del auricular llegó pero no tiene nada asignado</string>
 </resources>
