@@ -28,6 +28,8 @@ class WakeWordEngine(private val context: Context) {
         private const val MODEL_URL =
             "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"
         private const val MODEL_DIR = "vosk-model-small-ru-0.22"
+        /** Метка «скачано целиком»: каталог появляется гораздо раньше. */
+        private const val COMPLETE = ".complete"
         private const val TAG = "VoiceShell"
     }
 
@@ -46,15 +48,35 @@ class WakeWordEngine(private val context: Context) {
      */
     val isRunning: Boolean get() = speech != null && !failed
 
-    /** Качает модель, если её нет. Бросает — вызывающий решает, что делать. */
+    /**
+     * Качает модель, если её нет. Бросает — вызывающий решает, что делать.
+     *
+     * Признак «скачано» — отдельный файл, а не существование каталога.
+     * Каталог появляется на первой же записи из архива, и оборванная
+     * закачка — вышел из зоны вайфая, сел в машину — оставляла его на месте
+     * с половиной модели внутри. Дальше закачка пропускалась навсегда, а
+     * `Model()` падал на каждом запуске: обращение не работало до
+     * переустановки приложения, и чинилось это только ею.
+     */
     fun prepare(onProgress: (String) -> Unit) {
         val dir = File(context.filesDir, MODEL_DIR)
-        if (!dir.exists()) {
+        val done = File(dir, COMPLETE)
+        if (!done.exists()) {
+            runCatching { dir.deleteRecursively() }
             onProgress(context.getString(R.string.wake_downloading_model))
             download(MODEL_URL, context.filesDir)
+            // Метку ставим последней: всё, что до неё, можно смело стирать.
+            runCatching { done.writeText("ok") }
         }
         LibVosk.setLogLevel(LogLevel.WARNINGS)
-        model = Model(dir.absolutePath)
+        model = try {
+            Model(dir.absolutePath)
+        } catch (t: Throwable) {
+            // Модель есть, но не читается: метку снимаем, чтобы следующий
+            // запуск скачал заново, а не бился в то же самое.
+            runCatching { done.delete() }
+            throw t
+        }
     }
 
     fun start(onText: (String) -> Unit, onError: (Throwable) -> Unit) {

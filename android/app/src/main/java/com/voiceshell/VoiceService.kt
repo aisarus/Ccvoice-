@@ -165,6 +165,7 @@ class VoiceService : Service() {
     // Рукопожатие завершено и hello ушло: до этого сокет есть, а собеседника нет.
     @Volatile private var ready = false
     private var wakeLock: PowerManager.WakeLock? = null
+    @Volatile private var audioFocus = false
     private var cloud: SpeechRecognizer? = null
     private var wake: WakeWordEngine? = null
     private var route: AudioRoute? = null
@@ -301,7 +302,14 @@ class VoiceService : Service() {
 
     private val networkWatch = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            main.post { if (socket == null && linkState != LinkState.OFF) connectNow() }
+            main.post {
+                if (socket == null && linkState != LinkState.OFF) connectNow()
+                // Модель обращения качается сорок пять мегабайт, и первая
+                // попытка часто приходится на дорогу. Сеть вернулась — самое
+                // время попробовать снова: иначе телефон отзывался бы только
+                // на кнопку до следующего запуска службы.
+                if (!wakeReady && !preparingWake) Thread { prepareWakeWord() }.start()
+            }
         }
     }
 
@@ -439,7 +447,11 @@ class VoiceService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     // ---------- wake word (необязательный) ----------
+    @Volatile private var preparingWake = false
+
     private fun prepareWakeWord() {
+        if (preparingWake) return
+        preparingWake = true
         try {
             val engine = WakeWordEngine(this)
             engine.prepare { report(it) }
@@ -470,6 +482,8 @@ class VoiceService : Service() {
             Log.e(TAG, "wake word", t)
             wakeReady = false
             report(getString(R.string.wake_unavailable, t.javaClass.simpleName))
+        } finally {
+            preparingWake = false
         }
     }
 
@@ -1673,6 +1687,36 @@ class VoiceService : Service() {
      * пока он поднят, голос уедет в динамик телефона: и эхо, и разбуженные
      * соседи. Поэтому поток выбираем по тому, где сейчас микрофон.
      */
+    /**
+     * Приглушить чужой звук на время ответа.
+     *
+     * `MAY_DUCK`, а не полный захват: человек слушает музыку и не просил её
+     * останавливать — он просил ответить. Отпускаем, как только замолчали.
+     * Без этого ответ подмешивался в подкаст на полной громкости и был
+     * неразборчив, а сигнал «слушаю» — единственное подтверждение, что
+     * микрофон открылся, — не слышен вовсе.
+     */
+    private fun takeAudioFocus() {
+        if (audioFocus) return
+        audioFocus = runCatching {
+            val audio = getSystemService(AudioManager::class.java)
+            @Suppress("DEPRECATION")
+            audio.requestAudioFocus(
+                null, AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+            ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        }.getOrDefault(false)
+    }
+
+    private fun dropAudioFocus() {
+        if (!audioFocus) return
+        audioFocus = false
+        runCatching {
+            @Suppress("DEPRECATION")
+            getSystemService(AudioManager::class.java).abandonAudioFocus(null)
+        }
+    }
+
     private fun speechParams(): Bundle = Bundle().apply {
         putInt(
             TextToSpeech.Engine.KEY_PARAM_STREAM,
@@ -1789,6 +1833,11 @@ class VoiceService : Service() {
             return
         }
         runCatching {
+            // Пока говорим — приглушить чужую музыку. Без этого ответ
+            // подмешивался в подкаст на полной громкости и был неразборчив,
+            // а сигнал «слушаю» — единственное подтверждение, что микрофон
+            // открылся, — не слышен вовсе.
+            takeAudioFocus()
             engine.speak(Stress.render(text, prefs.stressStyle, prefs.engine),
                          TextToSpeech.QUEUE_FLUSH, speechParams(), "voice-shell")
         }
@@ -1970,6 +2019,15 @@ class VoiceService : Service() {
                 }
             }
             "ambient_control" -> onAmbient(message)
+            // Ветки не было: человек говорил «да», разрешение проходило, и
+            // он об этом не узнавал ничем. Единственный его канал — звук.
+            "permission_result" -> {
+                val approved = message.optBoolean("approved")
+                if (approved) signals?.accepted(route?.onBluetoothMic == true)
+                else signals?.missed(route?.onBluetoothMic == true)
+                report(getString(
+                    if (approved) R.string.permission_allowed else R.string.permission_rejected))
+            }
             "route" -> onRoute(message)
             "voice_summary" -> {
                 val text = message.optString("text")

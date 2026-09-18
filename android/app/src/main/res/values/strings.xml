@@ -231,4 +231,6 @@
     <string name="heard_too_little">only caught «%1$s» — say it again</string>
     <string name="language_not_supported">the daemon does not speak %1$s — answering in the language of the question</string>
     <string name="service_died">Voice Shell stopped</string>
+    <string name="permission_allowed">allowed</string>
+    <string name="permission_rejected">refused</string>
 </resources>

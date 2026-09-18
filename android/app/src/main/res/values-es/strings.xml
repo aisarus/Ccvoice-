@@ -205,4 +205,6 @@
     <string name="heard_too_little">solo capté «%1$s» — dilo otra vez</string>
     <string name="language_not_supported">el daemon no habla %1$s — responde en el idioma de la pregunta</string>
     <string name="service_died">Voice Shell se detuvo</string>
+    <string name="permission_allowed">permitido</string>
+    <string name="permission_rejected">rechazado</string>
 </resources>

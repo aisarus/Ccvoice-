@@ -205,4 +205,6 @@
     <string name="heard_too_little">只听到「%1$s」——再说一遍</string>
     <string name="language_not_supported">守护进程不会说 %1$s——将用提问的语言回答</string>
     <string name="service_died">Voice Shell 已停止</string>
+    <string name="permission_allowed">已允许</string>
+    <string name="permission_rejected">已拒绝</string>
 </resources>

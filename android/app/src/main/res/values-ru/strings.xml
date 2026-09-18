@@ -204,4 +204,6 @@
     <string name="heard_too_little">расслышал только «%1$s» — скажи ещё раз</string>
     <string name="language_not_supported">демон не говорит на «%1$s» — отвечает на языке вопроса</string>
     <string name="service_died">Voice Shell остановился</string>
+    <string name="permission_allowed">разрешил</string>
+    <string name="permission_rejected">отклонил</string>
 </resources>
