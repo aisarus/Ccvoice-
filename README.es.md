@@ -186,19 +186,37 @@ El shell también resuelve por su cuenta el deshacer, la memoria, las tareas en
 segundo plano, el puente a Telegram y las confirmaciones por voz, sin despertar
 a Claude. Todas las frases que conoce están en [`docs/VOICE.md`](docs/VOICE.md).
 
-### Las frases de comando están en ruso
+### Cuatro idiomas, y no hace falta elegir uno
 
-Esto importa más que cualquier otra cosa de esta página. La palabra de
-activación responde tanto a «Клод» como a «claude», la frase se reconoce en
-ruso, inglés o hebreo, y Claude responde en el idioma que hayas usado. Pero las
-frases que entiende el *shell* — prefijos de enrutado, deshacer, memoria, tareas
-en segundo plano, el puente a Telegram, el sí/no ante una petición de permiso —
-existen solo en ruso. En inglés están conectados únicamente «stop», «quiet»,
-«enough», «shut up», «stop working», «abort», «cancel» y el cambio de idioma.
+El shell habla y escucha en **inglés, ruso, español y chino**. Los prefijos de
+enrutado, deshacer, memoria, tareas en segundo plano, el puente a Telegram y el
+sí/no ante una petición de permiso existen en los cuatro, igual que todo lo que
+el shell contesta. La interfaz del teléfono está traducida a los mismos cuatro.
 
-En español no hay ninguna. Hablado en español, esto es una tubería de voz hacia
-Claude Code y poco más: las tablas de frases de los demás idiomas todavía no
-están escritas.
+Hablar y escuchar se deciden de forma distinta, a propósito:
+
+- **Lo que oye** no se configura. Las frases de comando de todos los idiomas se
+  buscan a la vez, porque el shell no puede saber en qué idioma va a ser tu
+  siguiente frase, y pedirte que muevas un interruptor antes de hablar anularía
+  el sentido de una interfaz manos libres. Es seguro porque son órdenes, no
+  prosa: las tablas son cortas y están elegidas para no chocar entre sí.
+- **Lo que dice** se decide en cada frase: lo que declaró el teléfono al
+  conectarse, luego el idioma en el que acabas de hablar, luego `VOICE_LANG`, y
+  por último inglés. Cambia al inglés a mitad de conversación y la respuesta
+  vuelve en inglés, sin tocar ningún ajuste.
+
+Las tablas están en [`daemon/voice_claude/lexicon.py`](daemon/voice_claude/lexicon.py)
+(lo que oye) y [`daemon/voice_claude/i18n.py`](daemon/voice_claude/i18n.py) (lo
+que dice). Son diccionarios normales: añadir un quinto idioma es añadir una
+columna, y `tests/test_i18n.py` te dirá qué te has dejado.
+
+Límites honestos: la redacción rusa es la que está en uso diario y el inglés es
+la traducción de referencia. El español y el chino se tradujeron con cuidado
+pero no los ha revisado un hablante nativo, y las frases de comando en
+particular agradecerían que alguien que las use diga cuáles suenan mal. El
+hebreo solo está como idioma de reconocimiento: el shell no tiene tablas de
+frases para él, así que hablado en hebreo esto es una tubería de voz hacia
+Claude y poco más.
 
 ---
 

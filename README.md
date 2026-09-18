@@ -184,18 +184,36 @@ The shell also handles undo, memory, background tasks, a Telegram bridge and
 voice approvals by itself, without waking Claude. Every phrase it knows is in
 [`docs/VOICE.md`](docs/VOICE.md).
 
-### The command phrases are Russian
+### Four languages, and you do not have to pick one
 
-This matters more than anything else on this page. The wake word answers to
-both "Клод" and "claude", the utterance is recognized in Russian, English or
-Hebrew, and Claude answers in the language you used. But the phrases the
-*shell* understands — routing prefixes, undo, memory, background tasks, the
-Telegram bridge, yes/no on a permission prompt — exist in Russian only. In
-English only "stop", "quiet", "enough", "shut up", "stop working", "abort",
-"cancel" and the language switch are wired up.
+The shell speaks and listens in **English, Russian, Spanish and Chinese**.
+Routing prefixes, undo, memory, background tasks, the Telegram bridge and
+yes/no on a permission prompt exist in all four, and so does everything the
+shell says back. The phone's UI is translated to the same four.
 
-Spoken to in English, this is a voice pipe to Claude Code and not much more.
-Nobody has written the phrase tables for the other languages yet.
+Speaking and listening are decided differently, on purpose:
+
+- **What it hears** is not configured at all. Command phrases from every
+  language are matched at once, because the shell cannot know which language
+  your next sentence will be in, and asking you to flip a switch before
+  speaking would defeat a hands-free interface. This is safe because these are
+  commands, not prose: the tables are short and chosen not to collide.
+- **What it says** is decided per utterance: what the phone declared when it
+  connected, then the language you actually just spoke, then `VOICE_LANG`, then
+  English. Switch to English mid-conversation and the answer comes back in
+  English — no settings to visit.
+
+The tables live in [`daemon/voice_claude/lexicon.py`](daemon/voice_claude/lexicon.py)
+(what it hears) and [`daemon/voice_claude/i18n.py`](daemon/voice_claude/i18n.py)
+(what it says). Both are plain dictionaries; adding a fifth language is adding
+a column, and `tests/test_i18n.py` will tell you what you missed.
+
+Honest limits: the Russian wording is the one in daily use. English is the
+reference translation. Spanish and Chinese were translated carefully but have
+not been reviewed by native speakers, and the command phrases in particular
+would benefit from someone who uses them saying which ones sound wrong.
+Hebrew is available as a recognition language only — the shell has no phrase
+tables for it, so spoken Hebrew is a voice pipe to Claude and not much more.
 
 ---
 
