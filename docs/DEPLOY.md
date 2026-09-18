@@ -1,243 +1,268 @@
-# Деплой и первый тест — с телефона, без компьютера
+# Deploy and first test — from a phone, without a computer
 
-Всё делается в браузере на телефоне. Ничего ставить не нужно.
+All of it happens in a browser on the phone. Nothing to install.
 
-Почему вообще деплой: браузер не даёт доступ к микрофону и распознаванию речи
-на `http://`. Нужен `https://`, а его проще всего получить у хостинга.
+Why deploy at all: a browser will not give microphone access or speech
+recognition over `http://`. It needs `https://`, and the easiest place to get
+that is a host.
 
-Эта страница — про **браузерный** клиент на Render. У приложения для Android
-другие возможности: там обращение слышит сам телефон, а «стоп» работает всегда.
-Приложение и свой сервер — в [README](../README.md).
-Фразы — в [`ГОЛОС.md`](ГОЛОС.md). Поломки — в
-[`ЕСЛИ-НЕ-РАБОТАЕТ.md`](ЕСЛИ-НЕ-РАБОТАЕТ.md).
+This page is about the **browser** client on Render. The Android app can do
+more: there the phone itself hears the wake word, and "стоп" works at any time.
+The app and your own server are in the [README](../README.md). Phrases are in
+[`VOICE.md`](VOICE.md). Breakage is in
+[`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
+
+Russian original: [`DEPLOY.ru.md`](DEPLOY.ru.md).
 
 ---
 
-## Что понадобится
+## What you will need
 
-| Что | Где | Зачем |
+| What | Where | Why |
 |---|---|---|
-| Аккаунт GitHub | [github.com](https://github.com) | из него деплоится репозиторий |
-| Подписка Claude (Pro или Max) | [claude.ai](https://claude.ai) | ей авторизуется Claude Code, отдельный API-ключ не нужен |
-| Аккаунт Render | [render.com](https://render.com) | бесплатный хостинг контейнера |
-| Chrome на Android | [Play Store](https://play.google.com/store/apps/details?id=com.android.chrome) | Firefox не умеет распознавание речи |
+| A GitHub account | [github.com](https://github.com) | the repository is deployed from it |
+| A Claude subscription (Pro or Max) | [claude.ai](https://claude.ai) | Claude Code authenticates with it; see the note below |
+| A Render account | [render.com](https://render.com) | free container hosting |
+| Chrome on Android | [Play Store](https://play.google.com/store/apps/details?id=com.android.chrome) | Firefox has no speech recognition |
 
-Ветка, которую деплоим:
+The branch being deployed:
 [`claude/voice-shell-claude-code-77wwh2`](https://github.com/aisarus/Ccvoice-/tree/claude/voice-shell-claude-code-77wwh2)
 
+> **About the subscription.** A Claude Pro or Max subscription is fine for an
+> instance you run for yourself. Since February 2026 Anthropic no longer permits
+> subscription OAuth credentials to be used from third-party products, so a
+> Render service that other people talk to needs its own `ANTHROPIC_API_KEY`
+> instead. A public URL plus a shared token is a service — keep the URL to
+> yourself, or use an API key.
+
 ---
 
-## Шаг 1. Создать сервис на Render (5 минут + 5–10 минут сборки)
+## Step 1. Create the service on Render (5 minutes plus 5–10 minutes of build)
 
-1. Открой [dashboard.render.com](https://dashboard.render.com) → **Get Started** →
-   **Sign in with GitHub**, разреши доступ к репозиторию `aisarus/Ccvoice-`.
-2. **New +** → **Blueprint** ([прямая ссылка](https://dashboard.render.com/blueprints)).
-3. Выбери репозиторий `aisarus/Ccvoice-`.
-4. В поле ветки укажи `claude/voice-shell-claude-code-77wwh2` — не `main`.
-5. **Apply**. Render прочитает [`render.yaml`](../render.yaml) и соберёт
+1. Open [dashboard.render.com](https://dashboard.render.com) → **Get Started** →
+   **Sign in with GitHub**, and allow access to the `aisarus/Ccvoice-`
+   repository.
+2. **New +** → **Blueprint** ([direct link](https://dashboard.render.com/blueprints)).
+3. Pick the `aisarus/Ccvoice-` repository.
+4. In the branch field put `claude/voice-shell-claude-code-77wwh2`, not `main`.
+5. **Apply**. Render reads [`render.yaml`](../render.yaml) and builds
    [`Dockerfile`](../Dockerfile).
-6. Ничего заполнять не надо: единственная обязательная переменная
-   (`VOICE_TOKEN`) генерируется сама, а Claude подключается на шаге 4.
-7. Жди статуса **Live**. Первая сборка долгая — внутри ставится Node и CLI Claude Code.
+6. Nothing to fill in: the only required variable (`VOICE_TOKEN`) is generated
+   for you, and Claude is connected in step 4.
+7. Wait for the status **Live**. The first build is slow — Node and the Claude
+   Code CLI are installed inside it.
 
 <details>
-<summary>Если Blueprint не подхватился</summary>
+<summary>If the Blueprint did not catch</summary>
 
-**New +** → **Web Service** → тот же репозиторий и ветка → Language/Runtime:
-**Docker** → Instance Type: **Free** → **Create Web Service**. Потом вручную
-добавь переменную `VOICE_TOKEN` с любым длинным случайным значением
-(Environment → Add Environment Variable).
+**New +** → **Web Service** → the same repository and branch → Language/Runtime:
+**Docker** → Instance Type: **Free** → **Create Web Service**. Then add the
+`VOICE_TOKEN` variable by hand, with any long random value (Environment → Add
+Environment Variable).
 </details>
 
-## Шаг 2. Забрать токен доступа
+## Step 2. Take the access token
 
-На странице сервиса нажми **☰** (три полоски вверху слева) → в меню сервиса
-пункт **Environment**. Либо просто пролистай страницу сервиса вниз — раздел
-`Environment Variables` идёт ниже `Settings`.
+On the service page press **☰** (the three bars at the top left) → in the
+service menu, **Environment**. Or scroll the service page down — the
+`Environment Variables` section comes after `Settings`.
 
-Там список переменных. Нужна строка `VOICE_TOKEN`; значение скрыто — нажми на
-глаз/**Show** или на иконку копирования рядом.
+There is a list of variables there. You need the `VOICE_TOKEN` line; the value
+is hidden — press the eye / **Show**, or the copy icon next to it.
 
-**Проще всего — задать его самому:** нажми на значение `VOICE_TOKEN`, сотри и
-впиши свою длинную строку (20+ символов, латиница и цифры, например
-`sonyvoice7412kqmz`), **Save Changes**. Сервис перезапустится за минуту, и ты
-точно знаешь свой токен, ничего не расшифровывая.
+**The easiest thing is to set it yourself:** press the `VOICE_TOKEN` value,
+delete it, type your own long string (20+ characters, Latin letters and digits,
+for example `sonyvoice7412kqmz`), **Save Changes**. The service restarts within
+a minute, and you know your token without decoding anything.
 
-Чем это **не** является:
+What it is **not**:
 
-- это **не** `Service ID` (`srv-...`) — тот просто идентификатор сервиса;
-- это **не** токен подписки Claude — он появится на шаге 4.
+- it is **not** the `Service ID` (`srv-...`) — that is only the service
+  identifier;
+- it is **not** the Claude subscription token — that appears in step 4.
 
-Это пароль от твоего голосового доступа: кто его знает, тот может говорить с
-твоим Claude. Никому не пересылай. Менять можно в любой момент там же — новое
-значение мгновенно убивает старую ссылку.
+It is the password to your voice access: whoever knows it can talk to your
+Claude. Do not forward it. You can change it at any time in the same place — a
+new value kills the old link instantly.
 
-## Шаг 3. Открыть на телефоне
+## Step 3. Open it on the phone
 
 ```
-https://ТВОЙ-СЕРВИС.onrender.com/?token=ТОКЕН_ИЗ_ШАГА_2
+https://YOUR-SERVICE.onrender.com/?token=TOKEN_FROM_STEP_2
 ```
 
-Адрес сервиса Render показывает вверху страницы сервиса — это ссылка вида
-`https://voice-shell.onrender.com` сразу под названием и значком **Live**. Открой **в Chrome**,
-разреши микрофон. Токен сохранится в браузере и сразу исчезнет из адресной
-строки — дальше можно заходить просто по адресу сервиса.
+Render shows the service address at the top of the service page — a link like
+`https://voice-shell.onrender.com`, right under the name and the **Live** badge.
+Open it **in Chrome** and allow the microphone. The token is saved in the
+browser and disappears from the address bar at once; after that the service
+address alone is enough.
 
-## Шаг 4. Подключить подписку Claude
+## Step 4. Connect Claude
 
-Сверху будет блок «Claude не подключён».
+At the top there will be a block saying "Claude не подключён".
 
-1. **подключить подписку** — на сервере запустится `claude setup-token`.
-2. **открыть авторизацию ↗** — войди в свой аккаунт Claude, разреши доступ,
-   скопируй код со страницы.
-3. Вставь код в поле → **готово**.
-4. Появится долгоживущий токен (год) и кнопка **копировать**.
-5. Вставь его в Render → **Environment** → `CLAUDE_CODE_OAUTH_TOKEN` → **Save**.
-   Без этого шага всё работает, но после перезапуска контейнера подписку
-   придётся подключать заново.
+1. **подключить подписку** — `claude setup-token` starts on the server.
+2. **открыть авторизацию ↗** — log in to your Claude account, allow access, copy
+   the code from the page.
+3. Paste the code into the field → **готово**.
+4. A long-lived token appears (a year) and a **копировать** button.
+5. Paste it into Render → **Environment** → `CLAUDE_CODE_OAUTH_TOKEN` →
+   **Save**. Without this step everything works, but after a container restart
+   the subscription has to be connected again.
 
-Альтернатива, если нужен отдельный биллинг по токенам: вместо подписки впиши
-`ANTHROPIC_API_KEY` ([console.anthropic.com](https://console.anthropic.com/settings/keys)).
-Приложение понимает оба варианта.
+If you need separate per-token billing, or anyone other than you will use this
+service, put in an `ANTHROPIC_API_KEY`
+([console.anthropic.com](https://console.anthropic.com/settings/keys)) instead
+of a subscription. The application understands both.
 
-## Шаг 5 (по желанию). Дать Claude рабочий репозиторий
+## Step 5 (optional). Give Claude a working repository
 
-По умолчанию Claude Code работает в пустом каталоге внутри контейнера. Чтобы он
-видел настоящий проект и мог пушить:
+By default Claude Code works in an empty directory inside the container. To let
+it see a real project and push to it:
 
-| Переменная | Значение |
+| Variable | Value |
 |---|---|
-| `WORKSPACE_REPO` | `https://github.com/aisarus/Ccvoice-.git` или другой репозиторий |
-| `GITHUB_TOKEN` | токен с правом `repo` — [github.com/settings/tokens](https://github.com/settings/tokens) → Generate new token (classic) |
+| `WORKSPACE_REPO` | `https://github.com/aisarus/Ccvoice-.git` or another repository |
+| `GITHUB_TOKEN` | a token with `repo` rights — [github.com/settings/tokens](https://github.com/settings/tokens) → Generate new token (classic) |
 
 ---
 
-## Тест: семь проверок по порядку
+## Test: seven checks in order
 
-Нажми кнопку (на экране или на наушниках), скажи фразу, нажми ещё раз или просто
-замолчи. После ответа микрофон включится сам — можно продолжать разговор молча
-для рук.
+Press the button (on screen or on the headphones), say the phrase, press again
+or fall silent. After the answer the microphone comes back on by itself — the
+conversation can continue hands-free.
 
-| # | Что сказать | Что должно произойти | Что это проверяет |
+The spoken phrases below are Russian, because the shell's own phrases are
+Russian. See the note at the top of [`VOICE.md`](VOICE.md).
+
+| # | What to say | What should happen | What it checks |
 |---|---|---|---|
-| 1 | «Посчитай сколько будет семнадцать процентов от четырёх тысяч двухсот» | ответ голосом (714), в ленте плашка `chat` | микрофон, распознавание, роутинг в чат, синтез речи |
-| 2 | «Запиши идею про второе ухо» | «Записал.», плашка `note` | цель-инбокс и маршрутизация по префиксу |
-| 3 | «Покажи какие файлы в репозитории» | плашка `code`, ответ списком файлов | долгая Claude Code-сессия |
-| 4 | «Да» (в ответ на вопрос, если он был) | звук подтверждения, в ленте «разрешил», работа продолжается | голосовые подтверждения |
-| 5 | Нажми чип **код**, скажи «ну такое себе» | уйдёт в `code`, а не в чат | принудительный выбор цели |
-| 6 | Нажми **авто**. Пусть рядом кто-то скажет фразу в паре метров от телефона (или включи видео с речью) и держи кнопку | в ленте «реплика не исполнена (role_gate)», ничего не выполнится | различение мастера и собеседника |
-| 7 | Скажи тихо, почти шёпотом, поднеся телефон ко рту | реплика принимается как твоя | профиль шёпота |
+| 1 | "Посчитай сколько будет семнадцать процентов от четырёх тысяч двухсот" | a spoken answer (714), a `chat` badge in the feed | microphone, recognition, routing to chat, speech synthesis |
+| 2 | "Запиши идею про второе ухо" | "Записал.", a `note` badge | the inbox target and prefix routing |
+| 3 | "Покажи какие файлы в репозитории" | a `code` badge, an answer listing files | the long-lived Claude Code session |
+| 4 | "Да" (answering a question, if there was one) | a confirmation sound, "разрешил" in the feed, the work carries on | voice approvals |
+| 5 | Press the **код** chip, say "ну такое себе" | goes to `code`, not to chat | forcing the target |
+| 6 | Press **авто**. Have someone speak a couple of metres from the phone (or play a video with speech) and hold the button | "реплика не исполнена (role_gate)" in the feed, nothing runs | telling the master from a bystander |
+| 7 | Speak quietly, almost in a whisper, holding the phone to your mouth | the utterance is accepted as yours | the whisper profile |
 
-Второе ухо (по желанию): нажми **ambient: passive**, затем **чужие реплики: вкл**,
-дай собеседнику назвать число, потом спроси «какую цифру он назвал». Ответ
-придёт из локального буфера. Выключение ambient стирает буфер.
+The second ear (optional): press **ambient: passive**, then **чужие реплики:
+вкл**, have the other person say a number, then ask "какую цифру он назвал". The
+answer comes out of the local buffer. Turning ambient off wipes the buffer.
 
 ---
 
-## Все контроллеры
+## All the controls
 
-| Контроллер | Где | Что делает |
+| Control | Where | What it does |
 |---|---|---|
-| Точка и слово состояния | сверху | `IDLE` ждёт · `LISTENING` слушает · `THINKING` думает · `SPEAKING` говорит · `WORKING` работает |
-| Поле токена | появляется, если доступ не подтверждён | вставить `VOICE_TOKEN` вручную |
-| Блок подписки | появляется, если Claude не подключён | шаг 4 целиком |
-| **авто / код / чат / заметка** | ряд чипов | принудительная цель; держится, пока не вернёшь **авто**; произнесённое «в чат …» перебивает чип |
-| **ambient** | чип | `off → passive → assist`; `passive` — локальный буфер на 10 минут |
-| **чужие реплики** | чип, виден при включённом ambient | явное разрешение писать в буфер чужую речь; выключение стирает уже собранное |
-| Большая кнопка | центр | нажатие начинает реплику, второе нажатие заканчивает; нажатие во время ответа обрывает речь |
-| **Кнопка наушников** | на самой гарнитуре | то же самое: нажал — говоришь, нажал — закончил. Работает через медиа-сессию, поэтому один раз нажми большую кнопку на экране, чтобы её включить |
-| **разговор** | чип | после ответа микрофон включается сам на 15 секунд — можно говорить дальше, ничего не нажимая |
-| **слушать всегда** | чип | микрофон не выключается; исполняются только фразы, начинающиеся с «Клод…». Временная замена wake word: аудио уходит в распознавание браузера и садится батарея |
-| Полоска под кнопкой | центр | уровень микрофона: видно, слышит ли тебя телефон |
-| Лента | низ | плашка показывает, кто говорил и куда ушла реплика |
-| Строка подсказки | под кнопкой | состояние целей и способ авторизации |
+| The dot and the state word | top | `IDLE` waiting · `LISTENING` listening · `THINKING` thinking · `SPEAKING` speaking · `WORKING` working |
+| Token field | appears if access is not confirmed | paste `VOICE_TOKEN` by hand |
+| Subscription block | appears if Claude is not connected | the whole of step 4 |
+| **авто / код / чат / заметка** | a row of chips | forces the target; holds until you go back to **авто**; a spoken "в чат …" overrides the chip |
+| **ambient** | chip | `off → passive → assist`; `passive` is a local ten-minute buffer |
+| **чужие реплики** | chip, visible when ambient is on | explicit opt-in to writing other people's speech into the buffer; turning it off wipes what was collected |
+| The big button | centre | one press starts an utterance, a second one ends it; a press during an answer cuts the speech off |
+| **The headphone button** | on the headset itself | the same: press to talk, press to finish. It works through the media session, so press the big on-screen button once to activate it |
+| **разговор** | chip | after an answer the microphone comes back on for 15 seconds — you can keep talking without pressing anything |
+| **слушать всегда** | chip | the microphone stays on; only utterances starting with "Клод…" are executed. A stand-in for the wake word: audio goes to the browser's recognition service and the battery drains |
+| The bar under the button | centre | microphone level: whether the phone can hear you |
+| The feed | bottom | the badge shows who spoke and where the utterance went |
+| The hint line | under the button | target availability and the authentication method |
 
-## Звуки
+## Sounds
 
-| Звук | Значение |
+| Sound | Meaning |
 |---|---|
-| короткий вверх | услышал, слушаю |
-| мягкий щелчок | реплика принята |
-| два коротких | нужно твоё решение |
-| мягкий динь | готово |
-| вниз | ошибка |
-| низкий / высокий | ушло в код / в чат |
+| short, rising | heard you, listening |
+| soft click | utterance accepted |
+| two short | your decision is needed |
+| soft ding | done |
+| falling | error |
+| low / high | went to code / to chat |
 
-## Переменные окружения
+## Environment variables
 
-| Переменная | Обязательна | Смысл |
+| Variable | Required | Meaning |
 |---|---|---|
-| `VOICE_TOKEN` | да (генерируется) | пароль от голосового доступа |
-| `CLAUDE_CODE_OAUTH_TOKEN` | практически да | подписка Claude; ставится на шаге 4 |
-| `ANTHROPIC_API_KEY` | нет | альтернатива подписке |
-| `WORKSPACE_REPO` | нет | репозиторий, который склонируется на старте |
-| `GITHUB_TOKEN` | нет | чтобы Claude мог пушить |
-| `AMBIENT_SUBMODE` | нет | стартовый режим: `off` (по умолчанию), `passive`, `assist` |
-| `ROUTER_MODEL` | нет | `auto` — на неуверенной реплике цель выбирает модель; `off` — только словарь, без лишнего круга к Claude |
-| `PERMISSION_MODE` | нет | `auto` (по умолчанию) — не спрашивается ничего; `guarded` — спрашивается разрушительное; `ask` — всё, кроме безопасного чтения |
-| `PROACTIVE` | нет | `watch` (по умолчанию) — сказать про упавшую сборку; `fix` — сказать и починить; `off` — молчать |
-| `QUIET_HOURS` | нет | `23-8` по умолчанию: часы, в которые наблюдатель молчит. `off` — не молчать |
-| `VOICE_MEMORY` | нет | путь к файлу памяти вместо `.voice-shell/memory.md` в рабочем каталоге |
-| `VOICE_GLOSSARY` | нет | свои имена через запятую (люди, сервисы, проекты) — Claude поймёт их в искажённой реплике |
-| `VOICE_ENV_FILE` | нет | где лежит этот самый файл окружения; демон дописывает в него токен подписки |
-| `PORT`, `HOST`, `WORKSPACE_DIR`, `NOTE_PATH` | нет | задаются платформой или по умолчанию |
+| `VOICE_TOKEN` | yes (generated) | the password to voice access |
+| `CLAUDE_CODE_OAUTH_TOKEN` | in practice yes | the Claude subscription; set in step 4 |
+| `ANTHROPIC_API_KEY` | no | the alternative to a subscription |
+| `WORKSPACE_REPO` | no | a repository cloned at startup |
+| `GITHUB_TOKEN` | no | so Claude can push (`GH_TOKEN` is read too) |
+| `AMBIENT_SUBMODE` | no | starting mode: `off` (default), `passive`, `assist` |
+| `ROUTER_MODEL` | no | `auto` — on an uncertain utterance a model picks the target; `off` — dictionary only, no extra round trip to Claude |
+| `PERMISSION_MODE` | no | `auto` (default) — nothing is asked; `guarded` — destructive things are; `ask` — everything but safe reads |
+| `PROACTIVE` | no | `watch` (default) — mention a failed build; `fix` — mention it and fix it; `off` — stay quiet |
+| `QUIET_HOURS` | no | `23-8` by default: the hours the watcher stays quiet. `off` — do not |
+| `VOICE_MEMORY` | no | path to the memory file instead of `.voice-shell/memory.md` in the working directory |
+| `VOICE_GLOSSARY` | no | your own names, comma separated (people, services, projects) — Claude will recognize them in a mangled utterance |
+| `VOICE_ENV_FILE` | no | where this environment file itself lives; the daemon appends the subscription token to it |
+| `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID` | no | the Telegram bridge; `setup-telegram.sh` writes both |
+| `TELEGRAM_API` | no | a different Bot API address, for a proxy or a test server |
+| `CLAUDE_CONFIG_DIR` | no | where the CLI keeps its own configuration |
+| `PORT`, `HOST`, `WORKSPACE_DIR`, `NOTE_PATH` | no | set by the platform, or defaulted |
 
 ---
 
-## Если что-то не так
+## If something is wrong
 
-| Симптом | Причина и что делать |
+| Symptom | Cause and what to do |
 |---|---|
-| «нужен токен доступа» | открыл без `?token=` — вставь `VOICE_TOKEN` в поле на странице |
-| «нет доступа к микрофону» | адрес не `https://` или разрешение не выдано в Chrome |
-| кнопка есть, текста нет | нужен Chrome: Firefox на Android не умеет распознавание речи |
-| «Claude недоступен: не подключена подписка» | пройди шаг 4 или впиши `CLAUDE_CODE_OAUTH_TOKEN` |
-| после перезапуска снова просит подписку | токен не сохранён в Environment (шаг 4, пункт 5) |
-| «код не принят или токен не выдан» | код авторизации живёт недолго — пройди шаг 4 заново |
-| первый ответ идёт минуту | бесплатный план Render засыпает после 15 минут простоя |
-| реплика ушла не в ту цель | скажи «не туда» либо выбери цель чипом |
-| твоя тихая реплика не исполнилась | шёпот с холодного старта даёт `unknown`; повтори громче или скажи что-то в открытом окне диалога |
-| «Claude недоступен: не установлен claude-agent-sdk» | это не про токен: в контейнере нет библиотеки. Пересобери сервис |
-| ничего не спрашивает перед опасным | так и задумано: `PERMISSION_MODE` по умолчанию `auto`. Поставь `guarded` |
+| "нужен токен доступа" | opened without `?token=` — paste `VOICE_TOKEN` into the field on the page |
+| "нет доступа к микрофону" | the address is not `https://`, or permission was not granted in Chrome |
+| there is a button but no text | Chrome is required: Firefox on Android has no speech recognition |
+| "Claude недоступен: не подключена подписка" | do step 4, or set `CLAUDE_CODE_OAUTH_TOKEN` |
+| it asks for the subscription again after a restart | the token was not saved in Environment (step 4, item 5) |
+| "код не принят или токен не выдан" | the authorization code is short-lived — go through step 4 again |
+| the first answer takes a minute | Render's free plan sleeps after 15 minutes of idling |
+| the utterance went to the wrong target | say "не туда", or pick the target with a chip |
+| your quiet utterance was not executed | a whisper from a cold start gives `unknown`; repeat louder, or say something inside an open dialogue window |
+| "Claude недоступен: не установлен claude-agent-sdk" | not about the token: the library is missing in the container. Rebuild the service |
+| nothing is asked before dangerous things | by design: `PERMISSION_MODE` is `auto` by default. Set `guarded` |
 
-Свой сервер вместо Render — там есть `doctor.sh`, который проверяет всё это
-одной командой. Полная диагностика: [`ЕСЛИ-НЕ-РАБОТАЕТ.md`](ЕСЛИ-НЕ-РАБОТАЕТ.md).
+On your own server instead of Render there is `doctor.sh`, which checks all of
+this with one command. Full diagnostics:
+[`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
 
-## Чего пока нет — чтобы не искать
+## What is not here yet — so you do not go looking
 
-- **Локальный wake word.** Режим «слушать всегда» ловит обращение «Клод», но
-  распознаёт его браузер, а не устройство: аудио уходит наружу и тратится
-  батарея. Настоящий локальный wake word — этап S1.
-- **Голосовое «стоп».** Пока микрофон не слушает постоянно, «стоп» ловить
-  нечем: прерывание — нажатием кнопки (в том числе на наушниках).
-- **Распознавание и синтез — браузерные.** В Chrome это значит, что аудио
-  реплики уходит в сервис распознавания Google. Локальное распознавание на
-  стороне демона — тоже S1.
-- **Ambient assist.** Буфер и ответы по нему работают; проактивных подсказок по
-  триггерам ещё нет.
-- **Микрофон наушников.** Отдельного выбора устройства нет — браузер берёт то,
-  что система считает основным.
+- **A local wake word.** The "слушать всегда" mode catches "Клод", but it is the
+  browser recognizing it, not the device: audio goes out and the battery drains.
+  A real local wake word exists in the Android app, not in the browser client.
+- **Voice "стоп".** While the microphone is not listening continuously there is
+  nothing to catch "стоп" with: interrupting is by button, including the one on
+  the headphones.
+- **Recognition and synthesis are the browser's.** In Chrome that means the
+  audio of your utterance goes to Google's recognition service. Recognition on
+  the daemon side is stage S1 and does not exist.
+- **Ambient assist.** The buffer and answers from it work; proactive
+  trigger-driven suggestions do not.
+- **Headphone microphone.** There is no separate device choice — the browser
+  takes whatever the system considers the default.
 
 ---
 
-## Куда это вообще можно задеплоить
+## Where else this can be deployed
 
-Render выбран по одному критерию: весь путь проходится с телефона и без CLI.
-Привязки к нему в коде нет. Требования к хостингу:
+Render was picked on one criterion: the whole path can be walked from a phone,
+with no CLI. There is nothing Render-specific in the code. What a host has to
+provide:
 
-| Нужно | Зачем |
+| Needed | Why |
 |---|---|
-| долго живущий процесс (контейнер, не serverless) | одна Claude Code-сессия держится между репликами |
-| WebSocket наружу | по нему ходит голос, состояние и подтверждения |
-| HTTPS | иначе браузер не даст микрофон |
-| один открытый порт | клиент и WebSocket специально сведены на один |
-| запись в файловую систему | рабочая копия репозитория и токен подписки |
-| деплой из браузера | у тебя нет ПК, а CLI-деплой требует терминала |
+| a long-lived process (a container, not serverless) | one Claude Code session is held between utterances |
+| outbound WebSocket | voice, state and approvals travel over it |
+| HTTPS | otherwise the browser gives no microphone |
+| one open port | the client and the WebSocket are deliberately on the same one |
+| a writable filesystem | the working copy of the repository, and the subscription token |
+| deploy from a browser | you have no PC, and CLI deploys need a terminal |
 
-**Vercel, Netlify, Cloudflare Workers не подходят** — там процесс живёт только
-на время запроса: WebSocket-сервер не поднять, а сессия умирала бы между
-репликами. Это не вопрос тарифа.
+**Vercel, Netlify and Cloudflare Workers do not work** — there a process lives
+only for the duration of a request: a WebSocket server cannot be raised, and the
+session would die between utterances. This is not a question of plan.
 
-**Подходят:** Render, Railway, Koyeb (все трое деплоятся из браузера), Fly.io и
-любой VPS (нужен терминал). Для VPS есть [`docker-compose.yml`](../docker-compose.yml):
-`VOICE_TOKEN=... docker compose up -d` и любой reverse proxy с TLS.
+**These do:** Render, Railway, Koyeb (all three deploy from a browser), Fly.io
+and any VPS (needs a terminal). For a VPS there is
+[`docker-compose.yml`](../docker-compose.yml): `VOICE_TOKEN=... docker compose
+up -d` and any reverse proxy with TLS.
