@@ -12,7 +12,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = sorted(ROOT.glob("scripts/*.sh")) + [ROOT / "android" / "smoke-test.sh"]
-ASSIGNMENT = re.compile(r"^\s*([^\s=()#]+)=[^=]", re.M)
+# `arr+=(...)` — это дописать в массив, а не имя переменной с плюсом.
+# Плюс снимается здесь, а не в списке исключений: иначе первое же дописывание
+# в массив выглядело бы как кириллица в имени и роняло проверку на ровном месте.
+ASSIGNMENT = re.compile(r"^\s*([^\s=()#]+?)\+?=[^=]", re.M)
 NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
