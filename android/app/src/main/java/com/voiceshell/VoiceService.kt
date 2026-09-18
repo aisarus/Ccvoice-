@@ -2227,7 +2227,7 @@ class VoiceService : Service() {
             getSystemService(NotificationManager::class.java).notify(
                 FAILURE_ID,
                 NotificationCompat.Builder(this, CHANNEL)
-                    .setSmallIcon(R.drawable.ic_mic)
+                    .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                     .setContentTitle(getString(R.string.service_died))
                     .setContentText(reason)
                     .setStyle(NotificationCompat.BigTextStyle().bigText(reason))
