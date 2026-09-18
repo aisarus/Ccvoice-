@@ -3,6 +3,21 @@
 # Машиночитаемая версия этой инструкции: docs/desktop-handoff.json
 set -euo pipefail
 
+# Скрипт сбрасывает репозиторий, в котором лежит сам. bash читает файл по
+# мере выполнения, по смещению в байтах, и `git reset --hard` меняет этот
+# файл под ним: дальше выполнение уходит в середину чужой строки или молча
+# упирается в конец. Ноль на выходе, половина работы сделана. Уходим в копию.
+VOICE_SHELL_SELF="${VOICE_SHELL_SELF:-$0}"
+if [ -z "${VOICE_SHELL_SELF_COPY:-}" ] && [ -f "$0" ] && [ -r "$0" ]; then
+    SELF_COPY="$(mktemp "${TMPDIR:-/tmp}/voice-shell-run.XXXXXX")"
+    cat "$0" > "$SELF_COPY"
+    export VOICE_SHELL_SELF VOICE_SHELL_SELF_COPY="$SELF_COPY"
+    exec bash "$SELF_COPY" "$@"
+fi
+if [ -n "${VOICE_SHELL_SELF_COPY:-}" ]; then
+    trap 'rm -f "$VOICE_SHELL_SELF_COPY"' EXIT
+fi
+
 ROOT="${VOICE_SHELL_DIR:-$HOME/voice-shell}"
 BRANCH="claude/voice-shell-claude-code-77wwh2"
 WORKSPACE="${1:-$ROOT}"

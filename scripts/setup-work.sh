@@ -21,6 +21,9 @@
 #   VOICE_ENV_FILE   файл окружения службы (по умолчанию /etc/voice-shell.env)
 set -euo pipefail
 
+# Запускают через curl | sudo bash, и тогда $0 — это «bash».
+VOICE_SHELL_SELF="${VOICE_SHELL_SELF:-$0}"
+
 ROOT="${VOICE_SHELL_DIR:-/opt/voice-shell}"
 ENV_FILE="${VOICE_ENV_FILE:-/etc/voice-shell.env}"
 
@@ -64,12 +67,12 @@ bash "$ROOT/scripts/update-server.sh"
 # -------------------------------------------------------------------- токен
 say "Доступ к GitHub"
 TOKEN="${GH_TOKEN:-}"
-[ -n "$TOKEN" ] || TOKEN="$(sed -n 's/^GH_TOKEN=//p' "$ENV_FILE" 2>/dev/null | tail -1)"
+[ -n "$TOKEN" ] || TOKEN="$(sed -n 's/^GH_TOKEN=//p' "$ENV_FILE" 2>/dev/null | tail -1 || true)"
 if [ -n "$TOKEN" ]; then
     echo "токен уже прописан в $ENV_FILE — беру его"
 else
     have_human || die "токена нет и спросить некого.
-Передай его переменной: GH_TOKEN=ghp_... sudo -E bash $0
+Передай его переменной: GH_TOKEN=ghp_... sudo -E bash $VOICE_SHELL_SELF
 Взять: github.com/settings/tokens -> classic, права repo и workflow."
     echo "Токен: github.com/settings/tokens -> Generate new token (classic)."
     echo "Права: repo (всё) и workflow. delete_repo брать не советую —"
@@ -100,7 +103,7 @@ echo "аккаунт: $LOGIN — $NAME <$EMAIL>"
 bash "$ROOT/scripts/setup-github.sh" "$TOKEN" "$NAME" "$EMAIL"
 
 # --------------------------------------------------------------- проекты
-WS="$(sed -n 's/^WORKSPACE_DIR=//p' "$ENV_FILE" 2>/dev/null | tail -1)"
+WS="$(sed -n 's/^WORKSPACE_DIR=//p' "$ENV_FILE" 2>/dev/null | tail -1 || true)"
 WS="${WS:-$ROOT/workspace}"
 
 say "Проекты"
@@ -154,7 +157,7 @@ done
 say "Проверка"
 bash "$ROOT/scripts/doctor.sh" --fast || true
 
-PUBLIC_URL_VALUE="$(sed -n 's/^PUBLIC_URL=//p' "$ENV_FILE" 2>/dev/null | tail -1)"
+PUBLIC_URL_VALUE="$(sed -n 's/^PUBLIC_URL=//p' "$ENV_FILE" 2>/dev/null | tail -1 || true)"
 if [ ${#CLONED[@]} -gt 0 ]; then
     PROJECTS="${CLONED[*]}"
 else

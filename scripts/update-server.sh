@@ -15,6 +15,26 @@
 #   VOICE_ENV_FILE      файл окружения службы (по умолчанию /etc/voice-shell.env)
 set -euo pipefail
 
+# Этот скрипт обновляет репозиторий, в котором лежит сам, — и это ловушка.
+# bash читает файл по мере выполнения, по смещению в байтах, а `git reset
+# --hard` меняет этот файл прямо под ним. Дальше выполнение продолжается с
+# того же смещения, но уже в другом тексте: попадает в середину чужой
+# строки или молча упирается в конец файла. Снаружи это выглядит как
+# «команда отработала и ничего не сделала» — без ошибки, без слова, с нулевым
+# кодом возврата. Проверено: ровно так и происходит.
+#
+# Поэтому первым делом уходим в копию. Её переписать некому.
+VOICE_SHELL_SELF="${VOICE_SHELL_SELF:-$0}"
+if [ -z "${VOICE_SHELL_SELF_COPY:-}" ] && [ -f "$0" ] && [ -r "$0" ]; then
+    SELF_COPY="$(mktemp "${TMPDIR:-/tmp}/voice-shell-run.XXXXXX")"
+    cat "$0" > "$SELF_COPY"
+    export VOICE_SHELL_SELF VOICE_SHELL_SELF_COPY="$SELF_COPY"
+    exec bash "$SELF_COPY" "$@"
+fi
+if [ -n "${VOICE_SHELL_SELF_COPY:-}" ]; then
+    trap 'rm -f "$VOICE_SHELL_SELF_COPY"' EXIT
+fi
+
 ROOT="${VOICE_SHELL_DIR:-/opt/voice-shell}"
 BRANCH="${VOICE_SHELL_BRANCH:-claude/voice-shell-claude-code-77wwh2}"
 ENV_FILE="${VOICE_ENV_FILE:-/etc/voice-shell.env}"
@@ -23,10 +43,10 @@ die() { printf '\n\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
 
 git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 \
     || die "нет рабочей копии в $ROOT — сначала install-server.sh
-(если копия лежит в другом месте: VOICE_SHELL_DIR=/путь sudo -E bash $0)"
+(если копия лежит в другом месте: VOICE_SHELL_DIR=/путь sudo -E bash $VOICE_SHELL_SELF)"
 # Проверяем права до сброса, а не после: иначе код бы обновился, а служба
 # осталась на старом, и человек не понял бы, что произошло.
-[ "$(id -u)" -eq 0 ] || die "нужен root — перезапуск службы без него не выйдет: sudo bash $0"
+[ "$(id -u)" -eq 0 ] || die "нужен root — перезапуск службы без него не выйдет: sudo bash $VOICE_SHELL_SELF"
 cd "$ROOT"
 
 echo "— было: $(git log --oneline -1)"
@@ -94,11 +114,11 @@ if [ -f "$ENV_FILE" ]; then
     mkdir -p "$PUBLIC"
     PORT_NOW="$(sed -n 's/^PORT=//p' "$ENV_FILE" | tail -1)"
     # Домен знает Caddy — если он стоит, адрес публикации https и без порта.
-    DOMAIN_NOW="$(sed -n 's/^\([A-Za-z0-9.-]*\) {$/\1/p' /etc/caddy/Caddyfile 2>/dev/null | head -1)"
+    DOMAIN_NOW="$(sed -n 's/^\([A-Za-z0-9.-]*\) {$/\1/p' /etc/caddy/Caddyfile 2>/dev/null | head -1 || true)"
     if [ -n "$DOMAIN_NOW" ]; then
         BASE="https://$DOMAIN_NOW"
     else
-        BASE="http://$(hostname -I 2>/dev/null | awk '{print $1}'):${PORT_NOW:-8787}"
+        BASE="http://$(hostname -I 2>/dev/null | awk '{print $1}' || true):${PORT_NOW:-8787}"
     fi
     add_env PUBLIC_DIR "$PUBLIC"
     add_env PUBLIC_URL "$BASE/p"
@@ -106,7 +126,7 @@ if [ -f "$ENV_FILE" ]; then
     # `best` — самая сильная модель из доступных этому аккаунту. Это
     # единственная настройка здесь, которая стоит денег и лимитов, поэтому
     # она названа вслух в выводе, а убирается одной строкой из файла
-    # окружения. Своя ставится так: CODE_MODEL=opus sudo -E bash $0
+    # окружения. Своя ставится так: CODE_MODEL=opus sudo -E bash $VOICE_SHELL_SELF
     add_env CODE_MODEL "${CODE_MODEL:-best}"
 
     # Настройки, правила, навыки и субагенты живут в рабочей папке, а она от
@@ -115,7 +135,7 @@ if [ -f "$ENV_FILE" ]; then
     WS="$(sed -n 's/^WORKSPACE_DIR=//p' "$ENV_FILE" | tail -1)"
     WS="${WS:-$ROOT/workspace}"
     bash "$ROOT/scripts/sync-workspace.sh" "$WS" | sed 's/^/— /'
-    echo "— модель: $(sed -n 's/^CODE_MODEL=//p' "$ENV_FILE" | tail -1), усилие решают настройки рабочей папки"
+    echo "— модель: $(sed -n 's/^CODE_MODEL=//p' "$ENV_FILE" | tail -1 || true), усилие решают настройки рабочей папки"
 fi
 
 # Инструменты, которыми Claude Code делает то, чего не умеет сам. Ставим
@@ -149,8 +169,8 @@ systemctl is-active voice-shell >/dev/null 2>&1 \
     && echo "— служба: перезапущена" \
     || { echo "::служба не поднялась::"; journalctl -u voice-shell -n 20 --no-pager; exit 1; }
 
-PORT_VALUE="$(sed -n 's/^PORT=//p' "$ENV_FILE" 2>/dev/null | tail -1)"
-TOKEN_VALUE="$(sed -n 's/^VOICE_TOKEN=//p' "$ENV_FILE" 2>/dev/null | tail -1)"
+PORT_VALUE="$(sed -n 's/^PORT=//p' "$ENV_FILE" 2>/dev/null | tail -1 || true)"
+TOKEN_VALUE="$(sed -n 's/^VOICE_TOKEN=//p' "$ENV_FILE" 2>/dev/null | tail -1 || true)"
 echo "— что думает демон:"
 curl -fsS --max-time 5 "http://127.0.0.1:${PORT_VALUE:-8787}/healthz?token=${TOKEN_VALUE}" \
     || echo "  не ответил — запусти $ROOT/scripts/doctor.sh"

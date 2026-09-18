@@ -33,7 +33,7 @@ else
 fi
 
 printf 'рабочая папка: %s\n' "$TARGET"
-printf '  навыков    : %s\n' "$(find "$TARGET/.claude/skills" -name SKILL.md 2>/dev/null | wc -l)"
-printf '  субагентов : %s\n' "$(find "$TARGET/.claude/agents" -name '*.md' 2>/dev/null | wc -l)"
-printf '  правил     : %s\n' "$(find "$TARGET/.claude/rules" -name '*.md' 2>/dev/null | wc -l)"
+printf '  навыков    : %s\n' "$(find "$TARGET/.claude/skills" -name SKILL.md 2>/dev/null | wc -l || true)"
+printf '  субагентов : %s\n' "$(find "$TARGET/.claude/agents" -name '*.md' 2>/dev/null | wc -l || true)"
+printf '  правил     : %s\n' "$(find "$TARGET/.claude/rules" -name '*.md' 2>/dev/null | wc -l || true)"
 printf '  %s\n' "$kept"

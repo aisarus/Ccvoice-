@@ -47,3 +47,71 @@ def test_variable_names_are_latin(script):
 def test_the_script_stops_on_the_first_failure(script):
     """Без set -e установщик доходит до конца, оставив половину сделанной."""
     assert "set -e" in script.read_text(encoding="utf-8"), "нет set -e"
+
+
+# -- две ловушки, которые молчат ------------------------------------------
+#
+# Обе стоили человеку половины настройки, доведённой до середины без единого слова
+# об ошибке. Обе видны только в момент запуска, поэтому ловим их здесь.
+
+def _substitutions(text):
+    """Все $(...) с учётом вложенности."""
+    out, i = [], 0
+    while True:
+        start = text.find("$(", i)
+        if start < 0:
+            return out
+        depth, j = 0, start + 1
+        while j < len(text):
+            if text[j] == "(":
+                depth += 1
+            elif text[j] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        out.append(text[start:j + 1])
+        i = start + 2
+
+
+@pytest.mark.parametrize("script", [s for s in SCRIPTS if s.name not in ДОКЛАДЧИКИ],
+                         ids=lambda p: p.name)
+def test_a_silenced_pipeline_cannot_kill_the_script(script):
+    """`X="$(sed … 2>/dev/null | tail -1)"` под `set -e` и `pipefail` — это
+    выход без единого слова, когда файла нет.
+
+    Ровно так обновление на сервере останавливалось сразу после проверки
+    спеки: не было `/etc/caddy/Caddyfile`, sed вернул двойку, pipefail
+    превратил её в провал подстановки, `set -e` убил скрипт, а `2>/dev/null`
+    — мой же — съел единственное сообщение. Человек увидел приглашение
+    оболочки и решил, что всё прошло.
+    """
+    text = script.read_text(encoding="utf-8")
+    if "pipefail" not in text:
+        return
+    # Обрыв строки обратной косой — это всё ещё одна команда, и `|| die`
+    # после неё ловит провал подстановки не хуже, чем `|| true` внутри.
+    опасные = []
+    for строка in text.replace("\\\n", " ").splitlines():
+        if "||" in строка:
+            continue
+        if any("2>/dev/null" in s and "|" in s for s in _substitutions(строка)):
+            опасные.append(строка.strip())
+    assert not опасные, f"{script.name}: провал некому поймать — {опасные}"
+
+
+@pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
+def test_a_script_that_rewrites_itself_runs_from_a_copy(script):
+    """bash читает файл по мере выполнения, по смещению в байтах.
+
+    `git reset --hard` по репозиторию, в котором лежит сам скрипт, меняет
+    этот файл под ним: дальше выполнение продолжается с того же смещения, но
+    уже в другом тексте — попадает в середину чужой строки или молча
+    упирается в конец. Нулевой код возврата, половина работы. Лечится
+    единственным способом: уйти в копию до первой правки.
+    """
+    text = script.read_text(encoding="utf-8")
+    if "git reset --hard" not in text and "git -C \"$ROOT\" reset" not in text:
+        return
+    assert "VOICE_SHELL_SELF_COPY" in text, \
+        f"{script.name}: переписывает свой репозиторий, но не уходит в копию"
