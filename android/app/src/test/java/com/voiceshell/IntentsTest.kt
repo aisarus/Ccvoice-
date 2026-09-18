@@ -233,11 +233,13 @@ class IntentsTest {
 
     @Test
     fun `хватит слушать вокруг закрывает ухо, а не гасит голос`() {
-        // Фраза начинается со слова, которым гасят голос, и «стоп» в этом
-        // файле разбирается раньше всего остального. Если второе ухо не
-        // проверить прежде него, человек, попросивший перестать слушать
-        // чужих, получит тишину — и ухо останется открытым.
-        assertEquals("voice", Intents.stopIntent("хватит слушать вокруг"))
+        // Столкновение было настоящим: фраза начинается со слова, которым
+        // гасят голос, и «стоп» разбирается раньше всего остального. Его
+        // больше нет — голый глагол теперь ловится только целой репликой, —
+        // но проверять стоит обе стороны: и что голос не гаснет, и что ухо
+        // закрывается.
+        assertNull(Intents.stopIntent("хватит слушать вокруг"))
+        assertEquals("voice", Intents.stopIntent("хватит"))
         assertEquals(Intents.SecondEar(false, null), Intents.secondEar("хватит слушать вокруг"))
     }
 
@@ -277,5 +279,101 @@ class IntentsTest {
         assertEquals(Intents.Listen("he-IL", null), Intents.listenSwitch("клод, слушай на иврите"))
         assertEquals(Intents.Listen("ru-RU", null), Intents.listenSwitch("клод, слушай по-русски"))
         assertEquals(Intents.Listen("en-US", null), Intents.listenSwitch("claude, listen in english"))
+    }
+
+    // -- то, что нашли разборы кода ----------------------------------------
+
+    @Test
+    fun `обращение слышно и после слова-затравки`() {
+        // Демон эти слова срезает с самого начала, телефон — нет, и реплика
+        // умирала на трубке, не дойдя до того, кто бы её понял.
+        assertTrue(Intents.hasWake("эй клод откати последнее"))
+        assertTrue(Intents.hasWake("окей клод покажи логи"))
+        assertTrue(Intents.hasWake("ну клод давай уже"))
+        assertTrue(Intents.hasWake("слушай клод почини тесты"))
+        assertTrue(Intents.hasWake("hey claude show the logs"))
+        assertTrue(Intents.hasWake("ok claude what's done"))
+        assertEquals("откати последнее", Intents.stripWake("эй клод откати последнее"))
+    }
+
+    @Test
+    fun `cloud — это тоже обращение`() {
+        // Самое частое, что слышит английский распознаватель вместо Claude.
+        // Допуск в одну букву не спасал: там две замены.
+        assertTrue(Intents.hasWake("cloud show me the logs"))
+        assertTrue(Intents.hasWake("clode fix the tests"))
+    }
+
+    @Test
+    fun `второе ухо выключи — это просьба закрыть, а не открыть`() {
+        // Совпадало начало фразы, и просьба закрыть ОТКРЫВАЛА микрофон на
+        // комнату — ровно то, чего нельзя делать без прямой просьбы.
+        assertEquals(Intents.SecondEar(false, null), Intents.secondEar("второе ухо выключи"))
+        assertEquals(Intents.SecondEar(false, null), Intents.secondEar("второе ухо убери"))
+        assertEquals(Intents.SecondEar(false, null), Intents.secondEar("второе ухо не надо"))
+        assertEquals(Intents.SecondEar(false, null), Intents.secondEar("second ear off"))
+    }
+
+    @Test
+    fun `разговор про второе ухо микрофон не открывает`() {
+        assertNull(Intents.secondEar("второе ухо это метафора"))
+        assertNull(Intents.secondEar("второе ухо это что"))
+        assertNull(Intents.secondEar("second ear in the code is called secondear"))
+        // А сама команда и команда с языком — открывают.
+        assertEquals(Intents.SecondEar(true, null), Intents.secondEar("второе ухо"))
+        assertEquals(Intents.SecondEar(true, "he-IL"), Intents.secondEar("второе ухо на иврите"))
+    }
+
+    @Test
+    fun `фраза про язык — не команда сменить язык`() {
+        // Команды смены языка у демона нет: перехваченная реплика не доходит
+        // никуда вообще, и человек этого не видит.
+        assertNull(Intents.languageSwitch("клод английский текст в логах не переводи"))
+        assertNull(Intents.languageSwitch("клод русский язык в интерфейсе надо поправить"))
+        assertNull(Intents.languageSwitch("клод автоматически запускай тесты после сборки"))
+        assertNull(Intents.languageSwitch("claude auto format the code"))
+        assertNull(Intents.languageSwitch("claude english is the default locale"))
+        // Сама команда работать не перестала.
+        assertEquals("en-US", Intents.languageSwitch("клод английский"))
+        assertEquals("en-US", Intents.languageSwitch("клод переключись на английский"))
+        assertEquals(Intents.ANY_LANGUAGE, Intents.languageSwitch("клод как спросил"))
+    }
+
+    @Test
+    fun `останови сервер — это поручение, а не остановка работы`() {
+        // Голый глагол съедал обычные команды: «останови сервер» гасил работу
+        // Claude вместо того, чтобы её ему поручить.
+        assertNull(Intents.stopIntent("клод останови сервер"))
+        assertNull(Intents.stopIntent("клод прекрати сыпать логи"))
+        assertNull(Intents.stopIntent("claude stop the server"))
+        assertNull(Intents.stopIntent("claude abort the migration if it hangs"))
+        assertNull(Intents.stopIntent("claude enough of the retries use a queue"))
+        assertNull(Intents.stopIntent("para el informe necesito los logs"))
+        // Голое слово по-прежнему останавливает.
+        assertEquals("voice", Intents.stopIntent("стоп"))
+        assertEquals("voice", Intents.stopIntent("тихо"))
+        assertEquals("work", Intents.stopIntent("останови"))
+        assertEquals("work", Intents.stopIntent("останови работу"))
+    }
+
+    @Test
+    fun `отмени задачу доезжает до демона, а не гасит работу`() {
+        // «cancel the task» — фраза, которой у демона отменяют фоновую
+        // задачу. Телефон превращал её в прерывание текущей работы: два
+        // разных разрушительных действия.
+        assertNull(Intents.stopIntent("cancel the task about dependencies"))
+        assertNull(Intents.stopIntent("cancela la tarea"))
+        assertNull(Intents.stopIntent("отмени задачу про тесты"))
+    }
+
+    @Test
+    fun `слушай только ошибки — не про языки`() {
+        // Такая фраза выключала многоязычие насовсем: переключателя на экране
+        // нет, а команда, которая вернула бы его, живёт на том же пути.
+        assertNull(Intents.listenSwitch("клод слушай только ошибки"))
+        assertNull(Intents.listenSwitch("claude listen only to stderr"))
+        assertEquals(Intents.Listen("en-US", false),
+                     Intents.listenSwitch("клод слушай только английский"))
+        assertEquals(Intents.Listen(null, false), Intents.listenSwitch("клод слушай только"))
     }
 }

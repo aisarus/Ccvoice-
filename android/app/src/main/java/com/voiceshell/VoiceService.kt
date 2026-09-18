@@ -159,6 +159,8 @@ class VoiceService : Service() {
     private var session: MediaSessionCompat? = null
     // Когда нажатие гарнитуры последний раз что-то сделало.
     private var buttonActedAt = 0L
+    // Рукопожатие завершено и hello ушло: до этого сокет есть, а собеседника нет.
+    @Volatile private var ready = false
     private var cloud: SpeechRecognizer? = null
     private var wake: WakeWordEngine? = null
     private var route: AudioRoute? = null
@@ -466,24 +468,20 @@ class VoiceService : Service() {
     // ---------- разбор реплики ----------
     private fun handle(text: String) {
         if (isOwnEcho(text)) return
-        // Раньше «стопа»: «хватит слушать вокруг» начинается со слова, которым
-        // гасят голос, и при обратном порядке ухо не закрылось бы никогда.
-        Intents.secondEar(text)?.let { change ->
-            secondEarCommand(change, text)
-            return
-        }
+        // «Стоп» — единственная команда без обращения.
+        //
+        // Она такой задумана: остановка не должна зависеть ни от круга по
+        // сети, ни от того, расслышали ли обращение. Все остальные разборы
+        // стояли здесь же — и это была дыра, а не решение. Локальная модель
+        // отдаёт сюда ВСЮ услышанную речь, не только обращения: разговор в
+        // комнате шёл через четыре таблицы команд, и «второе ухо это
+        // метафора» открывало микрофон на комнату, а «английский там лучше»
+        // молча закрепляло язык ответа. Остальное — после проверки, что
+        // говорили нам.
         Intents.stopIntent(text)?.let { scope ->
             silence()
             send(JSONObject().put("id", "interrupt").put("scope", scope))
             report(getString(if (scope == "work") R.string.stopping_work else R.string.going_quiet))
-            return
-        }
-        Intents.listenSwitch(text)?.let { change ->
-            switchListening(change)
-            return
-        }
-        Intents.languageSwitch(text)?.let { code ->
-            switchReplyLanguage(code, aloud = true)
             return
         }
         if (speaking) {
@@ -502,6 +500,20 @@ class VoiceService : Service() {
             return
         }
         windowUntil = 0
+
+        // Обращение услышано — теперь можно и команды разбирать.
+        Intents.secondEar(text)?.let { change ->
+            secondEarCommand(change, text)
+            return
+        }
+        Intents.listenSwitch(text)?.let { change ->
+            switchListening(change)
+            return
+        }
+        Intents.languageSwitch(text)?.let { code ->
+            switchReplyLanguage(code, aloud = true)
+            return
+        }
 
         // Модель обращения — самая маленькая в системе: её дело услышать
         // «Клод» и «стоп», а не переписывать команду. Поэтому саму реплику
@@ -561,15 +573,20 @@ class VoiceService : Service() {
         measured: Segment? = null,
     ) {
         if (payload.isBlank()) return
-        signals?.accepted(route?.onBluetoothMic == true)
-        phase(R.string.state_sent)
-        report(getString(R.string.sent_to, payload))
         val device = if (route?.onBluetoothMic == true) "sony_mic" else "phone_mic"
-        send(
+        // Сигнал «принято» — после отправки, а не до неё.
+        //
+        // Раньше он звучал первым: человек в наушниках слышал подтверждение,
+        // а реплика в это время не уходила никуда. Положительный звук на
+        // потерянной реплике — худшее, что можно ему сообщить.
+        val sent = send(
             JSONObject()
                 .put("id", "speech_segment")
                 .put("segment_id", System.currentTimeMillis().toString())
                 .put("transcript", payload)
+                // Закрепление языка едет с каждой репликой: переподключение
+                // иначе тихо его снимает, и ответ приходит на чужом языке.
+                .put("reply_language", prefs.replyLanguage)
                 // Демон не может услышать, по какому каналу пришёл звук: на
                 // канале гарнитуры полоса узкая и часть признаков не измерить.
                 .put("device", device)
@@ -582,6 +599,11 @@ class VoiceService : Service() {
                 .apply { if (alternatives.isNotEmpty()) put("alternatives", JSONArray(alternatives)) }
                 .apply { describe(this, device, measured) }
         )
+        if (sent) {
+            signals?.accepted(route?.onBluetoothMic == true)
+            phase(R.string.state_sent)
+            report(getString(R.string.sent_to, payload))
+        }
     }
 
     /**
@@ -796,6 +818,16 @@ class VoiceService : Service() {
             Intents.stopIntent(text)?.let { scope ->
                 silence()
                 send(JSONObject().put("id", "interrupt").put("scope", scope))
+                return
+            }
+            Intents.listenSwitch(text)?.let { change ->
+                // Этого разбора здесь не было вовсе, хотя комментарий выше
+                // обещал «тот же порядок». А это и есть обычный путь:
+                // обращение слышит локальная модель, реплику после него —
+                // облачный распознаватель. Смена языка микрофона работала
+                // только тогда, когда маленькая русская модель случайно
+                // разбирала всю фразу сама.
+                switchListening(change)
                 return
             }
             Intents.languageSwitch(text)?.let { code ->
@@ -1744,6 +1776,7 @@ class VoiceService : Service() {
         if (socket != null) return
         link(LinkState.CONNECTING, getString(R.string.link_connecting_to, prefs.server))
         val request = Request.Builder().url(prefs.socketUrl()).build()
+        ready = false
         socket = http.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 webSocket.send(
@@ -1752,11 +1785,21 @@ class VoiceService : Service() {
                         // Демон отвечает на языке телефона, пока не услышит
                         // другой: иначе первая же реплика пришла бы по-английски.
                         .put("language", prefs.language)
+                        // Закреплённый язык ответа переживает переподключение
+                        // только так: отсутствие поля демон читает как
+                        // «снять закрепление», а не как «не трогать».
+                        .put("reply_language", prefs.replyLanguage)
                         .put("app_version", "0.4.0").toString()
                 )
                 main.post {
                     unauthorized = false
-                    attempt = 0
+                    // Реплики можно отпускать только теперь: `newWebSocket`
+                    // отдаёт сокет сразу, до рукопожатия, а окхттп копит
+                    // отправленное и выливает его ПЕРЕД `onOpen`. Реплика,
+                    // сказанная в эту щель, обгоняла hello — демон отвечал
+                    // «сначала hello», ронял её и сообщал телефону, что токен
+                    // не тот. Токен при этом был в порядке.
+                    ready = true
                     link(LinkState.ONLINE, getString(R.string.link_hint_online))
                 }
             }
@@ -1773,6 +1816,24 @@ class VoiceService : Service() {
                 main.post { lost(Link.classify(message, code, online()), message, code) }
             }
 
+            /**
+             * Закрыл демон — а этого телефон не замечал по сорок секунд.
+             *
+             * okhttp зовёт `onClosed` только если закрылись обе стороны. Когда
+             * закрывает демон и клиент не отвечает, приходит ровно этот
+             * колбэк, и его не было. Всё это время сокет считался живым:
+             * переподключения не назначалось, связь показывалась зелёной, а
+             * `send` складывал реплики в сокет, который никто не читает, и
+             * возвращал «отправлено». Человек говорил в пустоту и слышал
+             * подтверждающий сигнал. Измерено: 39 секунд.
+             */
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                runCatching { webSocket.close(1000, null) }
+                main.post {
+                    lost(if (unauthorized) LinkState.REFUSED else LinkState.NO_SERVER, reason, 0)
+                }
+            }
+
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 // Демон закрыл сам. Неверный токен от этого не исправится, и
                 // долбиться в него раз в две секунды бессмысленно.
@@ -1786,6 +1847,7 @@ class VoiceService : Service() {
     /** Связь пропала: сказать человеку причину и назначить следующую попытку. */
     private fun lost(state: LinkState, message: String?, httpCode: Int) {
         socket = null
+        ready = false
         if (stopped) return
         val reason = Link.hint(this, state, message, httpCode)
         if (reconnectScheduled) {
@@ -1805,7 +1867,9 @@ class VoiceService : Service() {
     private fun connectNow() {
         main.removeCallbacks(reconnect)
         reconnectScheduled = false
-        attempt = 0
+        // Счётчик попыток не трогаем: человек говорит в каждую паузу, и
+        // обнуление здесь роняло лестницу пауз с минуты обратно на две
+        // секунды — час лежащего демона превращался в час стука в дверь.
         connect()
     }
 
@@ -1830,8 +1894,30 @@ class VoiceService : Service() {
     private fun onServerMessage(message: JSONObject) {
         when (message.optString("id")) {
             "welcome" -> {
-                report(getString(R.string.ready_credential, message.optString("credential")))
+                // Лестницу пауз сбрасывает `welcome`, а не открытый сокет:
+                // демон принимает рукопожатие с любым токеном и только потом
+                // отказывает. Сброс в `onOpen` означал, что неверный токен
+                // долбится в дверь каждые две секунды — и жалуется при этом
+                // на «сервер не отвечает» вместо «токен не тот».
+                attempt = 0
+                val problem = message.optString("credential_problem")
+                report(
+                    if (problem.isNotBlank()) getString(R.string.ready_credential, problem)
+                    else getString(R.string.ready_credential, message.optString("credential"))
+                )
                 restoreEar(message)
+            }
+            // Демон говорит, что у него закрепилось на самом деле. Телефон
+            // предлагает пять языков реплик, демон говорит на четырёх, и
+            // «Клод, иврит» закреплялся только на трубке: она читала ответы
+            // ивритским голосом, а приходили они по-русски.
+            "language" -> {
+                val pinned = message.optString("reply")
+                val mine = prefs.replyLanguage
+                if (pinned.isBlank() && mine.isNotBlank()) {
+                    prefs.replyLanguage = ""
+                    report(getString(R.string.language_not_supported, mine))
+                }
             }
             "ambient_control" -> onAmbient(message)
             "route" -> onRoute(message)
@@ -1921,16 +2007,23 @@ class VoiceService : Service() {
         }
     }
 
-    private fun send(payload: JSONObject) {
+    /** Ушла ли реплика на самом деле. */
+    private fun send(payload: JSONObject): Boolean {
         val ws = socket
-        if (ws == null) {
+        // `ready` вместо `ws != null`: сокет существует с первой миллисекунды
+        // рукопожатия, а слушать его на той стороне ещё некому.
+        if (ws == null || !ready || !ws.send(payload.toString())) {
             // Реплика пропала молча — это и есть «он меня не слышит».
+            // Молча она пропадать и не должна: строчку в уведомлении человек
+            // с телефоном в кармане не видит, и единственный канал, который
+            // у него есть, — звук в ухе.
+            signals?.missed(route?.onBluetoothMic == true)
             report(getString(R.string.not_sent, getString(linkState.label)))
             // Раз человек говорит, самое время попробовать связаться снова.
             main.post { connectNow() }
-            return
+            return false
         }
-        ws.send(payload.toString())
+        return true
     }
 
     // ---------- уведомление и статус ----------

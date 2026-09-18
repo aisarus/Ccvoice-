@@ -142,6 +142,24 @@ PHRASES: dict[str, dict[str, tuple[str, ...]]] = {
         "es": ("apaga el segundo oído", "apaga el segundo oido", "deja de escuchar alrededor"),
         "zh": ("关掉第二只耳朵", "别听周围了"),
     },
+    # Названия языков: ими договаривают «второе ухо на иврите».
+    "language_name": {
+        "en": ("english", "russian", "spanish", "chinese", "hebrew"),
+        "ru": ("английский", "по английски", "русский", "по русски", "испанский",
+               "по испански", "китайский", "по китайски", "иврит", "на иврите"),
+        "es": ("inglés", "ingles", "ruso", "español", "espanol", "chino", "hebreo"),
+        "zh": ("英语", "俄语", "西班牙语", "中文", "希伯来语"),
+    },
+    # Хвост, превращающий «второе ухо …» в просьбу его закрыть. Просить
+    # закрыть задом наперёд — «второе ухо выключи» — по-русски естественно,
+    # и раньше такая фраза открывала микрофон на комнату: совпадало начало.
+    "second_ear_closing_tail": {
+        "en": ("off", "stop", "close", "no more", "enough"),
+        "ru": ("выключи", "выключить", "убери", "убрать", "закрой", "закрыть",
+               "не надо", "больше не надо", "больше не нужно", "хватит", "стоп"),
+        "es": ("apaga", "quita", "cierra", "ya no"),
+        "zh": ("关掉", "别听了"),
+    },
     # Вопросы к буферу второго уха: «что он сказал», «какую цифру назвал».
     # Имя нарочно не «recall»: так зовётся память о человеке, и второй ключ
     # с тем же именем молча затёр бы её — в словаре побеждает последний.
@@ -355,6 +373,17 @@ def contains(text: str, phrases: tuple[str, ...]) -> bool:
     """Anywhere in the utterance — for phrases that trail, like «in background»."""
     lowered = text.lower()
     return any(phrase in lowered for phrase in phrases)
+
+
+def head_matches(text: str, phrases: tuple[str, ...]) -> bool:
+    """Начинается ли текст с одной из этих фраз.
+
+    Нужно там, где команда и её отмена начинаются одинаково: «второе ухо» и
+    «второе ухо выключи» различает только хвост.
+    """
+    lowered = normalise(text)
+    return any(lowered == phrase or lowered.startswith(phrase + " ")
+               or (_cjk(phrase) and lowered.startswith(phrase)) for phrase in phrases)
 
 
 def tail_after(text: str, phrases: tuple[str, ...]) -> str | None:

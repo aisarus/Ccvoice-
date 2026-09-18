@@ -182,3 +182,26 @@ def test_the_buffer_is_handed_to_claude_with_roles_and_times(daemon):
     rendered = daemon.ambient.transcript()
     assert "מתי זה יהיה מוכן" in rendered
     assert i18n.t("ambient.bystander") in rendered
+
+
+# -- «второе ухо выключи» ---------------------------------------------------
+
+@pytest.mark.parametrize("said,wanted", [
+    ("второе ухо", True),
+    ("клод, второе ухо", True),
+    ("второе ухо на иврите", True),
+    ("второе ухо выключи", False),
+    ("second ear off", False),
+    ("второе ухо это метафора", None),
+    ("second ear in the code is called secondear", None),
+    ("почини тесты", None),
+])
+def test_opening_the_ear_is_told_apart_from_talking_about_it(said, wanted):
+    """Совпадения начала фразы мало, и цена ошибки несимметрична.
+
+    «Второе ухо выключи» — просьба закрыть, сказанная задом наперёд; по-русски
+    так говорят не реже прямого порядка. Совпадало начало, и фраза открывала
+    микрофон на комнату — ровно то, чего нельзя делать без прямой просьбы, да
+    ещё в ответ на просьбу обратную.
+    """
+    assert Daemon._second_ear_intent(said) is wanted

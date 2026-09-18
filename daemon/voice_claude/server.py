@@ -815,8 +815,9 @@ class Daemon:
         if lexicon.starts_with(text, lexicon.every("second_ear_off")):
             await self._second_ear(False)
             return True
-        if lexicon.starts_with(text, lexicon.every("second_ear_on")):
-            await self._second_ear(True)
+        wanted = self._second_ear_intent(text)
+        if wanted is not None:
+            await self._second_ear(wanted)
             return True
         if checkpoints.matches(text, checkpoints.UNDO_PHRASES):
             await self._undo()
@@ -846,6 +847,29 @@ class Daemon:
             await self._say(spoken, "chat")
             return True
         return False
+
+    @staticmethod
+    def _second_ear_intent(text: str) -> bool | None:
+        """Открыть, закрыть или не про ухо вовсе.
+
+        Совпадения начала здесь мало. «Второе ухо выключи» — это просьба
+        закрыть, сказанная задом наперёд, и по-русски так говорят не реже
+        прямого порядка; а совпадало начало, и фраза ОТКРЫВАЛА микрофон на
+        комнату — ровно то, чего нельзя делать без прямой просьбы, да ещё в
+        ответ на просьбу обратную. «Второе ухо это что» — тоже не команда.
+        """
+        rest = lexicon.tail_after(lexicon.strip_openers(text),
+                                  lexicon.every("second_ear_on"))
+        if rest is None:
+            return None
+        if not rest:
+            return True
+        if lexicon.head_matches(rest, lexicon.every("second_ear_closing_tail")):
+            return False
+        # Договорили языком комнаты — это всё ещё «открой».
+        if lexicon.head_matches(rest, lexicon.every("language_name")):
+            return True
+        return None
 
     async def _second_ear(self, wanted: bool) -> None:
         """«Клод, второе ухо» — слушать, что вокруг, и пересказывать по просьбе.

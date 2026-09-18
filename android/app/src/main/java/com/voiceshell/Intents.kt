@@ -8,10 +8,19 @@ package com.voiceshell
  */
 object Intents {
     val WAKE = listOf("клод", "клода", "клоуд", "клауд", "claude", "клот", "клоуде",
-                      "claudio", "clod")
+                      "claudio", "clod",
+                      // «cloud» — самое частое, что слышит английский
+                      // распознаватель вместо «Claude», и допуск в одну букву
+                      // его не спасает: там две замены.
+                      "cloud", "clode", "cloudy")
 
-    /** Обращение по-китайски: там нет пробелов, слово ищется в начале строки. */
-    private val WAKE_CJK = listOf("克劳德", "克劳德你好")
+    /**
+     * Обращение по-китайски: там нет пробелов, слово ищется в начале строки.
+     *
+     * Длинное — первым: короткое совпало бы раньше и съело бы только себя,
+     * оставив «你好» приклеенным к команде.
+     */
+    private val WAKE_CJK = listOf("克劳德你好", "克劳德")
 
     /**
      * От этих слов отсчитывается допуск в одну букву.
@@ -23,12 +32,21 @@ object Intents {
     private val WAKE_ROOTS = listOf("клод", "клоуд", "клауд", "claude")
     /** Слова, которыми начинают команду: их нельзя принимать за обращение. */
     private val NOT_WAKE = setOf("код", "чат", "кот", "что", "как", "код?")
+    /**
+     * Работа названа прямо — можно ловить и с продолжением.
+     *
+     * Всё, что не называет работу, переехало в списки «целой репликой»: там
+     * голый глагол съедал обычные команды. «Клод, останови сервер» гасил
+     * работу Claude вместо того, чтобы её ему поручить, «claude stop the
+     * server» просто затыкал телефон, а «cancel the task» — фраза, которой у
+     * демона отменяют фоновую задачу, — превращалась в прерывание.
+     */
     private val STOP_WORK = listOf(
-        "стоп работу", "стоп работа", "останови работу", "останови", "прекрати",
+        "стоп работу", "стоп работа", "останови работу",
         // Про работу сказано прямо — это остановка, а не откат.
         "отмени работу", "отмена работы",
-        "stop working", "stop the work", "abort", "cancel",
-        "detén el trabajo", "deten el trabajo", "para el trabajo", "cancela"
+        "stop working", "stop the work",
+        "detén el trabajo", "deten el trabajo", "para el trabajo"
     )
 
     /**
@@ -48,14 +66,48 @@ object Intents {
      * ловились вместе с продолжением, откат не доходил до демона никогда:
      * телефон превращал его в прерывание и сам же о нём забывал.
      */
-    private val STOP_WORK_ALONE = listOf("отмени", "отмена")
-    private val STOP_VOICE = listOf(
-        "стоп", "тихо", "хватит", "замолчи",
-        "stop", "quiet", "enough", "shut up",
+    private val STOP_WORK_ALONE = listOf(
+        "отмени", "отмена", "останови", "прекрати", "abort", "cancel", "cancela"
+    )
+    /**
+     * Заткнуться — тоже целой репликой, кроме «стоп».
+     *
+     * «Стоп» остаётся безусловным нарочно: это единственное слово, которое
+     * обязано работать всегда и мгновенно. Остальные — обычные слова: «para»
+     * это самый частый предлог испанского, «enough of the retries» и «quiet
+     * down the logger» — обычные поручения.
+     */
+    private val STOP_VOICE = listOf("стоп", "stop talking", "stop speaking")
+    private val STOP_VOICE_ALONE = listOf(
+        "тихо", "хватит", "замолчи", "stop", "quiet", "enough", "shut up",
         "silencio", "basta", "cállate", "callate", "para"
     )
 
+    /**
+     * Слова, с которых человек начинает, прежде чем позвать.
+     *
+     * «Эй, Клод», «окей, Клод», «слушай, Клод», «hey claude» — телефон не
+     * слышал ни одного из них: обращение искалось только в первом слове.
+     * Демон эти слова срезает с самого начала, телефон — нет, и реплика
+     * умирала на трубке, не дойдя до того, кто бы её понял.
+     */
+    private val OPENERS = listOf(
+        "эй", "окей", "ок", "ну", "а", "и", "так", "давай", "пожалуйста", "слушай",
+        "hey", "ok", "okay", "so", "well", "please", "yo", "listen",
+        "oye", "vale", "bueno", "escucha", "venga", "eh"
+    )
+
     private fun isCjk(text: String): Boolean = text.any { it in '\u4e00'..'\u9fff' }
+
+    /** Реплика без слов-затравок в начале: «эй, клод…» → «клод…». */
+    private fun peeled(bare: String): String {
+        var rest = bare
+        while (true) {
+            val first = rest.substringBefore(' ')
+            if (first.isEmpty() || first !in OPENERS || !rest.contains(' ')) return rest
+            rest = rest.substringAfter(' ').trim()
+        }
+    }
 
     fun normalise(text: String): String =
         text.lowercase().replace(Regex("[^\\p{L}\\p{N}\\s]"), " ").replace(Regex("\\s+"), " ").trim()
@@ -63,7 +115,7 @@ object Intents {
     fun hasWake(text: String): Boolean {
         val bare = normalise(text)
         if (WAKE_CJK.any { bare.startsWith(it) }) return true
-        return isWake(bare.substringBefore(' '))
+        return isWake(peeled(bare).substringBefore(' '))
     }
 
     /**
@@ -103,9 +155,10 @@ object Intents {
         WAKE_CJK.firstOrNull { normalised.startsWith(it) }?.let { wake ->
             return normalised.removePrefix(wake).trim().ifBlank { text.trim() }
         }
-        val first = normalised.substringBefore(' ')
-        if (!isWake(first)) return text.trim()
-        return normalised.substringAfter(' ', "").trim().ifBlank { text.trim() }
+        val bare = peeled(normalised)
+        val first = bare.substringBefore(' ')
+        if (!isWake(first)) return bare.ifBlank { text.trim() }
+        return bare.substringAfter(' ', "").trim().ifBlank { text.trim() }
     }
 
     /** Смена языка голосом: «Клод, английский». Возвращает код языка или null. */
@@ -135,12 +188,15 @@ object Intents {
             .removePrefix("говори ").removePrefix("switch to ").removePrefix("speak ")
             .removePrefix("cambia a ").removePrefix("habla ")
             .removePrefix("说").removePrefix("切换到").trim()
-        if (ANY_WORDS.any {
-                bare == it || bare.startsWith("$it ") || (isCjk(it) && bare.startsWith(it))
-            }) return ANY_LANGUAGE
+        // Только целой репликой.
+        //
+        // Раньше хватало начала: «клод, английский текст в логах не переводи»
+        // молча закрепляло английский и не доходило до Claude вовсе — команды
+        // смены языка у демона нет, второго шанса не было. Слово «язык» в
+        // начале фразы встречается слишком часто, чтобы считать его командой.
+        if (ANY_WORDS.any { bare == it || (isCjk(it) && bare == it) }) return ANY_LANGUAGE
         for ((code, words) in LANGUAGES) {
-            if (words.any { bare == it || bare.startsWith("$it ") }) return code
-            if (words.any { isCjk(it) && bare.startsWith(it) }) return code
+            if (words.any { bare == it }) return code
         }
         return null
     }
@@ -194,7 +250,13 @@ object Intents {
         if (hit(LISTEN_ALL) != null) return Listen(null, true)
         hit(LISTEN_ONE)?.let { phrase ->
             // «Слушай только английский» — это и один язык, и какой именно.
-            return Listen(languageIn(bare.removePrefix(phrase)), false)
+            val rest = bare.removePrefix(phrase).trim()
+            val named = languageIn(rest)
+            // «Слушай только ошибки» — не про языки вовсе. Раньше такая
+            // фраза выключала многоязычие насовсем: переключателя на экране
+            // нет, а команда, которая его вернёт, живёт на том же пути.
+            if (named == null && rest.isNotEmpty()) return null
+            return Listen(named, false)
         }
         hit(LISTEN_OPENERS)?.let { phrase ->
             val named = languageIn(bare.removePrefix(phrase)) ?: return null
@@ -254,6 +316,14 @@ object Intents {
         "segundo oído", "segundo oido", "escucha alrededor",
         "第二只耳朵", "听周围"
     )
+    /** Хвост, который превращает «второе ухо …» в просьбу его закрыть. */
+    private val CLOSING_TAIL = listOf(
+        "выключи", "выключить", "убери", "убрать", "закрой", "закрыть",
+        "не надо", "больше не надо", "больше не нужно", "хватит", "стоп",
+        "off", "stop", "close", "no more", "enough",
+        "apaga", "quita", "cierra", "ya no"
+    )
+
     private val EAR_OFF = listOf(
         "выключи второе ухо", "убери второе ухо", "закрой второе ухо",
         "хватит слушать вокруг", "перестань слушать вокруг", "без второго уха",
@@ -278,7 +348,20 @@ object Intents {
         }
         if (hit(EAR_OFF) != null) return SecondEar(false, null)
         hit(EAR_ON)?.let { phrase ->
-            return SecondEar(true, languageIn(bare.removePrefix(phrase)))
+            val rest = bare.removePrefix(phrase).trim()
+            // «Второе ухо выключи» — просьба закрыть, сказанная задом наперёд,
+            // и по-русски так говорят не реже. Раньше хватало начала фразы, и
+            // она ОТКРЫВАЛА микрофон на комнату — ровно то, что нельзя делать
+            // без прямой просьбы, да ещё и в ответ на просьбу обратную.
+            if (CLOSING_TAIL.any { rest == it || rest.startsWith("$it ") }) {
+                return SecondEar(false, null)
+            }
+            val named = languageIn(rest)
+            // Остаток есть, языка в нём нет — значит это разговор про второе
+            // ухо, а не команда ему: «второе ухо это что», «second ear in the
+            // code is called secondEar».
+            if (named == null && rest.isNotEmpty()) return null
+            return SecondEar(true, named)
         }
         return null
     }
@@ -322,9 +405,10 @@ object Intents {
         val bare = stripWake(normalise(text))
         if (STOP_WORK_ALONE.any { bare == it }) return "work"
         STOP_WORK.firstOrNull { bare == it || bare.startsWith("$it ") }?.let { return "work" }
-        STOP_WORK_CJK.firstOrNull { bare.startsWith(it) }?.let { return "work" }
+        STOP_WORK_CJK.firstOrNull { bare == it }?.let { return "work" }
+        if (STOP_VOICE_ALONE.any { bare == it }) return "voice"
         STOP_VOICE.firstOrNull { bare == it || bare.startsWith("$it ") }?.let { return "voice" }
-        STOP_VOICE_CJK.firstOrNull { bare.startsWith(it) }?.let { return "voice" }
+        STOP_VOICE_CJK.firstOrNull { bare == it }?.let { return "voice" }
         return null
     }
 }

@@ -203,4 +203,5 @@
     <string name="second_ear_expired">第二只耳朵过了一小时自己关了</string>
     <string name="second_ear_online">设备上没有 %1$s 的离线识别——周围的话要走网络</string>
     <string name="heard_too_little">只听到「%1$s」——再说一遍</string>
+    <string name="language_not_supported">守护进程不会说 %1$s——将用提问的语言回答</string>
 </resources>
