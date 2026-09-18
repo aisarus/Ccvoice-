@@ -18,6 +18,7 @@ import os
 
 from . import policy
 from .auth import credential_kind, credential_problem, credentials_present
+from . import i18n
 from .i18n import t
 
 PermissionHook = Callable[[str, dict[str, Any]], Awaitable[bool]]
@@ -65,10 +66,14 @@ class _SdkTarget:
 
     target_id = "sdk"
 
+    #: Системный промпт цели меняется вместе с языком разговора.
+    prompt_follows_language = False
+
     def __init__(self, cwd: str | Path) -> None:
         self.cwd = Path(cwd).expanduser()
         self._client: Any | None = None
         self._lock = asyncio.Lock()
+        self._session_language: str | None = None
 
     @property
     def available(self) -> bool:
@@ -78,6 +83,14 @@ class _SdkTarget:
         raise NotImplementedError
 
     async def connect(self) -> None:
+        # Системный промпт задаётся один раз, при подъёме сессии, и живёт
+        # столько же, сколько она. Человек, перешедший на другой язык,
+        # получал верную работу и ответ вслух на прежнем: сессия всё ещё
+        # держала промпт, с которым её подняли. Поэтому смена языка —
+        # это повод поднять её заново, и только она.
+        if (self._client is not None and self.prompt_follows_language
+                and self._session_language != i18n.current()):
+            await self.reset()
         if self._client is not None or not self.available:
             return
         from claude_agent_sdk import ClaudeSDKClient  # type: ignore
@@ -85,6 +98,7 @@ class _SdkTarget:
         self.cwd.mkdir(parents=True, exist_ok=True)
         self._client = ClaudeSDKClient(options=self._options())
         await self._client.connect()
+        self._session_language = i18n.current()
 
     @staticmethod
     def compose(text: str, preamble: str = "", role_line: str = "") -> str:
@@ -124,6 +138,7 @@ class _SdkTarget:
     async def reset(self) -> None:
         """Сбросить клиент — например, после того как подключили подписку."""
         client, self._client = self._client, None
+        self._session_language = None
         if client is not None:
             try:
                 await client.disconnect()
@@ -176,6 +191,7 @@ class ChatTarget(_SdkTarget):
     цель остаётся безопасным дефолтом роутера."""
 
     target_id = "chat"
+    prompt_follows_language = True
     READ_ONLY_TOOLS = ("WebSearch", "WebFetch")
 
     def __init__(self, cwd: str | Path | None = None, model: str | None = None,
@@ -188,7 +204,7 @@ class ChatTarget(_SdkTarget):
 
     @property
     def system(self) -> str:
-        return self._system or t("prompt.chat_system")
+        return self._system or f'{t("prompt.chat_system")}\n{t("prompt.answer_language")}'
 
     def _options(self) -> Any:
         from claude_agent_sdk import ClaudeAgentOptions  # type: ignore
@@ -225,9 +241,10 @@ class SummaryTarget(_SdkTarget):
     """
 
     target_id = "summary"
+    prompt_follows_language = True
     @property
     def SYSTEM(self) -> str:                      # noqa: N802 - имя из спеки
-        return t("prompt.summary_system")
+        return f'{t("prompt.summary_system")}\n{t("prompt.answer_language")}'
 
     def __init__(self, cwd: str | Path | None = None) -> None:
         super().__init__(cwd or Path(tempfile.gettempdir()) / "voice-claude-summary")
@@ -260,6 +277,7 @@ class IntentTarget(_SdkTarget):
     """
 
     target_id = "intent"
+    prompt_follows_language = True
     VALID = ("code", "chat", "note")
     @property
     def SYSTEM(self) -> str:                      # noqa: N802 - имя из спеки

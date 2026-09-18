@@ -36,6 +36,12 @@ from .targets import ChatTarget, CodeTarget, NoteTarget, TargetSet
 
 log = logging.getLogger("voice-claude")
 PROTOCOL_VERSION = 1
+# Демон рассчитан на один-два телефона одного человека. Потолок нужен не от
+# нагрузки, а от того, что адрес перестаёт быть неизвестным: без токена никто
+# ничего не сделает, но сокеты открывать можно бесконечно, и они стоят памяти.
+MAX_SOCKETS = 32
+# Соединение, которое молчит вместо hello, — не телефон.
+HELLO_TIMEOUT_S = 10.0
 CLIENT_DIR = Path(__file__).resolve().parents[2] / "client" / "web"
 EXTRA_TYPES = {".webmanifest": "application/manifest+json", ".svg": "image/svg+xml"}
 
@@ -92,6 +98,8 @@ class Daemon:
             note=NoteTarget(settings.note_path),
         )
         self.clients: set[Any] = set()
+        # Все открытые сокеты, включая ещё не назвавшие токен.
+        self.sockets: set[Any] = set()
         self.telemetry: list[dict[str, Any]] = []
         self._pending: dict[str, asyncio.Future[bool]] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -135,6 +143,12 @@ class Daemon:
         """
         self._loop = asyncio.get_running_loop()
         working: set[asyncio.Task[Any]] = set()
+        if len(self.sockets) >= MAX_SOCKETS:
+            log.warning("too many open connections (%d), refusing a new one", len(self.sockets))
+            await self._close_quietly(websocket, 1013, "too many connections")
+            return
+        self.sockets.add(websocket)
+        deadline = asyncio.create_task(self._hello_deadline(websocket))
         try:
             async for raw in websocket:
                 try:
@@ -157,8 +171,24 @@ class Daemon:
         finally:
             # Начатую работу не обрываем: телефон переподключается сам, а
             # брошенная посреди дела правка — худшее, что можно сделать.
+            deadline.cancel()
+            self.sockets.discard(websocket)
             self.clients.discard(websocket)
             self._device_of.pop(websocket, None)
+
+    async def _hello_deadline(self, ws: Any) -> None:
+        """Сокет, не назвавший токен, живёт десять секунд.
+
+        Иначе открытые и молчащие соединения копятся до потолка и занимают
+        место, которое нужно настоящему телефону при переподключении.
+        """
+        try:
+            await asyncio.sleep(HELLO_TIMEOUT_S)
+        except asyncio.CancelledError:
+            return
+        if ws not in self.clients:
+            log.info("closing a connection that never said hello")
+            await self._close_quietly(ws, 1008, "hello first")
 
     async def _guarded(self, ws: Any, msg: dict[str, Any]) -> None:
         """Ни одна поломка не имеет права стать тишиной.
@@ -571,7 +601,10 @@ class Daemon:
         additions = load_spec()["command_passthrough"]["allowed_additions"]
         preamble = (additions.get("system_preamble_by_language", {}).get(i18n.current())
                     or additions["system_preamble"])
-        parts = ["\n".join(preamble.splitlines())]
+        # Язык называется прямо: сессия Claude Code живёт долго и помнит, на
+        # чём шёл прежний разговор, — без этой строки она продолжает отвечать
+        # на нём даже после того, как человек перешёл на другой.
+        parts = ["\n".join(preamble.splitlines()), i18n.t("prompt.answer_language")]
         for extra in (self._glossary_hint(), self.memory.hint()):
             if extra:
                 parts.append(extra)
@@ -1121,10 +1154,12 @@ class Daemon:
         await self._broadcast({"id": "state", "state": self.machine.state,
                                "window_open": self.machine.window_open()})
 
-    async def _close_quietly(self, ws: Any) -> None:
-        """Закрыть прежнее соединение того же телефона, не поднимая шума."""
+    async def _close_quietly(self, ws: Any, code: int = 1000,
+                             reason: str = "replaced by a newer connection") -> None:
+        """Закрыть соединение, не поднимая шума: прежнее того же телефона,
+        молчащее вместо hello или лишнее сверх потолка."""
         try:
-            await ws.close(1000, "replaced by a newer connection")
+            await ws.close(code, reason)
         except Exception:                        # оно могло уже умереть
             pass
 

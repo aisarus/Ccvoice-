@@ -14,6 +14,7 @@ import pytest
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 
+from voice_claude import server
 from voice_claude.server import Daemon, Settings
 from voice_claude.targets import Reply
 
@@ -418,3 +419,75 @@ def test_a_busy_daemon_does_not_pretend_to_be_idle(repo, tmp_path):
 
     asyncio.run(daemon._settle())
     assert daemon.machine.state == "WORKING"
+
+
+# -- потолок на соединения -------------------------------------------------
+
+class SilentSocket:
+    """Сокет, который открылся и молчит: ни hello, ни данных."""
+
+    def __init__(self) -> None:
+        self.closed: tuple[int, str] | None = None
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        raise StopAsyncIteration
+
+    async def send(self, _payload):
+        pass
+
+    async def close(self, code=1000, reason=""):
+        self.closed = (code, reason)
+
+
+def test_the_daemon_refuses_more_sockets_than_it_can_hold():
+    """Адрес демона перестаёт быть неизвестным, как только репозиторий открыт.
+
+    Без токена никто ничего не сделает — hello отобьётся, — но открывать
+    сокеты можно бесконечно, и каждый занимает место. Лишнее отбивается, а не
+    встаёт в очередь.
+    """
+    daemon = Daemon(Settings(workspace="/tmp", token="t"))
+    daemon.sockets.update(SilentSocket() for _ in range(server.MAX_SOCKETS))
+
+    extra = SilentSocket()
+    asyncio.run(daemon.handler(extra))
+
+    assert extra.closed is not None, "лишнее соединение осталось открытым"
+    assert extra not in daemon.sockets
+    assert len(daemon.sockets) == server.MAX_SOCKETS
+
+
+def test_a_socket_that_never_says_hello_is_closed():
+    """Молчащее соединение — не телефон, а занятое место."""
+    daemon = Daemon(Settings(workspace="/tmp", token="t"))
+    quiet = SilentSocket()
+
+    original, server.HELLO_TIMEOUT_S = server.HELLO_TIMEOUT_S, 0.01
+    try:
+        asyncio.run(daemon._hello_deadline(quiet))
+    finally:
+        server.HELLO_TIMEOUT_S = original
+    assert quiet.closed is not None
+
+
+def test_an_authenticated_socket_survives_the_deadline():
+    daemon = Daemon(Settings(workspace="/tmp", token="t"))
+    phone = SilentSocket()
+    daemon.clients.add(phone)
+
+    original, server.HELLO_TIMEOUT_S = server.HELLO_TIMEOUT_S, 0.01
+    try:
+        asyncio.run(daemon._hello_deadline(phone))
+    finally:
+        server.HELLO_TIMEOUT_S = original
+    assert phone.closed is None
+
+
+def test_a_socket_that_said_hello_frees_its_slot_when_it_goes():
+    """Иначе потолок забивается переподключениями телефона за полдня."""
+    daemon = Daemon(Settings(workspace="/tmp", token="t"))
+    asyncio.run(daemon.handler(SilentSocket()))
+    assert daemon.sockets == set()

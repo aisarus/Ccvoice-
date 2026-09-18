@@ -209,3 +209,82 @@ def test_permission_answers_are_understood_in_every_language(said, action):
 def test_apostrophes_survive_normalisation():
     """«don't» and «what's» are command phrases; «don t» is not."""
     assert lexicon.normalise("Don't — what's done?") == "don't what's done"
+
+
+# -- долгие сессии и смена языка -------------------------------------------
+
+class FakeSdkClient:
+    """Считает, сколько раз сессию поднимали заново, и с каким промптом."""
+
+    built: list["FakeSdkClient"] = []
+
+    def __init__(self, options=None):
+        self.options = options
+        self.connected = False
+        FakeSdkClient.built.append(self)
+
+    async def connect(self):
+        self.connected = True
+
+    async def disconnect(self):
+        self.connected = False
+
+
+@pytest.fixture
+def fake_sdk(monkeypatch):
+    """Подставляет claude_agent_sdk, которого в тестовой среде нет."""
+    import sys
+    import types
+
+    from voice_claude import targets
+
+    module = types.ModuleType("claude_agent_sdk")
+    module.ClaudeSDKClient = FakeSdkClient
+    module.ClaudeAgentOptions = lambda **kw: kw
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", module)
+    monkeypatch.setattr(targets, "sdk_available", lambda: True)
+    FakeSdkClient.built.clear()
+    return targets
+
+
+def test_switching_language_rebuilds_the_session_that_carries_the_prompt(fake_sdk, tmp_path):
+    """Системный промпт живёт столько же, сколько сессия.
+
+    Человек, перешедший на другой язык, получал верную работу и пересказ
+    вслух на прежнем: сессия пересказчика всё ещё держала промпт, с которым
+    её подняли. Смена языка — единственный повод поднять её заново.
+    """
+    import asyncio
+
+    target = fake_sdk.SummaryTarget(tmp_path / "summary")
+
+    i18n.use("ru")
+    asyncio.run(target.connect())
+    asyncio.run(target.connect())
+    assert len(FakeSdkClient.built) == 1, "сессия поднималась на каждую реплику"
+    assert "сокращаешь" in FakeSdkClient.built[0].options["system_prompt"]
+
+    i18n.use("en")
+    asyncio.run(target.connect())
+    assert len(FakeSdkClient.built) == 2, "сессия осталась с прежним промптом"
+    prompt = FakeSdkClient.built[1].options["system_prompt"]
+    assert i18n.t("prompt.summary_system") in prompt
+    assert prompt.endswith(i18n.t("prompt.answer_language"))
+
+    asyncio.run(target.connect())
+    assert len(FakeSdkClient.built) == 2, "сессию роняет язык, а не каждая реплика"
+
+
+def test_the_code_session_is_not_dropped_when_the_language_changes(fake_sdk, tmp_path):
+    """Преамбула кодовой цели идёт с каждой репликой, а не с сессией. Ронять
+    долгую сессию Claude Code из-за языка — значит терять весь контекст
+    работы на ровном месте."""
+    import asyncio
+
+    target = fake_sdk.CodeTarget(tmp_path / "code")
+
+    i18n.use("ru")
+    asyncio.run(target.connect())
+    i18n.use("zh")
+    asyncio.run(target.connect())
+    assert len(FakeSdkClient.built) == 1

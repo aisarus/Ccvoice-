@@ -752,6 +752,16 @@ PHRASES: dict[str, dict[str, str]] = {
 # stress-mark rules below only make sense for Russian synthesis.
 # --------------------------------------------------------------------------
 PHRASES.update({
+    # Одна строка, которую приписывают к любому промпту. Долгая сессия Claude
+    # Code помнит прежний разговор и продолжает отвечать на его языке: человек
+    # переходил на английский, работа делалась верно, а в ухо шло по-русски.
+    # «Отвечай на языке вывода» это чинить не может — оно и есть тот язык.
+    "prompt.answer_language": {
+        "en": "Answer in English.",
+        "ru": "Отвечай по-русски.",
+        "es": "Responde en espa\u00f1ol.",
+        "zh": "\u7528\u4e2d\u6587\u56de\u7b54\u3002",
+    },
     "prompt.chat_system": {
         "en": (
             "You are a voice companion in an earpiece. Answer in one or two short "
@@ -806,8 +816,7 @@ PHRASES.update({
             "Shorten file names to the gist: «fixed auth and session».\n"
             "Keep result numbers exact: 47 tests means 47.\n"
             "If Claude asked a question or wants a decision — end with that question.\n"
-            "Add nothing that isn't in the output. Answer with the line and nothing else.\n"
-            "Answer in the language of the output."
+            "Add nothing that isn't in the output. Answer with the line and nothing else."
         ),
         "ru": (
             "Ты сокращаешь вывод Claude Code до реплики, которую произнесут вслух в наушник.\n"
@@ -818,7 +827,6 @@ PHRASES.update({
             "Числа результатов сохраняй точно: 47 тестов — именно 47.\n"
             "Если Claude задал вопрос или просит решение — закончи этим вопросом.\n"
             "Не добавляй ничего, чего нет в выводе. Отвечай только самой репликой.\n"
-            "Отвечай на языке вывода: русский вывод — русская реплика, английский — английская.\n"
             "Латинские слова пиши русскими буквами так, как их произносят: config — конфиг, "
             "timeout — таймаут, commit — коммит, deploy — деплой.\n"
             "Ставь + перед ударной гласной там, где синтез ошибается: в технических словах, "
@@ -834,8 +842,7 @@ PHRASES.update({
             "Acorta los nombres de archivo a lo esencial: «arreglé auth y session».\n"
             "Mantén exactos los números de resultado: 47 pruebas son 47.\n"
             "Si Claude preguntó algo o pide una decisión — termina con esa pregunta.\n"
-            "No añadas nada que no esté en la salida. Responde solo con la frase.\n"
-            "Responde en el idioma de la salida."
+            "No añadas nada que no esté en la salida. Responde solo con la frase."
         ),
         "zh": (
             "你把 Claude Code 的输出压缩成一句会被念进耳机的话。\n"
@@ -845,8 +852,7 @@ PHRASES.update({
             "文件名只说要点：「修好了 auth 和 session」。\n"
             "结果里的数字要准确：47 个测试就是 47 个。\n"
             "如果 Claude 提了问题或要你拿主意——就用那个问题收尾。\n"
-            "不要添加输出里没有的内容。只回答那句话本身。\n"
-            "用输出本身的语言回答。"
+            "不要添加输出里没有的内容。只回答那句话本身。"
         ),
     },
     "prompt.intent_system": {
