@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Испанский. Голосовые команды («Claude», «stop», «stop working») не
+  переводятся: их слышит распознаватель, а он знает только русские и
+  английские слова.
+-->
+<resources>
+
+    <!-- Главный экран: подписи полей и кнопок. -->
+    <string name="readiness_checking">comprobando si todo está listo…</string>
+    <string name="label_server">dirección del servicio</string>
+    <string name="label_token">token de acceso</string>
+    <string name="label_language">idioma de voz — luego se cambia hablando</string>
+    <string name="action_start">iniciar</string>
+    <string name="action_stop">detener</string>
+    <string name="label_engine">motor de voz — RHVoice suena más natural que el del sistema</string>
+    <string name="action_engines_show">ver motores</string>
+    <string name="action_engine_use">usar el seleccionado</string>
+    <string name="action_engine_install">instalar RHVoice</string>
+    <string name="label_voice">voz</string>
+    <string name="action_voices_show">ver voces</string>
+    <string name="action_voice_try">escuchar y elegir</string>
+    <string name="label_say">escribirlo — para cuando no se puede hablar</string>
+    <string name="hint_say">di hola</string>
+    <string name="action_send">enviar</string>
+    <string name="action_background">permitir el segundo plano</string>
+    <string name="label_auth">suscripción de Claude en el servidor</string>
+    <string name="hint_auth_token">sk-ant-oat01-… si ya tienes un token</string>
+    <string name="action_auth_save">guardar el token de Claude</string>
+    <string name="label_auth_again">o vuelve a iniciar sesión:</string>
+    <string name="action_auth_start">conectar la suscripción</string>
+    <string name="action_auth_open">abrir el inicio de sesión</string>
+    <string name="hint_auth_code">pega el código de la página</string>
+    <string name="action_auth_done">listo</string>
+    <string name="action_copy_error">copiar el último error</string>
+    <string name="status_idle">sin iniciar</string>
+    <string name="help_text">El idioma se cambia por voz: «Claude, English», «Claude, Hebrew», «Claude, Russian»; las órdenes se dicen en inglés o en ruso. La respuesta se lee en el idioma en que llega. La palabra de activación «Claude» la oye el propio teléfono, sin internet. Después, lo que digas se reconoce en el idioma elegido: ruso, inglés o hebreo. Di «Claude…» y del teléfono solo sale el texto de lo que has dicho. El botón de los auriculares permite hablar sin la palabra de activación. «stop» calla la voz y «stop working» interrumpe la tarea.</string>
+
+    <!-- Переключатели: подпись кнопки и есть её состояние. -->
+    <string name="speech_on">voz: activada</string>
+    <string name="speech_off">voz: desactivada</string>
+    <string name="stress_auto">acentos: auto</string>
+    <string name="stress_plus">acentos: con +</string>
+    <string name="stress_acute">acentos: con tilde</string>
+    <string name="stress_off">acentos: sin marcas</string>
+    <string name="mic_headset">micrófono: auriculares</string>
+    <string name="mic_phone">micrófono: teléfono</string>
+    <string name="acoustics_on">señales del hablante: activadas</string>
+    <string name="acoustics_off">señales del hablante: desactivadas</string>
+
+    <!-- Что экран отвечает на нажатия. -->
+    <string name="engines_none">no se ha encontrado ningún motor</string>
+    <string name="voices_none">no se ha encontrado ninguna voz</string>
+    <string name="error_need_server_and_token">hacen falta la dirección del servicio y el token</string>
+    <string name="sent_text">enviado: %1$s</string>
+    <string name="engine_selected">motor: %1$s</string>
+    <string name="voice_selected">voz: %1$s</string>
+    <string name="error_paste_token">pega el token que empieza por sk-ant-</string>
+    <string name="auth_token_sent">token enviado al servidor</string>
+    <string name="auth_requesting_link">pidiendo el enlace…</string>
+    <string name="error_copied">error copiado</string>
+    <string name="service_stopped">el servicio está parado</string>
+    <string name="error_no_microphone">sin micrófono no puedo funcionar</string>
+    <string name="engines_listed_below">los motores están abajo — elige uno y pulsa «usar el seleccionado»</string>
+    <string name="link_retrying">intento conectar de nuevo</string>
+    <string name="background_already_allowed">el segundo plano ya está permitido</string>
+    <string name="service_starting">el servicio está arrancando…</string>
+    <string name="last_error">ejecución anterior: %1$s</string>
+
+    <!-- Проверка готовности: пять строк вместо гадания. -->
+    <string name="readiness_all_ready">todo listo</string>
+    <string name="readiness_with_warnings">listo, con algún detalle</string>
+    <string name="readiness_not_ready">no está listo: %1$s</string>
+    <string name="readiness_mic">micrófono</string>
+    <string name="readiness_mic_ok">concedido</string>
+    <string name="readiness_mic_bad">sin él el servicio no tiene derecho a arrancar</string>
+    <string name="readiness_fix_grant">conceder</string>
+    <string name="readiness_notifications">notificaciones</string>
+    <string name="readiness_notifications_ok">activadas</string>
+    <string name="readiness_notifications_bad">sin ellas Android no deja mantener vivo un servicio en segundo plano</string>
+    <string name="readiness_fix_enable">activar</string>
+    <string name="readiness_background">segundo plano</string>
+    <string name="readiness_background_ok">permitido</string>
+    <string name="readiness_background_bad">si no, el sistema duerme el servicio a los pocos minutos de apagar la pantalla</string>
+    <string name="readiness_fix_allow">permitir</string>
+    <string name="readiness_tts">síntesis de voz</string>
+    <string name="readiness_tts_none">no hay motores en el sistema — no hay con qué leer la respuesta</string>
+    <string name="readiness_fix_install">instalar</string>
+    <string name="readiness_tts_default">sin motor elegido — habla el robot del sistema</string>
+    <string name="readiness_fix_pick">elegir</string>
+    <string name="readiness_tts_gone">el motor elegido ha desaparecido del sistema</string>
+    <string name="readiness_tts_ok">elegido</string>
+    <string name="readiness_link">conexión con el servidor</string>
+    <string name="readiness_link_online">el daemon responde</string>
+    <string name="readiness_link_connecting">conectando…</string>
+    <string name="readiness_link_unknown">el servicio no está en marcha</string>
+    <string name="readiness_fix_start">iniciar</string>
+    <string name="readiness_link_off">falta la dirección o el token</string>
+    <string name="readiness_link_no_network">el teléfono está sin conexión</string>
+    <string name="readiness_fix_network">red</string>
+    <string name="readiness_link_no_server">el servidor no responde — revisa la dirección y que el daemon esté en marcha</string>
+    <string name="readiness_fix_retry">reintentar</string>
+    <string name="readiness_link_refused">el servidor lo ha rechazado — lo más probable es que el token no sea el correcto</string>
+    <string name="readiness_link_cleartext">el sistema bloquea http — hace falta https</string>
+
+    <!-- Состояние связи: строка идёт и на экран, и в уведомление. -->
+    <string name="link_unknown">conexión: el servicio no está en marcha</string>
+    <string name="link_off">conexión: sin configurar</string>
+    <string name="link_connecting">conexión: conectando</string>
+    <string name="link_online">conexión: bien</string>
+    <string name="link_no_network">conexión: sin red</string>
+    <string name="link_no_server">conexión: el servidor no responde</string>
+    <string name="link_refused">conexión: el servidor ha rechazado</string>
+    <string name="link_cleartext">conexión: el sistema bloquea http</string>
+
+    <!-- Обрыв: что случилось и что с этим делать. -->
+    <string name="link_hint_off">sin configurar: pon la dirección del servicio y el token</string>
+    <string name="link_hint_unknown">el servicio no está en marcha</string>
+    <string name="link_hint_connecting">conectando con el servidor…</string>
+    <string name="link_hint_online">conectado</string>
+    <string name="link_hint_no_network">sin red: el teléfono no tiene internet — espero a que vuelva</string>
+    <string name="link_hint_no_server">el servidor no responde: revisa la dirección, el puerto y que el daemon esté en marcha</string>
+    <string name="link_hint_refused">el servidor lo ha rechazado (HTTP %1$d): revisa el token y la dirección</string>
+    <string name="link_hint_cleartext">el sistema bloquea http: hace falta https, o ws en una dirección de confianza</string>
+    <string name="link_retry_in">%1$s · reintento en %2$d s</string>
+    <string name="link_connecting_to">conectando con %1$s</string>
+
+    <!-- Фаза: одно слово, которое видно с экрана блокировки. -->
+    <string name="state_starting">arrancando</string>
+    <string name="state_waiting_for_wake">esperando que me llames</string>
+    <string name="state_listening">escuchando</string>
+    <string name="state_speaking">hablando</string>
+    <string name="state_sent">enviado</string>
+    <string name="action_speak">Hablar</string>
+    <string name="action_stop_short">Parar</string>
+
+    <!-- Что говорит служба. -->
+    <string name="error_mic_permission">no hay permiso de micrófono — concédelo y vuelve a iniciar</string>
+    <string name="error_service_start">el servicio no ha podido arrancar: %1$s</string>
+    <string name="error_startup">error al arrancar: %1$s</string>
+    <string name="acoustics_measuring">mido el volumen de tu voz y envío las señales</string>
+    <string name="acoustics_hint_only">señales desactivadas — el rol se envía como sugerencia</string>
+    <string name="engines_found">motores de voz: %1$d</string>
+    <string name="engine_set">motor de voz: %1$s</string>
+    <string name="engine_system">el del sistema</string>
+    <string name="voices_found">voces disponibles: %1$d</string>
+    <string name="auth_checking_token">comprobando el token de Claude…</string>
+    <string name="auth_requesting_url">pidiendo el enlace de inicio de sesión…</string>
+    <string name="auth_checking_code">comprobando el código…</string>
+    <string name="wake_error">reconocimiento de la palabra de activación: %1$s</string>
+    <string name="state_listening_for_wake">te escucho — di «Claude…»</string>
+    <string name="wake_unavailable">la palabra de activación no está disponible (%1$s) — empieza a hablar con el botón</string>
+    <string name="wake_stopped">la palabra de activación se ha detenido: %1$s</string>
+    <string name="wake_downloading_model">descargando el modelo de reconocimiento, ~45 MB</string>
+    <string name="stopping_work">detengo el trabajo</string>
+    <string name="going_quiet">silencio</string>
+    <string name="language_set">idioma: %1$s</string>
+    <string name="heard_locally">entendido en el teléfono: %1$s</string>
+    <string name="sent_to">→ %1$s</string>
+    <string name="calibrating_mic">calibro el nivel del micrófono con tus primeras palabras</string>
+    <string name="recognizer_silent">el reconocedor no ha respondido — vuelvo a escuchar</string>
+    <string name="tts_silent">el motor de voz no ha avisado — vuelvo a escuchar</string>
+    <string name="listener_restarted">la escucha estaba parada — la he reiniciado</string>
+    <string name="recognition_unavailable">el reconocimiento no está disponible: %1$s</string>
+    <string name="recognition_error">reconocimiento de voz: error %1$d</string>
+    <string name="listening_for_reply">te escucho…</string>
+    <string name="listening_go_ahead">te escucho — habla</string>
+    <string name="tts_failed">la síntesis de voz no ha arrancado (código %1$d)</string>
+    <string name="ready_credential">listo · %1$s</string>
+    <string name="auth_open_link">abre el enlace, entra en Claude y pega el código</string>
+    <string name="auth_link_received">enlace de inicio de sesión recibido</string>
+    <string name="auth_saved">la suscripción está conectada y guardada en el servidor</string>
+    <string name="auth_not_saved">la suscripción está conectada pero no se ha guardado — escribe el token en el archivo del servicio</string>
+    <string name="auth_connected">suscripción conectada</string>
+    <string name="auth_connected_unsaved">suscripción conectada (sin guardar)</string>
+    <string name="auth_failed">no se ha podido iniciar sesión: %1$s</string>
+    <string name="error_bad_token">el token no sirve — pega solo el valor, sin VOICE_TOKEN=</string>
+    <string name="error_from_server">error: %1$s</string>
+    <string name="role_gate">el daemon no ha aceptado lo que has dicho: %1$s</string>
+    <string name="role_gate_off">me ha tomado dos veces por otra persona — he desactivado las señales del hablante</string>
+    <string name="not_sent">no ha salido nada — %1$s</string>
+
+    <!-- Куда смотрит микрофон. -->
+    <string name="mic_headset_bluetooth">micrófono: auriculares (bluetooth)</string>
+    <string name="mic_phone_bluetooth_off">micrófono: teléfono (el micrófono bluetooth está desactivado)</string>
+    <string name="mic_phone_no_channel">micrófono: teléfono — el canal de los auriculares no se ha abierto</string>
+    <string name="mic_switch_failed">no he podido pasar al micrófono de los auriculares — escucho con el teléfono</string>
+    <string name="mic_sco_unavailable">el sistema no cede el micrófono de los auriculares fuera de una llamada — escucho con el teléfono</string>
+    <string name="mic_channel_failed">el canal de los auriculares no se ha abierto: %1$s</string>
+</resources>
